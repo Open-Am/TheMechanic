@@ -1,7 +1,7 @@
 ---
 id: 0006
 title: Performance budgets
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -33,3 +33,4 @@ Agents measure before merging anything that adds bytes or triangles. Visual ambi
 ## History
 
 - 2026-10-10: proposed by Claude, from the brief.
+- 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.

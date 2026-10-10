@@ -1,7 +1,7 @@
 ---
 id: 0001
 title: Scope of the first version
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -37,3 +37,4 @@ Any feature request outside this list starts as a proposed ADR that supersedes t
 ## History
 
 - 2026-10-10: proposed by Claude, from the brief.
+- 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.

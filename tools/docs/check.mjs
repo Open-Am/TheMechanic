@@ -17,7 +17,8 @@ const warn = (m) => warnings.push(m);
 
 const ADR_STATUS = new Set(["proposed", "accepted", "superseded", "rejected"]);
 const PLAN_STATUS = new Set(["proposed", "approved", "done", "abandoned"]);
-const FILE_RE = /^(\d{4})-[a-z0-9-]+\.md$/;
+const ADR_FILE_RE = /^ADR-(d{4})-[a-z0-9-]+.md$/;
+const FILE_RE = /^(d{4})-[a-z0-9-]+.md$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseFrontMatter(text, file) {

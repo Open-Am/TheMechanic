@@ -1,7 +1,7 @@
 ---
 id: 0007
 title: Player mode and diagnostic mode
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -33,3 +33,4 @@ The game is harder and more satisfying. Testing needs development builds. The br
 ## History
 
 - 2026-10-10: proposed by Claude, from the owner's instruction.
+- 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.

@@ -37,7 +37,7 @@ No work that touches a decision is done without an ADR, and no ADR takes effect 
 
 1. **Explore, cheaply.** Read `docs/adr/README.md`, then only the ADRs relevant to the work, then `docs/open-questions.md`, then the code area involved. Use the cheapest capable model your tool offers for this step (in Claude Code, a Haiku subagent; elsewhere, the vendor's small model). Produce a short summary: which ADRs apply, which would be contradicted, what is unclear.
 2. **Decide, if needed.** If the work needs a decision, write a `proposed` ADR from `docs/adr/TEMPLATE.md` and stop for the owner.
-3. **Plan.** Write `docs/plans/NNNN-slug.md` from `docs/plans/TEMPLATE.md`. It names the ADRs it relies on, the files it will touch, the steps, and what done looks like. Stop for the owner's approval before building anything beyond the plan.
+3. **Plan.** Write `docs/plans/NNNN-slug.md` (ADR files are `docs/adr/ADR-NNNN-slug.md`) from `docs/plans/TEMPLATE.md`. It names the ADRs it relies on, the files it will touch, the steps, and what done looks like. Stop for the owner's approval before building anything beyond the plan.
 4. **Build.** On a branch named after the plan. Small commits with clear messages. Run `npm run docs:check` and the project tests before every commit.
 5. **Verify.** Do what the plan's done section says. Report results honestly: failing tests are reported as failing, skipped steps as skipped.
 6. **Release note.** Add or extend the entry in `docs/releases/` for the version being worked on, naming the plan and the ADRs. Regenerate the ADR index with `npm run docs:check -- --fix`.
@@ -73,7 +73,7 @@ Accounts, backend, leaderboards, community-submitted content, moderation, money,
 ## Writing conventions
 
 - Documents are plain Markdown, short sentences, no decoration. Say what is uncertain.
-- ADRs, plans and releases are numbered `NNNN` and never renumbered.
+- ADRs are `ADR-NNNN-slug.md`; plans and releases are `NNNN-slug.md` and `MAJOR.MINOR.PATCH.md`. Numbers are never reused.
 - Dates are absolute (`2026-10-10`), never "today" or "next week".
 - Commit messages: imperative first line under 72 characters, body explains why.
 - When the brief or an ADR is ambiguous, pick the simpler reading, say so in the plan, and continue.

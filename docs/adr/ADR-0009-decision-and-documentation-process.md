@@ -1,7 +1,7 @@
 ---
 id: 0009
 title: Decision and documentation process
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -31,3 +31,4 @@ More writing before code. In return, any agent can pick up the project cold and 
 ## History
 
 - 2026-10-10: proposed by Claude, from the owner's instruction.
+- 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.
