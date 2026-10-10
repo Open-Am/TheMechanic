@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "docs:check": "node tools/docs/check.mjs",
+    "docs:site": "node tools/docs/site.mjs",
     "dev": "npm --prefix game run dev",
     "test": "npm --prefix game test",
     "build": "npm --prefix game run build"

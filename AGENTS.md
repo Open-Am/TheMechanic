@@ -65,6 +65,7 @@ Accounts, backend, leaderboards, community-submitted content, moderation, money,
 | Command | Does |
 | --- | --- |
 | `npm run docs:check` | Validates ADRs, plans, release notes and the ADR index. `-- --fix` rewrites the index. |
+| `npm run docs:site <out.html>` | Bundles every document into one HTML page for review on any device. Republish it after doc changes. |
 | `npm run dev` | Game dev server, reachable on the local network. (From Phase 1.) |
 | `npm test` | Core tests. (From Phase 1.) |
 | `npm run build` | Static production build. (From Phase 2.) |
