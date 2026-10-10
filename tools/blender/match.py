@@ -1,7 +1,10 @@
 """Makes a match image: a render of the model from a reference photo's angle, beside the photo (ADR 0013, modelling brief).
 
     node tools/run-blender.mjs tools/blender/match.py --blend assets/gen950/blend/gen950.blend -- \
-        <reference image> <out.png> <azimuth> <polar> <fov_deg> [<target height in m>]
+        <reference image> <out.png> <azimuth> <polar> <fov_deg> [<target height in m> | only=<object id>]
+
+With only=<id>, every other object is hidden and the camera frames that one object, for matching a single part
+against a product photo. The azimuth and polar are then measured around the part.
 
 Angles are in radians, measured like the game camera: azimuth 0 looks at the front (+Z), positive turns towards the
 right side (+X); polar is from straight up. The camera orbits the machine's centre and frames it to fit the photo's
@@ -27,7 +30,25 @@ ref_path, out_path = os.path.abspath(a[0]), os.path.abspath(a[1])
 azimuth, polar, fov_deg = float(a[2]), float(a[3]), float(a[4])
 machine = common.load_machine()
 sx, sy, sz = machine["size"]
-target_y = float(a[5]) if len(a) > 5 else sy / 2
+only = a[5][5:] if len(a) > 5 and a[5].startswith("only=") else None
+target_y = float(a[5]) if len(a) > 5 and not only else sy / 2
+centre_gl = (0.0, target_y, 0.0)
+radius = math.sqrt(sx * sx + sy * sy + sz * sz) / 2
+hidden = []
+if only:
+    obj = bpy.data.objects.get(only)
+    if obj is None:
+        common.fail(f"No object named {only}")
+    for o in bpy.data.objects:
+        if o.type == "MESH" and o is not obj and not o.hide_render:
+            o.hide_render = True
+            hidden.append(o)
+    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    lo = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
+    hi = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
+    mid = (lo + hi) / 2
+    centre_gl = (mid.x, mid.z, -mid.y)
+    radius = (hi - lo).length / 2
 
 ref = bpy.data.images.load(ref_path)
 rw, rh = ref.size
@@ -43,15 +64,14 @@ cam_data.sensor_fit = "VERTICAL"
 cam_data.angle_y = math.radians(fov_deg)
 cam = bpy.data.objects.new("cam_match", cam_data)
 scene.collection.objects.link(cam)
-radius = math.sqrt(sx * sx + sy * sy + sz * sz) / 2
 fov_y = math.radians(fov_deg)
 fov_x = 2 * math.atan(math.tan(fov_y / 2) * width / HEIGHT)
 distance = radius * 1.1 / math.sin(min(fov_x, fov_y) / 2)
-target = (0.0, target_y, 0.0)
+target = centre_gl
 pos = (
-    distance * math.sin(polar) * math.sin(azimuth),
-    target_y + distance * math.cos(polar),
-    distance * math.sin(polar) * math.cos(azimuth),
+    target[0] + distance * math.sin(polar) * math.sin(azimuth),
+    target[1] + distance * math.cos(polar),
+    target[2] + distance * math.sin(polar) * math.cos(azimuth),
 )
 cam.location = common.gl(*pos)
 cam.rotation_euler = (Vector(common.gl(*target)) - cam.location).to_track_quat("-Z", "Y").to_euler()
@@ -82,4 +102,6 @@ out.file_format = "PNG"
 out.save()
 os.remove(render_path)
 bpy.data.objects.remove(cam, do_unlink=True)
+for o in hidden:
+    o.hide_render = False
 print(f"Match image {out_path} ({combined.shape[1]} x {HEIGHT})")

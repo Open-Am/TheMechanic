@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { checkFileSize, checkModel, imageSize, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { checkFileSize, checkModel, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -104,7 +104,7 @@ describe("the model contract and budgets (ADR 0014)", () => {
     expect(aim.warnings.join(" ")).toMatch(/over the 3 MB aim/);
   });
 
-  it("textures: at most one atlas over 1024 px, none over 2048, none outside the file", () => {
+  it("textures: at most one atlas (one material's set) over 1024 px, none over 2048, none outside the file", () => {
     const png = (w: number, h: number) => {
       const b = new Uint8Array(32);
       b.set([0x89, 0x50, 0x4e, 0x47], 0);
@@ -112,18 +112,34 @@ describe("the model contract and budgets (ADR 0014)", () => {
       new DataView(b.buffer).setUint32(20, h);
       return b;
     };
-    const images = [png(2048, 2048), png(2048, 1024), png(4096, 4096)];
+    const images = [png(2048, 2048), png(2048, 1024), png(4096, 4096), png(2048, 2048)];
     const bin = new Uint8Array(32 * images.length);
     images.forEach((im, i) => bin.set(im, i * 32));
     const json = {
       ...modelJson(all),
       images: [...images.map((_, i) => ({ bufferView: i, mimeType: "image/png" })), { uri: "outside.png" }],
       bufferViews: images.map((_, i) => ({ byteOffset: i * 32, byteLength: 32 })),
+      textures: [{ source: 0 }, { source: 1 }, { extensions: { EXT_texture_webp: { source: 3 } } }],
+      // One atlas set (base colour and normal both 2048 px) on one material is fine; a second large material is not.
+      materials: [
+        { name: "exterior", pbrMetallicRoughness: { baseColorTexture: { index: 0 } }, normalTexture: { index: 1 } },
+        { name: "second", pbrMetallicRoughness: { baseColorTexture: { index: 2 } } },
+      ],
     };
     const r = checkModel(readGlb(makeGlb(json, bin)), ids, budgets);
     expect(r.errors.join(" ")).toMatch(/4096 x 4096, over 2048 px/);
-    expect(r.errors.join(" ")).toMatch(/2 images are larger than 1024 px/);
+    expect(r.errors.join(" ")).toMatch(/2 materials use images larger than 1024 px \(exterior, second\)/);
     expect(r.errors.join(" ")).toMatch(/external file \(outside.png\)/);
+  });
+});
+
+describe("atlas counting", () => {
+  it("one material with several large maps is one atlas", () => {
+    const json = {
+      textures: [{ source: 0 }, { source: 1 }, { source: 2 }],
+      materials: [{ name: "exterior", pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicRoughnessTexture: { index: 1 } }, normalTexture: { index: 2 } }, { name: "small" }],
+    };
+    expect(materialsUsingImages(json, new Set([0, 1, 2]))).toEqual(["exterior"]);
   });
 });
 

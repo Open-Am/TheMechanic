@@ -28,6 +28,8 @@ interface GltfJson {
   meshes?: Array<{ primitives: Array<{ mode?: number; indices?: number; attributes: Record<string, number> }> }>;
   accessors?: Array<{ count: number }>;
   images?: Array<{ bufferView?: number; mimeType?: string; uri?: string }>;
+  textures?: Array<{ source?: number; extensions?: Record<string, { source?: number }> }>;
+  materials?: Array<Record<string, unknown>>;
   bufferViews?: Array<{ byteOffset?: number; byteLength: number }>;
 }
 
@@ -145,7 +147,9 @@ export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckRe
   if (glb.byteLength > budgets.glbBytes) errors.push(`The GLB is ${(glb.byteLength / 1e6).toFixed(2)} MB, over the ${budgets.glbBytes / 1e6} MB budget.`);
   else if (glb.byteLength > budgets.glbAimBytes) warnings.push(`The GLB is ${(glb.byteLength / 1e6).toFixed(2)} MB, over the ${budgets.glbAimBytes / 1e6} MB aim.`);
 
-  let atlases = 0;
+  // An atlas is one texture set (base colour, normal, occlusion-roughness-metallic), as the modelling brief defines it:
+  // count the materials that use an image over the texture size, not the images.
+  const large = new Set<number>();
   for (const [i, img] of (glb.json.images ?? []).entries()) {
     if (img.uri) {
       errors.push(`Image ${i} is an external file (${img.uri}); everything must be inside the GLB.`);
@@ -161,11 +165,40 @@ export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckRe
     }
     const side = Math.max(size.width, size.height);
     if (side > budgets.atlasPx) errors.push(`Image ${i} is ${size.width} x ${size.height}, over ${budgets.atlasPx} px.`);
-    else if (side > budgets.texturePx) atlases++;
+    else if (side > budgets.texturePx) large.add(i);
   }
-  if (atlases > budgets.atlasCount) errors.push(`${atlases} images are larger than ${budgets.texturePx} px; at most ${budgets.atlasCount} atlas is allowed.`);
+  const atlases = materialsUsingImages(glb.json, large);
+  if (atlases.length > budgets.atlasCount) {
+    errors.push(`${atlases.length} materials use images larger than ${budgets.texturePx} px (${atlases.join(", ")}); at most ${budgets.atlasCount} atlas is allowed.`);
+  }
 
   return { errors, warnings, triangles: total };
+}
+
+/** Image index behind a texture index, through EXT_texture_webp or similar extensions when present. */
+function textureImage(json: GltfJson, texture: number): number | undefined {
+  const tex = json.textures?.[texture];
+  if (!tex) return undefined;
+  for (const ext of Object.values(tex.extensions ?? {})) if (ext.source !== undefined) return ext.source;
+  return tex.source;
+}
+
+/** Names (or indices) of materials that reference any image in `images`. */
+export function materialsUsingImages(json: GltfJson, images: ReadonlySet<number>): string[] {
+  const out: string[] = [];
+  for (const [i, mat] of (json.materials ?? []).entries()) {
+    const refs: number[] = [];
+    const walk = (v: unknown): void => {
+      if (!v || typeof v !== "object") return;
+      for (const [k, child] of Object.entries(v as Record<string, unknown>)) {
+        if (k === "index" && typeof child === "number") refs.push(child);
+        else walk(child);
+      }
+    };
+    walk(mat);
+    if (refs.some((ti) => images.has(textureImage(json, ti) ?? -1))) out.push(typeof mat.name === "string" ? mat.name : String(i));
+  }
+  return out;
 }
 
 /** A companion file (environment, ground shadow) against its byte budget. */
