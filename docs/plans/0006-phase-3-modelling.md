@@ -1,7 +1,7 @@
 ---
 id: 0006
 title: Phase 3b, modelling the parts towards the real machine
-status: approved
+status: done
 date: 2026-10-10
 adrs: [0003, 0012, 0013, 0014]
 branch: plan/0006-modelling
@@ -38,7 +38,7 @@ The brief's order: outside first, then the parts the faults live in, then the re
 4. For every part: the nine-step workflow in the modelling brief, at most five match rounds, then report what still differs.
 5. A whole-machine match against the clearest whole-machine photos, from their angles.
 6. A performance check on the finished model at 4x throttle, and the GLB size against the budget.
-7. Release note `docs/releases/0.5.0.md` listing each part's status.
+7. Release note `docs/releases/0.6.0.md` listing each part's status (0.5.0 went to plan 0007, which finished first).
 
 ## Done when
 

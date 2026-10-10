@@ -27,7 +27,7 @@
       "does": "Turns the fuel on and off. Its strainer catches dirt.",
       "requires": ["fuel_hose"],
       "inspectOk": "Strainer is clean. Fuel runs freely.",
-      "placeholder": { "shape": "box", "size": [0.0235, 0.048, 0.034], "position": [-0.1737, 0.223, 0.116], "color": "#b9b8b2" },
+      "placeholder": { "shape": "box", "size": [0.0213, 0.0556, 0.051], "position": [-0.1736, 0.2227, 0.11], "color": "#b9b8b2" },
       "explode": [-0.08, 0, 0],
       "motion": { "type": "unscrew", "axis": "y", "turns": 1 }
     },
@@ -68,7 +68,7 @@
       "does": "Mixes fuel with air in the right amount.",
       "requires": ["air_filter", "fuel_hose"],
       "inspectOk": "Bowl is clean. Jet is clear.",
-      "placeholder": { "shape": "box", "size": [0.0625, 0.0685, 0.047], "position": [-0.0782, 0.0953, 0.1195], "color": "#a9adb1" },
+      "placeholder": { "shape": "box", "size": [0.071, 0.0915, 0.039], "position": [-0.0795, 0.1087, 0.1175], "color": "#a9adb1" },
       "explode": [0, 0, 0.12],
       "motion": { "type": "unbolt", "axis": "z" }
     },
@@ -88,7 +88,7 @@
       "does": "Makes the spark that lights the fuel.",
       "requires": ["plug_cap"],
       "inspectOk": "Tip is light brown. Healthy.",
-      "placeholder": { "shape": "cylinder", "axis": "z", "size": [0.019, 0.0506, 0.0506], "position": [0.06, 0.2048, -0.1498], "color": "#e8e8e8" },
+      "placeholder": { "shape": "cylinder", "axis": "z", "size": [0.0184, 0.0679, 0.0679], "position": [0.06, 0.2016, -0.1466], "color": "#e8e8e8" },
       "explode": [0, 0.07, -0.07],
       "motion": { "type": "unscrew", "axis": "y", "turns": 3 }
     },

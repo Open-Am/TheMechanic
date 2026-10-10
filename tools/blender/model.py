@@ -181,15 +181,31 @@ PLUG_BASE = (0.06, 0.188, -0.133)
 
 
 def spark_plug(M):
+    # Round 2: the whole 80 mm plug, so the tray picture shows a real plug: terminal, ribbed insulator, hex,
+    # knurled body, gasket, threaded shank and bent side electrode. The shank runs back into the head.
+    def at(d):
+        return along(PLUG_BASE, d)
+
     pieces = [
-        cyl(0.006, 0.012, along(PLUG_BASE, 0.0), "y", M["bright_metal"], verts=12, tilt=PLUG_TILT),  # thread, showing
-        cyl(0.0105, 0.01, along(PLUG_BASE, 0.011), "y", M["bright_metal"], verts=6, tilt=PLUG_TILT),  # hex
-        cyl(0.0095, 0.002, along(PLUG_BASE, 0.0175), "y", M["bright_metal"], verts=24, tilt=PLUG_TILT),  # crimp
+        cyl(0.0068, 0.02, at(-0.012), "y", M["bright_metal"], verts=12, tilt=PLUG_TILT),  # threaded shank
     ]
-    for i in range(4):
-        pieces.append(cyl(0.0068 - i * 0.0004, 0.004, along(PLUG_BASE, 0.022 + i * 0.0045), "y", M["ceramic"], verts=16, tilt=PLUG_TILT))
-    pieces.append(cyl(0.0055, 0.012, along(PLUG_BASE, 0.044), "y", M["ceramic"], verts=16, tilt=PLUG_TILT))
-    pieces.append(cyl(0.0035, 0.006, along(PLUG_BASE, 0.053), "y", M["bright_metal"], verts=8, tilt=PLUG_TILT))  # terminal
+    for i in range(6):
+        pieces.append(cyl(0.0073, 0.0012, at(-0.02 + i * 0.003), "y", M["bright_metal"], verts=12, tilt=PLUG_TILT))  # thread crests
+    pieces += [
+        box((0.0025, 0.003, 0.006), at(-0.024), M["bright_metal"]),  # side electrode
+        cyl(0.0088, 0.0016, at(-0.0012), "y", M["zinc"], verts=14, tilt=PLUG_TILT),  # gasket
+        cyl(0.0092, 0.008, at(0.004), "y", M["bright_metal"], verts=16, tilt=PLUG_TILT),  # body
+        cyl(0.0105, 0.009, at(0.0125), "y", M["bright_metal"], verts=6, tilt=PLUG_TILT),  # hex, 21 mm across flats
+        cyl(0.0085, 0.0025, at(0.0185), "y", M["bright_metal"], verts=16, tilt=PLUG_TILT),  # crimp
+    ]
+    for i in range(5):
+        pieces.append(cyl(0.0066, 0.0028, at(0.023 + i * 0.0042), "y", M["ceramic"], verts=14, tilt=PLUG_TILT))  # ribs
+        pieces.append(cyl(0.0058, 0.0014, at(0.0251 + i * 0.0042), "y", M["ceramic"], verts=14, tilt=PLUG_TILT))
+    pieces += [
+        cyl(0.0056, 0.01, at(0.048), "y", M["ceramic"], verts=14, tilt=PLUG_TILT),  # upper insulator
+        cyl(0.0024, 0.006, at(0.056), "y", M["bright_metal"], verts=8, tilt=PLUG_TILT),  # terminal stud
+        cyl(0.0042, 0.004, at(0.061), "y", M["bright_metal"], verts=12, tilt=PLUG_TILT),  # terminal nut
+    ]
     return pieces
 
 
@@ -205,31 +221,53 @@ def plug_cap(M):
 # References: carburetor/* (two-hole flange with holes about 37 mm apart, 16 mm bore, round float bowl).
 
 def carburetor(M):
+    # Round 2, from carburetor/et950-carb-*.jpg: cast body with a raised throat, the oval two-hole flange (holes about
+    # 37 mm apart, 16 mm bore), the round float bowl on one bolt with a brass drain, two brass spring screws, the
+    # angled brass inlet towards the hose, and the bent yellow-zinc linkage arm over the top.
     c = (-0.075, 0.108, 0.117)
-    body = bevelled(box((0.042, 0.036, 0.034), c, M["cast_aluminium"]), 0.004, 2)
-    bore = disc(0.011, 0.012, (c[0], c[1] + 0.002, c[2] + 0.018), "z", M["cast_aluminium"], verts=20, bevel=0.002)
-    cut(bore, [cyl(0.008, 0.02, (c[0], c[1] + 0.002, c[2] + 0.02), "z", M["slot"], verts=16)])
-    bowl = disc(0.017, 0.022, (c[0], c[1] - 0.03, c[2]), "y", M["bright_metal"], verts=28, bevel=0.003)
-    bolt = cyl(0.004, 0.006, (c[0], c[1] - 0.044, c[2]), "y", M["bright_metal"], verts=6)
-    drain = cyl(0.002, 0.008, (c[0] + 0.016, c[1] - 0.034, c[2]), "x", M["brass"], verts=8)
-    flange = bevelled(box((0.056, 0.024, 0.004), (c[0], c[1], c[2] - 0.019), M["cast_aluminium"]), 0.002)
-    inlet = tube([(c[0] - 0.021, c[1] + 0.004, c[2]), (c[0] - 0.028, c[1] + 0.004, c[2]), (c[0] - 0.034, c[1] + 0.003, c[2])], 0.0028, M["brass"], resolution=4)
-    choke = bevelled(box((0.03, 0.003, 0.008), (c[0] + 0.012, c[1] + 0.02, c[2] + 0.008), M["zinc"]), 0.001)
-    screws = [cyl(0.0018, 0.012, (c[0] + dx, c[1] + 0.008, c[2] + 0.02), "z", M["brass"], verts=8) for dx in (-0.012, 0.012)]
-    return [body, bore, bowl, bolt, drain, flange, inlet, choke, *screws]
+    body = bevelled(box((0.04, 0.034, 0.03), c, M["cast_aluminium"]), 0.004, 2)
+    throat = disc(0.012, 0.016, (c[0], c[1] + 0.004, c[2] + 0.012), "z", M["cast_aluminium"], verts=24, bevel=0.002)
+    cut(throat, [cyl(0.008, 0.03, (c[0], c[1] + 0.004, c[2] + 0.014), "z", M["slot"], verts=20)])
+    outline = hull(circle_points(-0.0185, 0.0, 0.009, 16) + circle_points(0.0185, 0.0, 0.009, 16) + circle_points(0.0, 0.0, 0.016, 24))
+    flange = prism([(x + c[0], y + c[1] + 0.004) for x, y in outline], "xy", c[2] - 0.019, c[2] - 0.015, M["cast_aluminium"], bevel=0.0012, segments=1)
+    cut(flange, [cyl(0.004, 0.02, (c[0] + dx, c[1] + 0.004, c[2] - 0.017), "z", M["slot"], verts=12) for dx in (-0.0185, 0.0185)] + [cyl(0.008, 0.02, (c[0], c[1] + 0.004, c[2] - 0.017), "z", M["slot"], verts=20)])
+    bowl = disc(0.017, 0.022, (c[0], c[1] - 0.028, c[2]), "y", M["bright_metal"], verts=32, bevel=0.003)
+    bowl_bolt = cyl(0.004, 0.006, (c[0], c[1] - 0.042, c[2]), "y", M["brass"], verts=6)
+    drain = cyl(0.0022, 0.008, (c[0] + 0.016, c[1] - 0.032, c[2]), "x", M["brass"], verts=8)
+    screws = []
+    for dx, dy in ((0.004, 0.006), (0.006, -0.006)):
+        screws.append(cyl(0.0022, 0.014, (c[0] + 0.024, c[1] + dy, c[2] + dx), "x", M["brass"], verts=8))
+        for k in range(3):
+            screws.append(cyl(0.003, 0.0012, (c[0] + 0.02 + k * 0.003, c[1] + dy, c[2] + dx), "x", M["brass"], verts=8))
+    inlet = tube([(c[0] - 0.02, c[1] - 0.008, c[2]), (c[0] - 0.027, c[1] - 0.008, c[2]), (c[0] - 0.031, c[1] - 0.003, c[2])], 0.0028, M["brass"], resolution=6)
+    arm_mat = mat("yellow_zinc", "#b8a14a", 1.0, 0.35)
+    arm = [
+        box((0.004, 0.026, 0.008), (c[0] + 0.012, c[1] + 0.03, c[2] + 0.006), arm_mat),
+        box((0.044, 0.003, 0.008), (c[0] - 0.008, c[1] + 0.042, c[2] + 0.006), arm_mat),
+        box((0.012, 0.003, 0.008), (c[0] - 0.034, c[1] + 0.045, c[2] + 0.006), arm_mat),
+    ]
+    choke = bevelled(box((0.014, 0.003, 0.01), (c[0] + 0.012, c[1] + 0.022, c[2] - 0.004), arm_mat), 0.0012)
+    return [body, throat, flange, bowl, bowl_bolt, drain, *screws, inlet, *arm, choke]
 
 
 # ---- Fuel tap ----
 # References: fuel_tap/* (65 to 77 mm long, cast body, ON/OFF lever on two screws, side barb, strainer inside the tank).
 
 def fuel_tap(M):
-    c = (-0.172, 0.228, 0.11)
-    body = bevelled(box((0.02, 0.028, 0.022), c, M["bright_metal"]), 0.003, 2)
-    nut = cyl(0.011, 0.006, (c[0], c[1] + 0.016, c[2]), "y", M["bright_metal"], verts=6)
-    lever = bevelled(box((0.003, 0.01, 0.034), (c[0] - 0.012, c[1] + 0.002, c[2] + 0.006), M["bright_metal"]), 0.0012)
-    pivot = cyl(0.004, 0.004, (c[0] - 0.011, c[1] + 0.002, c[2]), "x", M["zinc"], verts=8)
-    barb = cyl(0.0035, 0.016, (c[0], c[1] - 0.021, c[2]), "y", M["brass"], verts=8)
-    return [body, nut, lever, pivot, barb]
+    # Round 2, from fuel_tap/*.jpg: a flat oval cast body with two screws and a rotary ON/OFF lever on its outer face,
+    # a hex nut and threaded stem up into the tank, and an angled barb down to the hose.
+    c = (-0.172, 0.222, 0.11)
+    # Oval across the tap, seen from outside (-X): u is glTF z, v is glTF y.
+    outline = hull(circle_points(-0.016, 0.0, 0.0095, 16) + circle_points(0.016, 0.0, 0.0095, 16) + circle_points(0.0, 0.0, 0.013, 20))
+    body = prism([(c[2] + u, c[1] + v) for u, v in outline], "zy", c[0] - 0.006, c[0] + 0.006, M["bright_metal"], bevel=0.0018, segments=2)
+    screws = [cyl(0.0035, 0.002, (c[0] - 0.007, c[1], c[2] + dz), "x", M["zinc"], verts=12) for dz in (-0.016, 0.016)]
+    knob = disc(0.0075, 0.004, (c[0] - 0.008, c[1], c[2]), "x", M["bright_metal"], verts=20, bevel=0.0012)
+    lever = bevelled(box((0.0025, 0.006, 0.03), (c[0] - 0.011, c[1] - 0.006, c[2] + 0.008), M["bright_metal"]), 0.0012)
+    rotate_about(lever, "x", 35, (c[0] - 0.011, c[1], c[2]))
+    nut = cyl(0.0105, 0.006, (c[0], c[1] + 0.0155, c[2]), "y", M["bright_metal"], verts=6)
+    stem = cyl(0.006, 0.01, (c[0], c[1] + 0.0235, c[2]), "y", M["bright_metal"], verts=16)
+    barb = tube([(c[0], c[1] - 0.012, c[2]), (c[0], c[1] - 0.02, c[2] + 0.002), (c[0], c[1] - 0.026, c[2] + 0.004)], 0.0035, M["bright_metal"], resolution=6)
+    return [body, *screws, knob, lever, nut, stem, barb]
 
 
 # ---- Fuel hose ----
