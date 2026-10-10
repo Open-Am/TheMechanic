@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apply, initialState, conditionText } from "../../game/src/core/reducer.ts";
-import { removalOrder, removableNow } from "../../game/src/core/rules.ts";
+import { isVisible, removalOrder, removableNow } from "../../game/src/core/rules.ts";
 import { scoreState } from "../../game/src/core/score.ts";
 import { validateAll } from "../../game/src/core/validate.ts";
 import type { Action, ActionType, Fault, FaultFile, Machine, PartId, RoundState } from "../../game/src/core/types.ts";
@@ -24,10 +24,13 @@ if (!v.ok) {
   process.exit(1);
 }
 
-/** The shortest correct play, with timestamps that make the score readable. */
+/** The shortest correct play, with timestamps that make the score readable.
+ *  It opens by looking at the first part on the removal path where it sits (ADR 0011), as a mechanic would. */
 function perfectPlay(fault: Fault, stepMs: number): Action[] {
   const order = removalOrder(machine, fault);
   const steps: Array<[ActionType, PartId?]> = [];
+  const look = order.find((id) => isVisible(machine, initialState(machine), id));
+  if (look) steps.push(["inspect", look]);
   for (const id of order) steps.push(["remove", id]);
   steps.push(["inspect", fault.culprit], ["fix", fault.culprit]);
   for (const id of [...order].reverse()) steps.push(["install", id]);
@@ -39,7 +42,7 @@ function describe(fault: Fault, state: RoundState, action: Action): string {
   const who = action.partId ?? "";
   switch (action.type) {
     case "remove": return `remove ${who}`;
-    case "inspect": return `inspect ${who}: "${conditionText(machine, fault, state, who)}"`;
+    case "inspect": return `inspect ${who}${state.installed.has(who) ? " in place" : ""}: "${conditionText(machine, fault, state, who)}"`;
     case "fix": return `fix ${who}: ${fault.fix}`;
     case "install": return `put back ${who}`;
     case "pull": return "pull the cord";
