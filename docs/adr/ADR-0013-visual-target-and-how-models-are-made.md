@@ -1,7 +1,7 @@
 ---
 id: 0013
 title: Visual target and how the models are made
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -38,3 +38,4 @@ The licensing rule means seller photos guide the shapes and colours, but the tex
 ## History
 
 - 2026-10-10: proposed by Claude, from the owner's instruction to make the model "as close as possible to the actual generator", keeping the ADR 0006 budgets.
+- 2026-10-10: accepted by the owner, who wrote "I accept ADR 13".

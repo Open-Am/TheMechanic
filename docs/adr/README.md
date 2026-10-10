@@ -18,4 +18,5 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0010](ADR-0010-module-layout-and-boundaries.md) | Module layout and boundaries | accepted |
 | [0011](ADR-0011-inspecting-parts-in-place.md) | Inspecting parts in place | accepted |
 | [0012](ADR-0012-tool-versions-and-asset-storage.md) | Tool versions, finding Blender, and storing asset files | accepted |
-| [0013](ADR-0013-visual-target-and-how-models-are-made.md) | Visual target and how the models are made | proposed |
+| [0013](ADR-0013-visual-target-and-how-models-are-made.md) | Visual target and how the models are made | accepted |
+| [0014](ADR-0014-performance-budgets-and-realistic-lighting.md) | Performance budgets and realistic lighting | proposed |
