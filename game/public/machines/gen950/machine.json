@@ -1,0 +1,135 @@
+{
+  "id": "gen950",
+  "name": "950 generator",
+  "schema": 1,
+  "verified": false,
+  "size": [0.367, 0.375, 0.312],
+  "base": [
+    { "id": "base_frame", "placeholder": { "shape": "box", "size": [0.36, 0.02, 0.30], "position": [0, 0.01, 0], "color": "#2b2b2b" } },
+    { "id": "base_engine", "placeholder": { "shape": "box", "size": [0.16, 0.18, 0.16], "position": [-0.08, 0.12, 0], "color": "#8a8f94" } },
+    { "id": "base_alternator", "placeholder": { "shape": "box", "size": [0.09, 0.16, 0.16], "position": [0.045, 0.11, 0], "color": "#6f7479" } },
+    { "id": "base_panel", "placeholder": { "shape": "box", "size": [0.12, 0.08, 0.01], "position": [0.10, 0.15, 0.145], "color": "#1f1f1f" } }
+  ],
+  "parts": [
+    {
+      "id": "fuel_hose",
+      "name": "Fuel hose",
+      "does": "Carries fuel from the tap to the carburetor.",
+      "requires": [],
+      "inspectOk": "No cracks. Not blocked.",
+      "placeholder": { "shape": "cylinder", "axis": "y", "size": [0.012, 0.07, 0.012], "position": [-0.02, 0.17, 0.13], "color": "#111111" },
+      "explode": [0, 0, 0.10],
+      "motion": { "type": "pull" }
+    },
+    {
+      "id": "fuel_tap",
+      "name": "Fuel tap",
+      "does": "Turns the fuel on and off. Its strainer catches dirt.",
+      "requires": ["fuel_hose"],
+      "inspectOk": "Strainer is clean. Fuel runs freely.",
+      "placeholder": { "shape": "box", "size": [0.03, 0.04, 0.03], "position": [-0.02, 0.225, 0.13], "color": "#b08d57" },
+      "explode": [0, 0, 0.10],
+      "motion": { "type": "unscrew", "axis": "y", "turns": 1 }
+    },
+    {
+      "id": "fuel_tank",
+      "name": "Fuel tank",
+      "does": "Holds the petrol and oil mix.",
+      "requires": ["fuel_tap"],
+      "inspectOk": "Clean inside. Fuel smells fresh.",
+      "placeholder": { "shape": "box", "size": [0.34, 0.10, 0.28], "position": [0, 0.30, 0], "color": "#c0392b" },
+      "explode": [0, 0.15, 0],
+      "motion": { "type": "lift" }
+    },
+    {
+      "id": "air_filter_cover",
+      "name": "Air filter cover",
+      "does": "Holds the air filter in place.",
+      "requires": [],
+      "inspectOk": "Not cracked. Clips are fine.",
+      "placeholder": { "shape": "box", "size": [0.09, 0.09, 0.012], "position": [-0.08, 0.14, 0.146], "color": "#222222" },
+      "explode": [0, 0, 0.12],
+      "motion": { "type": "unclip", "axis": "x" }
+    },
+    {
+      "id": "air_filter",
+      "name": "Air filter",
+      "does": "Keeps dust out of the engine.",
+      "requires": ["air_filter_cover"],
+      "inspectOk": "A little dusty. Air passes easily.",
+      "placeholder": { "shape": "box", "size": [0.08, 0.08, 0.02], "position": [-0.08, 0.14, 0.13], "color": "#d9c27a" },
+      "explode": [0, 0, 0.12],
+      "motion": { "type": "slide" }
+    },
+    {
+      "id": "carburetor",
+      "name": "Carburetor",
+      "does": "Mixes fuel with air in the right amount.",
+      "requires": ["air_filter", "fuel_hose"],
+      "inspectOk": "Bowl is clean. Jet is clear.",
+      "placeholder": { "shape": "box", "size": [0.05, 0.05, 0.04], "position": [-0.08, 0.14, 0.10], "color": "#a9adb1" },
+      "explode": [0, 0, 0.12],
+      "motion": { "type": "unbolt", "axis": "z" }
+    },
+    {
+      "id": "plug_cap",
+      "name": "Spark plug cap",
+      "does": "Carries the high voltage to the spark plug.",
+      "requires": [],
+      "inspectOk": "Fits tightly. No cracks.",
+      "placeholder": { "shape": "box", "size": [0.025, 0.025, 0.03], "position": [-0.08, 0.16, -0.135], "color": "#111111" },
+      "explode": [0, 0, -0.10],
+      "motion": { "type": "pull" }
+    },
+    {
+      "id": "spark_plug",
+      "name": "Spark plug",
+      "does": "Makes the spark that lights the fuel.",
+      "requires": ["plug_cap"],
+      "inspectOk": "Tip is light brown. Healthy.",
+      "placeholder": { "shape": "cylinder", "axis": "z", "size": [0.02, 0.02, 0.04], "position": [-0.08, 0.16, -0.10], "color": "#e8e8e8" },
+      "explode": [0, 0, -0.10],
+      "motion": { "type": "unscrew", "axis": "z", "turns": 3 }
+    },
+    {
+      "id": "recoil_starter",
+      "name": "Recoil starter",
+      "does": "The pull cord that spins the engine to start it.",
+      "requires": [],
+      "inspectOk": "Rope is sound. Spring pulls it back.",
+      "placeholder": { "shape": "cylinder", "axis": "x", "size": [0.02, 0.14, 0.14], "position": [-0.17, 0.12, 0], "color": "#2b2b2b" },
+      "explode": [-0.12, 0, 0],
+      "motion": { "type": "unbolt", "axis": "x" }
+    },
+    {
+      "id": "muffler",
+      "name": "Muffler",
+      "does": "Quiets the exhaust and lets the smoke out.",
+      "requires": [],
+      "inspectOk": "A thin layer of soot. Gas passes freely.",
+      "placeholder": { "shape": "box", "size": [0.10, 0.07, 0.05], "position": [-0.02, 0.09, -0.115], "color": "#5a5a5a" },
+      "explode": [0, 0, -0.12],
+      "motion": { "type": "unbolt", "axis": "z" }
+    },
+    {
+      "id": "alternator_cover",
+      "name": "Alternator end cover",
+      "does": "Protects the electrical end of the generator.",
+      "requires": [],
+      "inspectOk": "Not cracked. Vents are clear.",
+      "placeholder": { "shape": "box", "size": [0.05, 0.16, 0.16], "position": [0.115, 0.11, 0], "color": "#2b2b2b" },
+      "explode": [0.12, 0, 0],
+      "motion": { "type": "unbolt", "axis": "x" }
+    },
+    {
+      "id": "capacitor",
+      "name": "Capacitor",
+      "does": "Starts the generator's voltage and keeps it steady.",
+      "requires": ["alternator_cover"],
+      "inspectOk": "Case is flat and clean. Holding charge.",
+      "placeholder": { "shape": "box", "size": [0.03, 0.05, 0.03], "position": [0.105, 0.11, 0.03], "color": "#f2f2f2" },
+      "explode": [0.10, 0, 0],
+      "motion": { "type": "unclip", "axis": "y" }
+    }
+  ]
+}
