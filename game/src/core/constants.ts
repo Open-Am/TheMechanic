@@ -9,6 +9,15 @@ export const FAILED_PULL_PENALTY = 15;
 /** Three stars at or under this score, two at or under the second, otherwise one. */
 export const STAR_THRESHOLDS = { three: 45, two: 90 } as const;
 
+/** Seconds of patience a failed pull of the cord costs (ADR 0015). The only action that costs patience. */
+export const FAILED_PULL_PATIENCE_COST = 20;
+
+/** Share of patience left at which the customer reacts: "waiting" below the first, "annoyed" below the second. */
+export const PATIENCE_THRESHOLDS = { waiting: 0.5, annoyed: 0.2 } as const;
+
+/** Mixed into the day hash for the daily customer, so the customer and the fault are chosen independently. */
+export const DAILY_CUSTOMER_SALT = 0x63757374; // "cust"
+
 /** Day 0 of the daily fault, as a UTC date string. Lagos midnight on this date is day 0. */
 export const DAILY_EPOCH = "2026-10-01";
 

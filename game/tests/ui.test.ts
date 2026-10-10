@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SYMPTOMS } from "../src/core/types.ts";
-import { formatTime, starText } from "../src/ui/format.ts";
-import { STRINGS, SYMPTOM_TEXT } from "../src/ui/strings.ts";
+import { formatTime, patienceMood, starText } from "../src/ui/format.ts";
+import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
 import { loadFaults } from "./helpers.ts";
 
 describe("formatTime", () => {
@@ -39,5 +39,21 @@ describe("strings", () => {
 
   it("no string is empty", () => {
     for (const [k, v] of Object.entries(STRINGS)) expect(v.length, k).toBeGreaterThan(0);
+  });
+});
+
+describe("customers in the interface (ADR 0015)", () => {
+  it("the meter's colour follows the 50 and 20 percent thresholds", () => {
+    expect(patienceMood(1)).toBe("calm");
+    expect(patienceMood(0.5)).toBe("calm");
+    expect(patienceMood(0.49)).toBe("waiting");
+    expect(patienceMood(0.19)).toBe("annoyed");
+    expect(patienceMood(0)).toBe("annoyed");
+  });
+
+  it("text that names a customer comes from one place", () => {
+    expect(TEMPLATES.walkedTitle("Tunde")).toBe("Tunde took the generator to another mechanic.");
+    expect(TEMPLATES.speech("Tunde", "You never finish?")).toBe("Tunde: “You never finish?”");
+    expect(TEMPLATES.customerSays("Mama Ngozi")).toBe("Mama Ngozi says");
   });
 });

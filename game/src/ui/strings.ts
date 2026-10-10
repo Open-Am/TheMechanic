@@ -30,4 +30,13 @@ export const STRINGS = {
   cannotRunTitle: "This phone cannot run the game",
   cannotRunWebgl: "Its browser does not support 3D graphics (WebGL).",
   cannotRunData: "The machine data could not be loaded.",
+  patience: "Patience",
+  walkedHint: "They ran out of patience. Nothing was fixed.",
+} as const;
+
+/** Player-facing text that names someone. */
+export const TEMPLATES = {
+  customerSays: (name: string) => `${name} says`,
+  walkedTitle: (name: string) => `${name} took the generator to another mechanic.`,
+  speech: (name: string, line: string) => `${name}: “${line}”`,
 } as const;
