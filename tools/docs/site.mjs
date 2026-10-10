@@ -119,6 +119,21 @@ nav li a .num { font-family: var(--mono); font-size: 12px; color: inherit; opaci
 .chip.superseded, .chip.rejected, .chip.abandoned { background: var(--dead-soft); color: var(--dead); }
 nav li a.active .chip { background: rgba(255,255,255,0.2); color: #fff; }
 .phone-nav { display: none; }
+.search { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+.search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+nav .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; line-height: 1.4; }
+nav li.hidden { display: none; }
+mark { background: var(--accent-soft); color: inherit; padding: 0 2px; border-radius: 2px; }
+mark.current { outline: 2px solid var(--accent); }
+.results h2 { margin-top: 0; }
+.result { padding: 14px 0; border-top: 1px solid var(--line); }
+.result:last-child { border-bottom: 1px solid var(--line); }
+.result a.title { font-weight: 600; color: var(--fg); text-decoration: none; font-size: 17px; }
+.result a.title:hover { color: var(--accent); }
+.result .where { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-left: 8px; }
+.result p { margin: 6px 0 0; font-size: 14px; color: var(--muted); max-width: 72ch; }
+.result p b { font-weight: 500; color: var(--fg); }
+.count { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
 main { padding-block: 32px 64px; padding-inline: clamp(16px, 5vw, 64px); }
 article { max-width: 72ch; min-width: 0; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 20px; align-items: center; }
@@ -144,15 +159,22 @@ a:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outlin
   .shell { grid-template-columns: 1fr; }
   nav { display: none; }
   .phone-nav { display: block; position: sticky; top: env(safe-area-inset-top, 0px); background: var(--panel); border-bottom: 1px solid var(--line); padding-block: 10px; padding-inline: 16px; z-index: 2; }
+  .phone-nav { display: grid; gap: 8px; }
   .phone-nav select { width: 100%; font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
   main { padding-block: 20px 48px; }
   article h1 { font-size: 24px; }
 }
 @media (prefers-reduced-motion: no-preference) { nav li a { transition: background 0.12s; } }
 </style>
-<div class="phone-nav"><select id="phone-select" aria-label="Document"></select></div>
+<div class="phone-nav">
+  <input id="phone-search" class="search" type="search" placeholder="Search all documents" aria-label="Search all documents" autocomplete="off">
+  <select id="phone-select" aria-label="Document"></select>
+</div>
 <div class="shell">
-  <nav id="nav"><h1>Open Am docs</h1><p class="gen" id="gen"></p></nav>
+  <nav id="nav"><h1>Open Am docs</h1><p class="gen" id="gen"></p>
+    <input id="search" class="search" type="search" placeholder="Search all documents" aria-label="Search all documents" autocomplete="off">
+    <p class="hint">Type two or more characters. Matches titles in the index and text in every document.</p>
+  </nav>
   <main><article id="article"><p class="empty">Loading.</p></article></main>
 </div>
 <script id="docs-data" type="application/json">${payload}</script>
@@ -225,9 +247,101 @@ a:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outlin
     if (link) { link.classList.add("active"); link.scrollIntoView({ block: "nearest" }); }
     select.value = d.id;
     document.title = d.title + " · Open Am docs";
+    if (lastQuery) highlight(art, lastQuery);
+    window.scrollTo(0, 0);
+    var first = art.querySelector("mark");
+    if (first) { first.classList.add("current"); first.scrollIntoView({ block: "center" }); }
+  }
+
+  // ---- search ----
+  var inputs = [document.getElementById("search"), document.getElementById("phone-search")];
+  var lastQuery = "";
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function escRe(s) { return s.replace(/[.*+?^\${}()|[\\]\\\\]/g, "\\\\$&"); }
+
+  function highlight(rootEl, q) {
+    var re = new RegExp(escRe(q), "gi");
+    var walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (n) {
+      if (!re.test(n.nodeValue)) return;
+      re.lastIndex = 0;
+      var frag = document.createDocumentFragment(), last = 0, m, text = n.nodeValue;
+      while ((m = re.exec(text))) {
+        frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        var mk = document.createElement("mark"); mk.textContent = m[0]; frag.appendChild(mk);
+        last = m.index + m[0].length;
+      }
+      frag.appendChild(document.createTextNode(text.slice(last)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+
+  function filterNav(q) {
+    var lq = q.toLowerCase();
+    docs.forEach(function (d) {
+      var a = document.getElementById("link-" + d.id);
+      if (!a) return;
+      var hit = !lq || d.title.toLowerCase().indexOf(lq) >= 0 || d.path.toLowerCase().indexOf(lq) >= 0 || d.body.toLowerCase().indexOf(lq) >= 0;
+      a.parentNode.classList.toggle("hidden", !hit);
+    });
+  }
+
+  function snippets(body, q, max) {
+    var re = new RegExp(escRe(q), "gi"), out = [], m, used = [];
+    var plain = body.replace(/^---[\\s\\S]*?---\\n/, "").replace(/[#*>\`|]/g, " ").replace(/\\s+/g, " ");
+    while ((m = re.exec(plain)) && out.length < max) {
+      var start = Math.max(0, m.index - 70), end = Math.min(plain.length, m.index + q.length + 90);
+      if (used.some(function (u) { return start < u[1] && end > u[0]; })) continue;
+      used.push([start, end]);
+      var s = plain.slice(start, end);
+      s = esc(s).replace(new RegExp(escRe(esc(q)), "gi"), function (x) { return "<b>" + x + "</b>"; });
+      out.push((start > 0 ? "… " : "") + s + (end < plain.length ? " …" : ""));
+    }
+    return out;
+  }
+
+  function searchAll(q) {
+    var art = document.getElementById("article");
+    var re = new RegExp(escRe(q), "gi");
+    var hits = docs.map(function (d) {
+      var n = (d.body.match(re) || []).length + (d.title.match(re) || []).length;
+      return { d: d, n: n };
+    }).filter(function (h) { return h.n > 0; }).sort(function (a, b) { return b.n - a.n; });
+    var html = '<div class="results"><h2>Search</h2><p class="count">' +
+      (hits.length ? hits.length + " document" + (hits.length === 1 ? "" : "s") + " mention “" + esc(q) + "”" : "Nothing mentions “" + esc(q) + "”") + "</p>";
+    hits.forEach(function (h) {
+      html += '<div class="result"><a class="title" href="#' + h.d.id + '">' + esc(h.d.title) + "</a>" +
+        '<span class="where">' + esc(h.d.path) + " · " + h.n + " match" + (h.n === 1 ? "" : "es") + "</span>";
+      snippets(h.d.body, q, 3).forEach(function (s) { html += "<p>" + s + "</p>"; });
+      html += "</div>";
+    });
+    art.innerHTML = html + "</div>";
+    document.querySelectorAll("nav a.active").forEach(function (a) { a.classList.remove("active"); });
+    document.title = "Search · Open Am docs";
     window.scrollTo(0, 0);
   }
-  function route() { show((location.hash || "").replace(/^#/, "")); }
+
+  function onSearch(q) {
+    lastQuery = q.length >= 2 ? q : "";
+    inputs.forEach(function (i) { if (i.value !== q) i.value = q; });
+    filterNav(lastQuery);
+    if (lastQuery) searchAll(lastQuery); else route();
+  }
+  inputs.forEach(function (i) {
+    i.addEventListener("input", function () { onSearch(i.value.trim()); });
+    i.addEventListener("keydown", function (e) { if (e.key === "Escape") { onSearch(""); i.blur(); } });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "SELECT") { e.preventDefault(); inputs[0].focus(); }
+  });
+
+  function route() {
+    var id = (location.hash || "").replace(/^#/, "");
+    if (!id && lastQuery) { searchAll(lastQuery); return; }
+    show(id);
+  }
   window.addEventListener("hashchange", route);
   route();
 })();
