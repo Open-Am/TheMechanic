@@ -4,7 +4,7 @@ Instructions for any AI agent working in this repository, whatever vendor or too
 
 ## The project in one paragraph
 
-"Open Am" (working title) is a browser game. The player is a roadside generator mechanic in Lagos who takes a small two-stroke generator apart, part by part, finds the one bad part, fixes it, reassembles the machine and pulls the cord. It runs on low-end Android phones over expensive data: portrait, touch first, no install, no login. The full product brief is `open-am-build-brief.md`. Real-machine facts are in `docs/reference/`.
+"Open Am" is a browser game. The player is a roadside generator mechanic in Lagos who takes a small two-stroke generator apart, part by part, finds the one bad part, fixes it, reassembles the machine and pulls the cord. It runs on low-end Android phones over expensive data: portrait, touch first, no install, no login. The full product brief is `open-am-build-brief.md`. Real-machine facts are in `docs/reference/`.
 
 ## Where things are
 
