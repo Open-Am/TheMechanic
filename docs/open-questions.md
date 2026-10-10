@@ -20,7 +20,7 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 
 ## Modelling (Phase 3)
 
-- The machine is blue and black (tank blue, body black), not red as in the Phase 2 placeholders. The placeholder colours in `machine.json` are stand-ins; the model follows the references.
+- Capacitor look: a round cream cylinder (Nigerian video) or a black CBB61 box (listing). The placeholder is cream for now; the mechanic or a photo decides.
 - There is no tube frame. `base_frame` will be modelled as the die-cast base, rubber mounts and body shell. Its ID stays as it is (data contract).
 
 ## Owner decisions pending
