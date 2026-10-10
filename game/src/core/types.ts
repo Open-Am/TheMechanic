@@ -104,7 +104,7 @@ export type RefusalReason =
   | "not_installed"
   | "blocked_by"
   | "not_in_tray"
-  | "dependents_installed"
+  | "dependents_missing"
   | "not_culprit"
   | "already_fixed"
   | "parts_missing"
@@ -113,7 +113,7 @@ export type RefusalReason =
 export interface Refusal {
   reason: RefusalReason;
   action: Action;
-  /** For blocked_by: an installed part from `requires`. For dependents_installed: an installed dependent. For parts_missing: the parts still in the tray. */
+  /** For blocked_by: installed parts from `requires`. For dependents_missing: parts that must go back first. For parts_missing: the parts still in the tray. */
   parts?: PartId[];
 }
 
