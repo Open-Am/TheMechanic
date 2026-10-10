@@ -129,14 +129,14 @@ button.pull {
   min-height: 52px;
 }
 
+/* Wraps instead of scrolling: chips swallow touch drags (a drag puts a part back), so a scrolling tray could not be scrolled. */
 .tray {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .tray-empty {
@@ -149,7 +149,8 @@ button.pull {
 .chip {
   flex: none;
   min-height: 44px;
-  padding: 12px 14px;
+  padding: 11px 13px;
+  font-size: 15px;
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid rgb(255 255 255 / 0.12);

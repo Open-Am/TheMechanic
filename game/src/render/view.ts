@@ -280,6 +280,27 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
   el.addEventListener("pointercancel", onUp);
   el.addEventListener("wheel", onWheel, { passive: false });
 
+  // ---- Development hook for the browser check (plan 0003). Vite drops this block from production builds. ----
+
+  if (import.meta.env.DEV) {
+    const probe = (id: PartId): { x: number; y: number; dir: ScreenDirection } | null => {
+      const pv = view.parts.get(id);
+      if (!pv || !game.state.installed.has(id)) return null;
+      view.root.updateMatrixWorld();
+      const rect = renderer.domElement.getBoundingClientRect();
+      const steps = [0, -0.3, 0.3, -0.15, 0.15, -0.45, 0.45];
+      for (const u of steps) for (const v of steps) for (const w of steps) {
+        const p = new Vector3(u, v, w).applyMatrix4(pv.hit.matrixWorld).project(camera);
+        if (Math.abs(p.x) > 0.98 || Math.abs(p.y) > 0.98 || p.z > 1) continue;
+        const x = rect.left + ((p.x + 1) / 2) * rect.width;
+        const y = rect.top + ((1 - p.y) / 2) * rect.height;
+        if (pickAt(x, y) === id) return { x, y, dir: directionOf(id) };
+      }
+      return null;
+    };
+    (window as unknown as Record<string, unknown>).__openAmDevRender = { probe, busy: () => tweens.size > 0, marker: "open-am-dev-hook" };
+  }
+
   // ---- Loop ----
 
   let last = performance.now();

@@ -9,7 +9,7 @@ Portrait first. From top to bottom:
 - Timer, top centre. `m:ss`. Hidden on the briefing and result screens.
 - The machine, filling the middle. The canvas sits behind everything else.
 - "Pull cord" button, full width, above the tray. Enabled only when the tray is empty.
-- The tray, a single horizontal row of chips along the bottom, scrolling sideways if it overflows.
+- The tray, chips along the bottom, wrapping onto more rows as parts come off. It does not scroll: chips take every drag for putting parts back, so a scrolling tray could not be scrolled by touch.
 
 Landscape works but is not tuned. Safe-area insets are respected (`viewport-fit=cover`).
 
