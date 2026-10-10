@@ -1,0 +1,12 @@
+{
+  "name": "open-am",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "docs:check": "node tools/docs/check.mjs",
+    "dev": "npm --prefix game run dev",
+    "test": "npm --prefix game test",
+    "build": "npm --prefix game run build"
+  }
+}
