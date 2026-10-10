@@ -1,7 +1,7 @@
 ---
 id: 0007
 title: Customers and their patience
-status: proposed
+status: approved
 date: 2026-10-10
 adrs: [0003, 0004, 0005, 0007, 0010, 0015]
 branch: plan/0007-customer-patience
@@ -12,6 +12,8 @@ branch: plan/0007-customer-patience
 ## Goal
 
 Every round has a customer from `game/public/customers.json`. Their patience drains with round time and drops on a failed pull; when it runs out they take the generator and leave, and the round ends unsolved. The player sees a patience meter and the customer's lines; the result screen says whether the machine was fixed or the customer walked. All of it is pure, tested, and replayable from the log. No 3D characters yet: the customer is a name, a meter and speech lines until the character plan.
+
+Approved by the owner on 2026-10-10, who wrote "I approve plan 0007".
 
 ## ADRs relied on
 
