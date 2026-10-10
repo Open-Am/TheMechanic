@@ -24,26 +24,11 @@ ENV_PATH = os.path.join(ROOT, "game", "public", "env", "workshop.hdr")
 
 COLLECTIONS = ("parts", "base", "reference")
 
-# Triangle allocation per object, from docs/design/modelling-brief.md. The total budget is 60,000 (ADR 0014).
-TRIANGLE_BUDGET = 60_000
-ALLOCATION = {
-    "fuel_tank": 5000,
-    "recoil_starter": 4500,
-    "muffler": 4000,
-    "alternator_cover": 3500,
-    "carburetor": 4500,
-    "air_filter_cover": 1800,
-    "air_filter": 1200,
-    "fuel_tap": 1500,
-    "fuel_hose": 800,
-    "plug_cap": 1000,
-    "spark_plug": 1400,
-    "capacitor": 800,
-    "base_frame": 6000,
-    "base_engine": 9000,
-    "base_alternator": 3000,
-    "base_panel": 2000,
-}
+# Budgets and the triangle allocation, shared with tools/pipeline/check.ts (ADR 0014, modelling brief).
+with open(os.path.join(ROOT, "tools", "pipeline", "budgets.json"), encoding="utf-8") as _f:
+    BUDGETS = json.load(_f)
+TRIANGLE_BUDGET = BUDGETS["triangles"]
+ALLOCATION = BUDGETS["allocation"]
 
 # Game camera, matching game/src/render/view.ts and orbit.ts.
 GAME_CAMERA = {"fov_deg": 40.0, "azimuth": 0.55, "polar": 1.12, "aspect": 390 / 844}

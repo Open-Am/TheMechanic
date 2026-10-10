@@ -12,7 +12,8 @@
     "play": "npm --prefix game run play",
     "typecheck": "npm --prefix game run typecheck",
     "size": "node tools/build/size.mjs",
-    "verify:phone": "node tools/verify/phone-play.ts"
+    "verify:phone": "node tools/verify/phone-play.ts",
+    "assets": "node tools/pipeline/assets.mjs"
   },
   "engines": {
     "node": ">=24 <25"

@@ -9,3 +9,4 @@ assets/*/export/*.glb
 *.blend2
 __pycache__/
 *.pyc
+assets/*/export/*.png
