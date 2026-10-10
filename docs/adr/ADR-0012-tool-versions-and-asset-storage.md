@@ -1,7 +1,7 @@
 ---
 id: 0012
 title: Tool versions, finding Blender, and storing asset files
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -53,3 +53,4 @@ Work this creates, for a plan: add `engines` and `.node-version`, change `@types
 ## History
 
 - 2026-10-10: proposed by Claude, after the owner asked for Blender to be installed and for this ADR to be written.
+- 2026-10-10: accepted by the owner, who wrote "I accept adr 12".

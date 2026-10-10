@@ -8,8 +8,8 @@ See the checklist at the end of `reference/generator-reference-pack.md`. Nothing
 
 ## Owner decisions pending
 
-- Git LFS quota: ADR 0012 (proposed) puts `.blend` files and textures in Git LFS. The storage and bandwidth allowance on the GitHub plan for `Open-Am/TheMechanic` is not checked.
-- Blender is not on PATH on the build machine (`C:\Program Files\Blender Foundation\Blender 4.5\blender.exe`). ADR 0012 (proposed) reads it from `BLENDER`; the owner sets that variable or adds the folder to PATH.
+- Git LFS quota: ADR 0012 puts `.blend` files and textures in Git LFS. The storage and bandwidth allowance on the GitHub plan for `Open-Am/TheMechanic` is not checked.
+- Blender is not on PATH on the build machine (`C:\Program Files\Blender Foundation\Blender 4.5\blender.exe`). ADR 0012 reads it from `BLENDER`; the owner sets that variable or adds the folder to PATH.
 - The Phase 2 done-criterion needs a real phone on the local network. The owner does the real check; agents test in emulation.
 - "Open Am" is a working title. It appears in share text and the page title.
 
