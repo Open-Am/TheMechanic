@@ -37,7 +37,7 @@ reference = bpy.data.collections["reference"]
 scene.render.engine = "BLENDER_EEVEE_NEXT"
 scene.view_settings.view_transform = "Khronos PBR Neutral"
 scene.view_settings.look = "None"
-scene.view_settings.exposure = math.log2(0.9)  # LIGHTING.exposure in the game is 0.9
+scene.view_settings.exposure = math.log2(common.LOOKDEV["exposure"])
 scene.render.resolution_x = 780
 scene.render.resolution_y = 1688
 scene.render.film_transparent = False
@@ -51,7 +51,7 @@ links = world.node_tree.links
 nodes.clear()
 out = nodes.new("ShaderNodeOutputWorld")
 bg = nodes.new("ShaderNodeBackground")
-bg.inputs["Strength"].default_value = 0.55  # LIGHTING.environmentIntensity
+bg.inputs["Strength"].default_value = common.LOOKDEV["environment_strength"]
 links.new(bg.outputs["Background"], out.inputs["Surface"])
 if os.path.exists(common.ENV_PATH):
     env = nodes.new("ShaderNodeTexEnvironment")
@@ -63,7 +63,7 @@ else:
 
 # Key light: a sun from the game's key direction (glTF axes converted to Blender).
 sun_data = bpy.data.lights.new("key", "SUN")
-sun_data.energy = 1.4 * 3.0  # the game's 1.4 key intensity; Blender suns are in W/m^2, tuned by eye to match
+sun_data.energy = common.LOOKDEV["key_energy"]
 sun = bpy.data.objects.new("key", sun_data)
 reference.objects.link(sun)
 d = Vector(common.gl(*common.KEY_DIRECTION)).normalized()

@@ -34,6 +34,9 @@ ALLOCATION = BUDGETS["allocation"]
 GAME_CAMERA = {"fov_deg": 40.0, "azimuth": 0.55, "polar": 1.12, "aspect": 390 / 844}
 # Key light direction, matching LIGHTING.key.direction in game/src/render/lighting.ts (glTF axes).
 KEY_DIRECTION = (0.6, 1.4, 1.0)
+# Look-development lighting, matching LIGHTING in game/src/render/lighting.ts: hdrIntensity, exposure, and the key
+# light (the game uses 1.4; Blender suns are in W/m^2, scaled by eye to match).
+LOOKDEV = {"environment_strength": 1.25, "exposure": 0.9, "key_energy": 4.2}
 
 
 def fail(message):
