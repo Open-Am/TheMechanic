@@ -10,6 +10,8 @@
     "test": "npm --prefix game test",
     "build": "npm --prefix game run build",
     "play": "npm --prefix game run play",
-    "typecheck": "npm --prefix game run typecheck"
+    "typecheck": "npm --prefix game run typecheck",
+    "size": "node tools/build/size.mjs",
+    "verify:phone": "node tools/verify/phone-play.ts"
   }
 }

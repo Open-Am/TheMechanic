@@ -84,6 +84,8 @@ Accounts, backend, leaderboards, community-submitted content, moderation, money,
 | `npm run build` | Static production build. (From Phase 2.) |
 | `npm run play` | Text-mode player: solves every fault from an action log and prints the steps and score. |
 | `npm run typecheck` | TypeScript check of the game, its tests and the play script. |
+| `npm run size` | Gzipped JavaScript in `game/dist` against the 350 KB budget. Run after `npm run build`. |
+| `npm run verify:phone` | Plays every fault in headless Edge or Chrome at phone size with real gestures; screenshots, console errors, frame rate. `-- --out <dir>` for screenshots. |
 | `npm run assets` | Blender to validated GLB. (From Phase 3.) |
 
 ## Writing conventions

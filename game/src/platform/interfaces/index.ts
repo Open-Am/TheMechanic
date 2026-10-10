@@ -1,7 +1,7 @@
 // Interfaces that app depends on (ADR 0010). Implementations live in platform/local and are injected in main.ts.
-// Phase 1 defines the interfaces only.
+// Implementations of Clock and Audio arrive in Phase 2; the rest in Phase 4.
 
-import type { Action, FaultId, ScoreBreakdown } from "../core/types.ts";
+import type { Action, FaultId, ScoreBreakdown } from "../../core/types.ts";
 
 export interface StoredResult {
   faultId: FaultId;
