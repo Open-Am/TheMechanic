@@ -17,6 +17,16 @@ const ALLOWED: Record<string, string[]> = {
   diagnostic: ["app", "core"],
 };
 
+/** Which npm packages each layer may import. Only render draws with Three.js (ADR 0002, ADR 0010). */
+const PACKAGES: Record<string, string[]> = {
+  core: [],
+  app: [],
+  render: ["three"],
+  ui: [],
+  platform: [],
+  diagnostic: [],
+};
+
 const FORBIDDEN_IN_CORE = [/\bfrom\s+["']three/, /\bdocument\b/, /\bwindow\b/, /\bnavigator\b/, /\blocalStorage\b/, /\bHTMLElement\b/, /\brequestAnimationFrame\b/];
 
 function walk(dir: string): string[] {
@@ -43,6 +53,20 @@ function importsOf(file: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) out.push(m[1] ?? m[2]!);
   return out;
+}
+
+function isPackage(spec: string): boolean {
+  return !spec.startsWith(".") && !spec.startsWith("/") && !spec.startsWith("node:");
+}
+
+function packageName(spec: string): string {
+  const parts = spec.split("/");
+  return spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+}
+
+/** Whether a file in layer `base` may import a package `spec`. */
+function packageAllowed(base: string, spec: string): boolean {
+  return (PACKAGES[base] ?? []).includes(packageName(spec));
 }
 
 function targetLayer(fromFile: string, spec: string): string | null {
@@ -75,12 +99,24 @@ describe("layer boundaries (ADR 0010)", () => {
         if (spec.startsWith("node:")) {
           expect.fail(`${relative(src, file)} imports Node built-in "${spec}"; browser code cannot`);
         }
+        if (isPackage(spec)) {
+          expect(packageAllowed(base, spec), `${relative(src, file)} imports package "${spec}"`).toBe(true);
+          continue;
+        }
         const same = target === base || (base === "platform" && target === "platform/interfaces");
         const ok = same || allowed.includes(target) || (target === "platform/interfaces" && allowed.includes("platform"));
         expect(ok, `${relative(src, file)} imports "${spec}" (${target})`).toBe(true);
       }
     });
   }
+
+  it("only render may import three, and no layer may import any other package", () => {
+    expect(packageAllowed("render", "three")).toBe(true);
+    expect(packageAllowed("render", "three/examples/jsm/controls/OrbitControls.js")).toBe(true);
+    for (const layer of ["core", "app", "ui", "platform", "diagnostic"]) expect(packageAllowed(layer, "three"), layer).toBe(false);
+    for (const layer of Object.keys(PACKAGES)) expect(packageAllowed(layer, "lodash"), layer).toBe(false);
+    expect(packageAllowed("render", "@scope/three")).toBe(false);
+  });
 
   it("core has no Three.js and no DOM", () => {
     for (const file of files.filter((f) => layerOf(f) === "core")) {
