@@ -73,6 +73,31 @@ export interface FaultFile {
   faults: Fault[];
 }
 
+// ---- Customers (ADR 0015) ----
+
+export const CUSTOMER_MOMENTS = ["arrive", "waiting", "annoyed", "leaving", "pleased"] as const;
+export type CustomerMoment = (typeof CUSTOMER_MOMENTS)[number];
+
+export interface Customer {
+  id: string;
+  name: string;
+  /** Which character model and outfit (used once the 3D customer exists). */
+  look: string;
+  /** Seconds of patience at the start of the round. */
+  patience: number;
+  /** What the customer says at each moment, in Nigerian Pidgin. At least one line per moment. */
+  lines: Record<CustomerMoment, string[]>;
+  /** False until the owner or the mechanic has checked the lines. */
+  verified: boolean;
+}
+
+export interface CustomerFile {
+  schema: number;
+  customers: Customer[];
+}
+
+export type RoundOutcome = "fixed" | "walked";
+
 // ---- Round (ADR 0004) ----
 
 export const ACTION_TYPES = ["remove", "inspect", "fix", "install", "pull"] as const;
@@ -111,7 +136,8 @@ export type RefusalReason =
   | "not_culprit"
   | "already_fixed"
   | "parts_missing"
-  | "time_went_backwards";
+  | "time_went_backwards"
+  | "customer_left";
 
 export interface Refusal {
   reason: RefusalReason;
@@ -127,9 +153,12 @@ export interface ScoreBreakdown {
   wrongParts: number;
   failedPulls: number;
   total: number;
-  stars: 1 | 2 | 3;
+  /** 0 for a round the customer walked out of (ADR 0015). */
+  stars: 0 | 1 | 2 | 3;
   /** The log replayed cleanly to a finished round. */
   complete: boolean;
+  /** How the round ended, or null while it is still going. */
+  outcome: RoundOutcome | null;
 }
 
 export interface ValidationIssue {

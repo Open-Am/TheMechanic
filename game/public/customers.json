@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "customers": [
+    {
+      "id": "mama_ngozi",
+      "name": "Mama Ngozi",
+      "look": "woman_market",
+      "patience": 150,
+      "verified": false,
+      "lines": {
+        "arrive": ["Good morning o. Take your time, check am well well."],
+        "waiting": ["No wahala, I dey wait.", "I don sit down small."],
+        "annoyed": ["Abeg, how far? Market dey wait me o."],
+        "leaving": ["I no fit wait again. I go carry am go another place."],
+        "pleased": ["Ehen! E don start. God bless your hand."]
+      }
+    },
+    {
+      "id": "alhaji_musa",
+      "name": "Alhaji Musa",
+      "look": "man_kaftan",
+      "patience": 110,
+      "verified": false,
+      "lines": {
+        "arrive": ["My brother, abeg help me look this gen."],
+        "waiting": ["How e dey go?"],
+        "annoyed": ["Oga, e don tey o. I get work for shop."],
+        "leaving": ["Ah, I don tire. Make I carry am go."],
+        "pleased": ["Correct! You sabi work."]
+      }
+    },
+    {
+      "id": "tunde",
+      "name": "Tunde",
+      "look": "man_young",
+      "patience": 80,
+      "verified": false,
+      "lines": {
+        "arrive": ["Bros, quick quick abeg. Match dey tonight."],
+        "waiting": ["You never finish?"],
+        "annoyed": ["Ah ahn! Wetin dey take you so long?"],
+        "leaving": ["Forget am jare. I go find another mechanic."],
+        "pleased": ["Na so! Thank you bros."]
+      }
+    }
+  ]
+}

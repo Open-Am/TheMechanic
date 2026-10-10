@@ -1,7 +1,7 @@
 // Validator for machine.json and faults.json (ADR 0003 section "Validation", ADR 0008).
 // Never throws. Returns every issue found so a data author sees them all at once.
 
-import { MOTION_TYPES, SYMPTOMS, type FaultFile, type Machine, type ValidationIssue, type ValidationResult } from "./types.ts";
+import { CUSTOMER_MOMENTS, MOTION_TYPES, SYMPTOMS, type CustomerFile, type FaultFile, type Machine, type ValidationIssue, type ValidationResult } from "./types.ts";
 
 function result(issues: ValidationIssue[]): ValidationResult {
   return { ok: !issues.some((i) => i.level === "error"), issues };
@@ -102,4 +102,29 @@ export function validateAll(machine: Machine, faults: FaultFile): ValidationResu
   if (!m.ok) return m;
   const f = validateFaults(faults, machine);
   return result([...m.issues, ...f.issues]);
+}
+
+/** Validates customers.json (ADR 0015). Never throws; reports every issue. */
+export function validateCustomers(file: CustomerFile): ValidationResult {
+  const issues: ValidationIssue[] = [];
+  const seen = new Set<string>();
+  const customers = Array.isArray(file?.customers) ? file.customers : [];
+  if (customers.length === 0) issues.push(error("no_customers", "The customer file has no customers."));
+  for (const c of customers) {
+    const id = typeof c?.id === "string" && c.id ? c.id : "(no id)";
+    if (seen.has(id)) issues.push(error("duplicate_id", `Duplicate customer ID "${id}".`));
+    seen.add(id);
+    if (typeof c?.name !== "string" || !c.name.trim()) issues.push(error("no_name", `Customer "${id}" has no name.`));
+    if (typeof c?.look !== "string" || !c.look.trim()) issues.push(error("no_look", `Customer "${id}" has no look.`));
+    if (typeof c?.patience !== "number" || !Number.isFinite(c.patience) || c.patience <= 0) {
+      issues.push(error("bad_patience", `Customer "${id}" has patience ${String(c?.patience)}; it must be a positive number of seconds.`));
+    }
+    for (const moment of CUSTOMER_MOMENTS) {
+      const lines = c?.lines?.[moment];
+      if (!Array.isArray(lines) || !lines.some((l) => typeof l === "string" && l.trim())) {
+        issues.push(error("missing_line", `Customer "${id}" has no line for "${moment}".`));
+      }
+    }
+  }
+  return result(issues);
 }
