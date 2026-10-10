@@ -67,9 +67,9 @@ function listDocs(dir) {
 const adrs = listDocs("adr");
 const adrById = new Map();
 for (const d of adrs) {
-  const m = d.name.match(FILE_RE);
+  const m = d.name.match(ADR_FILE_RE);
   if (!m) {
-    err(`${d.file}: filename must be NNNN-slug.md`);
+    err(`${d.file}: filename must be ADR-NNNN-slug.md`);
     continue;
   }
   if (!d.fm) continue;
