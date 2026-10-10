@@ -33,6 +33,7 @@ Everything runs on the player's phone in the browser. The server is a static fil
 | `vitest` | dev | Phase 1 |
 | `three` | runtime | Phase 2 |
 | `@types/three` | dev | Phase 2 |
+| `@types/node` (types only, for tests and tools) | dev | Phase 1 |
 | `@gltf-transform/cli` | dev | Phase 3 |
 | `meshoptimizer` (decoder only, if Meshopt compression is chosen) | runtime | Phase 3 |
 
@@ -62,3 +63,4 @@ Small, auditable bundle; zero running cost; instant play from a link. Agents wri
 - 2026-10-10: proposed by Claude, from the brief.
 - 2026-10-10: rewritten after the owner asked for the stack to be argued and for two limits to remain changeable: hiding game logic, and notifications.
 - 2026-10-10: accepted by the owner, who wrote "please accept both adr 2 and 10".
+- 2026-10-10: the owner wrote "Add it": `@types/node` (dev, types only) is added to the approved list so the tests type-check.

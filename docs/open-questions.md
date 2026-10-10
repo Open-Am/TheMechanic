@@ -14,5 +14,4 @@ See the checklist at the end of `reference/generator-reference-pack.md`. Nothing
 
 ## Raised during plan 0001
 
-- `@types/node` (types only, development only) was added so tests type-check. ADR 0002 does not list it. Owner to accept into ADR 0002 by a history line, or ask for tests to be excluded from `tsc`.
 - Should a player be allowed to inspect a part that is still on the machine? The reducer refuses it, following the brief (inspection happens from the tray). A mechanic looks at parts in place too; this may deserve a design discussion before Phase 2.

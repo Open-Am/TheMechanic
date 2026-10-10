@@ -38,11 +38,24 @@ No work that touches a decision is done without an ADR, and no ADR takes effect 
 1. **Explore, cheaply.** Read `docs/adr/README.md`, then only the ADRs relevant to the work, then `docs/open-questions.md`, then the code area involved. Use the cheapest capable model your tool offers for this step (in Claude Code, a Haiku subagent; elsewhere, the vendor's small model). Produce a short summary: which ADRs apply, which would be contradicted, what is unclear.
 2. **Decide, if needed.** If the work needs a decision, write a `proposed` ADR from `docs/adr/TEMPLATE.md` and stop for the owner.
 3. **Plan.** Write `docs/plans/NNNN-slug.md` (ADR files are `docs/adr/ADR-NNNN-slug.md`) from `docs/plans/TEMPLATE.md`. It names the ADRs it relies on, the files it will touch, the steps, and what done looks like. Stop for the owner's approval before building anything beyond the plan.
-4. **Build.** On a branch named after the plan. Small commits with clear messages. Run `npm run docs:check` and the project tests before every commit.
+4. **Build, with tests as you go.** On a branch named after the plan. Small commits with clear messages. Run `npm run docs:check` and the project tests before every commit. Tests are written alongside the code, not after: see "Testing" below.
 5. **Verify.** Do what the plan's done section says. Report results honestly: failing tests are reported as failing, skipped steps as skipped.
 6. **Release note.** Add or extend the entry in `docs/releases/` for the version being worked on, naming the plan and the ADRs. Regenerate the ADR index with `npm run docs:check -- --fix`.
 
 Which model does which step is the owner's call. Lay out the steps and let the owner assign them when more than one agent or model is available.
+
+## Testing
+
+Unit tests are part of every piece of work, written while the code is written. A step is not done until its tests pass.
+
+- **Every rule gets a test.** Each behaviour in an accepted ADR that code implements has at least one test naming that behaviour. When a test and an ADR disagree, the ADR wins and the test is wrong, or the ADR needs superseding.
+- **Every bug gets a test first.** Reproduce the bug in a failing test, then fix it, then commit both together.
+- **Core is tested exhaustively.** `game/src/core` is pure, so every function there is tested: normal cases, refusals, edge cases, and that the same input always gives the same output.
+- **Other layers are tested where they can be.** Pure helpers in `app`, `render`, `ui` and `platform` (tweens, emitters, formatting, storage fallbacks) get unit tests. DOM and WebGL behaviour is verified by the plan's done checks instead.
+- **The boundary test always runs.** `game/tests/boundaries.test.ts` enforces ADR 0010 and is never skipped or weakened.
+- **Tests use the shipped data.** Load `game/public/machines/<id>/` in tests rather than inventing fixtures, so a data change that breaks a rule is caught.
+- **A commit never lowers coverage of core.** Removing or weakening a test needs a reason in the commit message.
+- Tests live in `game/tests/`, named `<area>.test.ts`, run with `npm test` from the repository root.
 
 ## Standing rules from the brief
 
