@@ -14,6 +14,8 @@ export interface RenderAssets {
   environment: DataTexture | null;
   /** The baked ground shadow (alpha), or null to draw one. */
   ground: ImageBitmap | null;
+  /** The mechanic's hand (plan 0008), or null: parts then move on their own. */
+  hand: Object3D | null;
 }
 
 async function fetchOk(url: string): Promise<Response | null> {
@@ -68,8 +70,13 @@ async function loadImage(url: string): Promise<ImageBitmap | null> {
   }
 }
 
-/** `machineBase` and `envUrl` are URLs relative to the page. Never throws. */
-export async function loadRenderAssets(machineBase: string, envUrl: string): Promise<RenderAssets> {
-  const [model, environment, ground] = await Promise.all([loadModel(`${machineBase}model.glb`), loadEnvironment(envUrl), loadImage(`${machineBase}ground.png`)]);
-  return { model, environment, ground };
+/** `machineBase`, `envUrl` and `handUrl` are URLs relative to the page. Never throws. */
+export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null): Promise<RenderAssets> {
+  const [model, environment, ground, hand] = await Promise.all([
+    loadModel(`${machineBase}model.glb`),
+    loadEnvironment(envUrl),
+    loadImage(`${machineBase}ground.png`),
+    handUrl ? loadModel(handUrl) : Promise.resolve(null),
+  ]);
+  return { model, environment, ground, hand };
 }

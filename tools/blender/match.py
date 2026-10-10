@@ -1,7 +1,7 @@
 """Makes a match image: a render of the model from a reference photo's angle, beside the photo (ADR 0013, modelling brief).
 
     node tools/run-blender.mjs tools/blender/match.py --blend assets/gen950/blend/gen950.blend -- \
-        <reference image> <out.png> <azimuth> <polar> <fov_deg> [<target height in m> | only=<object id>]
+        <reference image> <out.png> <azimuth> <polar> <fov_deg> [<target height in m> | only=<object id> [key=<shape key>:<value>]]
 
 With only=<id>, every other object is hidden and the camera frames that one object, for matching a single part
 against a product photo. The azimuth and polar are then measured around the part.
@@ -30,8 +30,11 @@ ref_path, out_path = os.path.abspath(a[0]), os.path.abspath(a[1])
 azimuth, polar, fov_deg = float(a[2]), float(a[3]), float(a[4])
 machine = common.load_machine()
 sx, sy, sz = machine["size"]
-only = a[5][5:] if len(a) > 5 and a[5].startswith("only=") else None
-target_y = float(a[5]) if len(a) > 5 and not only else sy / 2
+extra = a[5:]
+only = next((x[5:] for x in extra if x.startswith("only=")), None)
+key = next((x[4:] for x in extra if x.startswith("key=")), None)  # key=<shape key>:<value>, with only=
+plain = [x for x in extra if "=" not in x]
+target_y = float(plain[0]) if plain else sy / 2
 centre_gl = (0.0, target_y, 0.0)
 radius = math.sqrt(sx * sx + sy * sy + sz * sz) / 2
 hidden = []
@@ -43,6 +46,9 @@ if only:
         if o.type == "MESH" and o is not obj and not o.hide_render:
             o.hide_render = True
             hidden.append(o)
+    if key and obj.data.shape_keys:
+        kname, kval = key.split(":")
+        obj.data.shape_keys.key_blocks[kname].value = float(kval)
     corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
     lo = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
     hi = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))

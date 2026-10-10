@@ -119,3 +119,12 @@ Saved in `wear/`:
 - `lagos-barbershop-use-gen-scene-jumia-ng-possibly-ai-generated.jpg`: mood only; it looks AI-generated.
 
 The machine is sold as "I pass my neighbour", from about ₦30,000 used to ₦150,000 new on Jiji. Background: https://nigerianqueries.com/tiger-generator-prices-in-nigeria/, https://leadership.ng/things-remembered-the-waning-fortune-of-i-pass-my-neighbour-generator/.
+
+## The mechanic's hand (plan 0008)
+
+Saved in `assets/hand/reference/` (git-ignored).
+
+- `mechanic-dirty-hands-at-work-1-dvids-pd.jpg`: a mechanic showing greasy hands, public domain (US DVIDS, via Wikimedia Commons, "Soldier in Focus, Mechanic gets dirty on the job"). Used for where grease gathers: fingertips, palm creases, along the fingers.
+- `hand-dorsal-anatomical-commons-ccbysa4.jpg`: turned out to be a line drawing; of little use.
+
+Proportions come from standard adult hand measurements. Photos of a Lagos mechanic's hands, open and gripping, would be the right reference.

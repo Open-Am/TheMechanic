@@ -6,7 +6,8 @@ import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from "three";
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
+import { approachDirection, basisToQuaternion, entryPoint, gripDuringReach, gripPoint, handBasis, HAND } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -404,5 +405,72 @@ describe("quantized model nodes", () => {
     pv.visual.scale.setScalar(1); // what reset() and the press pulse do
     expect(pv.size[0]).toBeCloseTo(0.1);
     expect(pv.visual.children[0]!.scale.x).toBeCloseTo(0.05);
+  });
+});
+
+describe("the hand's pose (plan 0008)", () => {
+  const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+  const len = (a: number[]) => Math.hypot(a[0]!, a[1]!, a[2]!);
+
+  it("approaches from the entry point towards the part", () => {
+    const a = approachDirection([0, 0.2, 0], [0.4, -0.1, 0.6]);
+    expect(len(a)).toBeCloseTo(1);
+    expect(a[2]).toBeLessThan(0); // from the camera side towards the machine
+  });
+
+  it("grips a little in front of the part's centre, on the side the hand comes from", () => {
+    const g = gripPoint([0, 0.2, 0], [0, 0, -1], 0.1);
+    expect(g[2]).toBeCloseTo(0.1 * HAND.gripInset);
+  });
+
+  it("points the fingers along the approach with the palm turned down, as an orthonormal basis", () => {
+    for (const a of [[0, 0, -1], [-0.5, 0.3, -0.8], [0.7, -0.2, -0.6]] as Array<[number, number, number]>) {
+      const n = len(a);
+      const ap: [number, number, number] = [a[0] / n, a[1] / n, a[2] / n];
+      const b = handBasis(ap);
+      expect(dot(b.x, b.y)).toBeCloseTo(0);
+      expect(dot(b.y, b.z)).toBeCloseTo(0);
+      expect(dot(b.z, ap)).toBeCloseTo(-1); // local -z (the fingers) along the approach
+      expect(b.y[1]).toBeGreaterThan(0); // local +y up, so the palm (-y) faces down
+    }
+  });
+
+  it("copes with an approach straight down", () => {
+    const b = handBasis([0, -1, 0]);
+    expect(len(b.x)).toBeCloseTo(1);
+    expect(dot(b.z, [0, -1, 0])).toBeCloseTo(-1);
+  });
+
+  it("turns the basis into a unit quaternion that rotates -z onto the approach", () => {
+    const ap: [number, number, number] = [0, -0.6, -0.8];
+    const [x, y, z, w] = basisToQuaternion(handBasis(ap));
+    expect(Math.hypot(x, y, z, w)).toBeCloseTo(1);
+    const v = new Vector3(0, 0, -1).applyQuaternion(new Quaternion(x, y, z, w));
+    expect(v.x).toBeCloseTo(ap[0]);
+    expect(v.y).toBeCloseTo(ap[1]);
+    expect(v.z).toBeCloseTo(ap[2]);
+  });
+
+  it("closes the grip over the last part of the reach", () => {
+    expect(gripDuringReach(0)).toBe(0);
+    expect(gripDuringReach(1 - HAND.gripShare)).toBe(0);
+    expect(gripDuringReach(1)).toBe(1);
+    expect(gripDuringReach(1 - HAND.gripShare / 2)).toBeCloseTo(0.5);
+  });
+});
+
+describe("where the hand comes from (plan 0008)", () => {
+  it("starts out along the side the part comes off, leaning towards the camera", () => {
+    // The muffler comes off the back (-z); the camera is in front (+z). The hand must start behind the part,
+    // not reach through the machine from the front.
+    const e = entryPoint([0, 0.1, -0.12], [0, 0, -0.12], [0.5, 0.6, 1.2]);
+    expect(e[2]).toBeLessThan(-0.12);
+    const d = Math.hypot(e[0], e[1] - 0.1, e[2] + 0.12);
+    expect(d).toBeCloseTo(HAND.reachFrom);
+  });
+
+  it("for a part that comes off the front, starts in front of it", () => {
+    const e = entryPoint([0, 0.1, 0.15], [0, 0, 0.12], [0.5, 0.6, 1.2]);
+    expect(e[2]).toBeGreaterThan(0.15);
   });
 });

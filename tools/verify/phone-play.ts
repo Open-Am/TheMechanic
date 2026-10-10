@@ -186,6 +186,14 @@ async function pullOff(id: string): Promise<void> {
       const dx = p.dir.headOn ? 0 : p.dir.x;
       const dy = p.dir.headOn ? 1 : p.dir.y;
       await drag(p.x, p.y, p.x + dx * 70, p.y + dy * 70);
+      // The hand (plan 0008) should be gripping within a moment of an accepted pull: catch it once on camera.
+      if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender.hasHand()"))) {
+        const seen = await waitFor("the hand gripping", () => evaluate<boolean>("window.__openAmDevRender.handGripping()"), 1500).catch(() => false);
+        if (seen) {
+          handSeen = true;
+          await screenshot("7-hand-gripping");
+        }
+      }
       if (await waitFor(`${id} in the tray`, () => trayHas(id), 3000).catch(() => false)) return;
     }
     // Hidden from this angle, or the pull missed: turn the machine and try again, as a player would.
@@ -217,6 +225,37 @@ await screenshot("1-briefing");
 
 const solved = new Map<string, string>();
 const shots = new Set<string>();
+
+// A blocked pull shows no hand (ADR 0007, ADR 0015): the fuel tank is in view but cannot come off while the tap is on.
+let handSeen: boolean | null = null;
+let blockedShowedHand = false;
+{
+  await tapSelector(".briefing .primary");
+  await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+  await idle();
+  const tank = await evaluate<{ x: number; y: number; dir: { x: number; y: number; headOn: boolean } } | null>("window.__openAmDevRender.probe('fuel_tank')");
+  if (tank) {
+    const dx = tank.dir.headOn ? 0 : tank.dir.x;
+    const dy = tank.dir.headOn ? -1 : tank.dir.y;
+    await mouse("mousePressed", tank.x, tank.y, true);
+    for (let i = 1; i <= 10; i++) {
+      await mouse("mouseMoved", tank.x + (dx * 70 * i) / 10, tank.y + (dy * 70 * i) / 10, true);
+      if (await evaluate<boolean>("window.__openAmDevRender.handGripping()")) blockedShowedHand = true;
+      await sleep(16);
+    }
+    await mouse("mouseReleased", tank.x + dx * 70, tank.y + dy * 70, false);
+    for (let i = 0; i < 10; i++) {
+      if (await evaluate<boolean>("window.__openAmDevRender.handGripping()")) blockedShowedHand = true;
+      await sleep(50);
+    }
+    if (await trayHas("fuel_tank")) failures.push("blocked pull: the fuel tank came off while the tap was on");
+  }
+  if (blockedShowedHand) failures.push("blocked pull: the hand appeared for a part that cannot come off");
+  // Back to a fresh round for the faults.
+  await send("Page.navigate", { url });
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await sleep(300);
+}
 for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round++) {
   await tapSelector(".briefing .primary");
   await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
@@ -294,6 +333,8 @@ if (failures.length === 0) {
 
 console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
 console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
+console.log(`Hand: ${handSeen ? "seen gripping mid-pull" : "not seen"}; blocked pull ${blockedShowedHand ? "SHOWED the hand" : "showed no hand"}`);
+if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen gripping during a pull");
 console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps`);
 console.log(`Console errors: ${consoleErrors.length}`);
 for (const e of consoleErrors) console.log(`   ${e}`);

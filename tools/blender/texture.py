@@ -54,7 +54,12 @@ PROFILES = {
     "switch_red": ("plastic", None, 0.3),
     "reel_plastic": ("plastic", None, 0.3),
     "earth_wire": ("plain", None, 0.2),
+    # The mechanic's hand (plan 0008).
+    "skin": ("skin", None, 0.0),
+    "nail": ("nail", None, 0.15),
+    "cloth": ("cloth", None, 0.15),
 }
+GREASE = (0.012, 0.010, 0.009)
 DUST = (0.36, 0.31, 0.25)  # Lagos laterite dust, linear-ish, reddish brown
 RUST = (0.32, 0.12, 0.04)
 SOOT = (0.02, 0.018, 0.016)
@@ -199,6 +204,27 @@ def authoring(base_name, group, image):
         colour = mix_rgb(soot, colour, SOOT)
         metal_out = math_node("MULTIPLY", math_node("SUBTRACT", 1.0, rust), metallic)
         rough_out = math_node("ADD", math_node("MULTIPLY", rust, 0.25), rough)
+    elif profile == "skin":
+        # Lighter palms and finger pads (faces pointing down), darker creases, and engine grease on the fingertips
+        # and in the palm, as working hands carry it (reference: assets/hand/reference/mechanic-dirty-hands-*).
+        palm = ramp(math_node("MULTIPLY", sep.outputs["Z"], -1.0), 0.15, 0.85)
+        colour = mix_rgb(math_node("MULTIPLY", palm, 0.85), colour, srgb_to_linear("#9a6a58"))
+        colour = mix_rgb(math_node("MULTIPLY", crevice, 1.6), colour, tuple(c * 0.45 for c in base))
+        grease = math_node("MULTIPLY", math_node("ADD", math_node("MULTIPLY", palm, 0.6), math_node("MULTIPLY", crevice, 1.2)), ramp(noise(18.0, 6.0), 0.48, 0.72))
+        colour = mix_rgb(math_node("MULTIPLY", grease, 0.85), colour, GREASE)
+        rough_out = math_node("SUBTRACT", rough, math_node("MULTIPLY", grease, 0.22))
+    elif profile == "nail":
+        dirt = math_node("MULTIPLY", edge, 0.9)
+        colour = mix_rgb(dirt, colour, GREASE)
+    elif profile == "cloth":
+        weave = n.new("ShaderNodeTexWave")
+        weave.inputs["Scale"].default_value = 400.0
+        link(t, coord.outputs["Object"], weave.inputs["Vector"])
+        colour = mix_rgb(math_node("MULTIPLY", weave.outputs["Fac"], 0.12), colour, tuple(c * 0.7 for c in base))
+        faded = math_node("MULTIPLY", up, 0.12)
+        colour = mix_rgb(faded, colour, tuple(min(1, c * 1.3 + 0.02) for c in base))
+        grease = math_node("MULTIPLY", ramp(big, 0.55, 0.8), 0.6)
+        colour = mix_rgb(grease, colour, GREASE)
     elif profile == "label":
         lines = n.new("ShaderNodeTexWave")
         lines.wave_type = "BANDS"
@@ -231,7 +257,7 @@ def authoring(base_name, group, image):
 
     # Fine surface: orange peel on paint, casting grain on metal, mould grain on plastic.
     bump = n.new("ShaderNodeBump")
-    bump.inputs["Strength"].default_value = {"paint": 0.05, "metal": 0.12, "plastic": 0.06, "exhaust": 0.18}.get(profile, 0.04)
+    bump.inputs["Strength"].default_value = {"paint": 0.05, "metal": 0.12, "plastic": 0.06, "exhaust": 0.18, "skin": 0.14, "cloth": 0.2}.get(profile, 0.04)
     bump.inputs["Distance"].default_value = 0.0004
     link(t, noise(220.0, 4.0), bump.inputs["Height"])
     link(t, bump.outputs["Normal"], bsdf.inputs["Normal"])
@@ -345,14 +371,15 @@ def final_material(group, base_img, orm_img, normal_img):
     return m
 
 
-def main():
+def bake_groups(groups, tex_dir):
+    """Bakes each group {name: (size, [object names])} to its own texture set in tex_dir. Used by main() and hand.py."""
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
     scene.render.bake.margin = 6
-    os.makedirs(TEX_DIR, exist_ok=True)
+    os.makedirs(tex_dir, exist_ok=True)
 
-    for group, (size, names) in GROUPS.items():
+    for group, (size, names) in groups.items():
         objects = [bpy.data.objects[nm] for nm in names if bpy.data.objects.get(nm)]
         for o in objects:
             if any(s.material and s.material.name.startswith("baked_") for s in o.material_slots):
@@ -388,7 +415,7 @@ def main():
         orm_img.pixels = orm.ravel().tolist()
 
         for img in (base_img, orm_img, normal_img):
-            img.filepath_raw = os.path.join(TEX_DIR, f"{img.name}.png")
+            img.filepath_raw = os.path.join(tex_dir, f"{img.name}.png")
             img.file_format = "PNG"
             img.save()
             img.pack()
@@ -403,8 +430,12 @@ def main():
             bpy.data.materials.remove(m)
         print(f"[{group}] baked")
 
+
+def main():
+    bake_groups(GROUPS, TEX_DIR)
     bpy.ops.wm.save_mainfile()
     print("Textured all groups.")
 
 
-main()
+if __name__ == "__main__":
+    main()
