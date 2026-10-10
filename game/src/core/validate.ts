@@ -62,7 +62,11 @@ export function validateMachine(machine: Machine): ValidationResult {
       if (!partIds.has(dep)) issues.push(error("unknown_requires", `Part "${p.id}" requires "${dep}", which is not a part.`));
       if (dep === p.id) issues.push(error("self_requires", `Part "${p.id}" requires itself.`));
     }
-    if (p.motion && !(MOTION_TYPES as readonly string[]).includes(p.motion.type)) {
+    for (const hider of p.hiddenBy ?? []) {
+      if (!partIds.has(hider)) issues.push(error("unknown_hidden_by", `Part "${p.id}" is hidden by "${hider}", which is not a part.`));
+      else if (!p.requires.includes(hider)) issues.push(warning("hidden_by_not_required", `Part "${p.id}" is hidden by "${hider}", which is not in its requires. Check this is meant.`));
+    }
+    if (p.motion &&!(MOTION_TYPES as readonly string[]).includes(p.motion.type)) {
       issues.push(warning("unknown_motion", `Part "${p.id}" has motion type "${p.motion.type}", which this build does not know. It will play as "slide".`));
     }
   }

@@ -13,6 +13,18 @@ export function blockers(machine: Machine, state: RoundState, partId: PartId): P
   return part.requires.filter((dep) => state.installed.has(dep));
 }
 
+/** Installed parts that hide `partId` (ADR 0011). `hiddenBy` defaults to `requires`. Empty means it can be seen. */
+export function hiders(machine: Machine, state: RoundState, partId: PartId): PartId[] {
+  const part = partById(machine, partId);
+  if (!part) return [];
+  return (part.hiddenBy ?? part.requires).filter((id) => state.installed.has(id));
+}
+
+/** An installed part that nothing hides. Parts in the tray are not "visible" here; they are inspected from the tray. */
+export function isVisible(machine: Machine, state: RoundState, partId: PartId): boolean {
+  return state.installed.has(partId) && hiders(machine, state, partId).length === 0;
+}
+
 export function canRemove(machine: Machine, state: RoundState, partId: PartId): boolean {
   return state.installed.has(partId) && blockers(machine, state, partId).length === 0;
 }

@@ -45,6 +45,31 @@ describe("validateMachine rejections", () => {
     for (const id of ["fuel_tank", "fuel_tap", "fuel_hose"]) expect(cycle?.message).toContain(id);
   });
 
+  it("hiddenBy naming no part", () => {
+    const m = clone(machine);
+    m.parts.find((p) => p.id === "spark_plug")!.hiddenBy = ["ghost"];
+    const r = validateMachine(m);
+    expect(r.ok).toBe(false);
+    expect(r.issues.map((i) => i.code)).toContain("unknown_hidden_by");
+  });
+
+  it("warns on a hiddenBy entry that is not in requires and still accepts", () => {
+    const m = clone(machine);
+    m.parts.find((p) => p.id === "spark_plug")!.hiddenBy = ["plug_cap", "muffler"];
+    const r = validateMachine(m);
+    expect(r.ok).toBe(true);
+    const warnings = r.issues.filter((i) => i.code === "hidden_by_not_required");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.level).toBe("warning");
+    expect(warnings[0]!.message).toContain("muffler");
+  });
+
+  it("accepts an empty hiddenBy with no issue", () => {
+    const m = clone(machine);
+    expect(m.parts.find((p) => p.id === "fuel_tank")!.hiddenBy).toEqual([]);
+    expect(validateMachine(m).issues).toEqual([]);
+  });
+
   it("warns on an unknown motion type and still accepts", () => {
     const m = clone(machine);
     m.parts[0]!.motion = { type: "teleport" };

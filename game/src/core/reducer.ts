@@ -1,7 +1,7 @@
 // The one place game rules are applied (ADR 0004, ADR 0010).
 // `apply` is pure: same inputs, same output. Time comes from the action, never from a clock.
 
-import { blockers, missingDependents } from "./rules.ts";
+import { blockers, hiders, missingDependents } from "./rules.ts";
 import type { Action, ApplyResult, Fault, Machine, PartId, Refusal, RoundState } from "./types.ts";
 
 export function initialState(machine: Machine): RoundState {
@@ -47,7 +47,11 @@ export function apply(machine: Machine, fault: Fault, state: RoundState, action:
 
     case "inspect": {
       if (!known || partId === undefined) return refuse(action, "unknown_part");
-      if (!state.tray.includes(partId)) return refuse(action, "not_in_tray");
+      // From the tray, or in place when nothing hides it (ADR 0011).
+      if (state.tray.includes(partId)) return withTime(state, action.t, {});
+      if (!state.installed.has(partId)) return refuse(action, "not_in_tray");
+      const hiding = hiders(machine, state, partId);
+      if (hiding.length) return refuse(action, "hidden_by", hiding);
       return withTime(state, action.t, {});
     }
 

@@ -36,6 +36,7 @@
       "name": "Fuel tank",
       "does": "Holds the petrol and oil mix.",
       "requires": ["fuel_tap"],
+      "hiddenBy": [],
       "inspectOk": "Clean inside. Fuel smells fresh.",
       "placeholder": { "shape": "box", "size": [0.34, 0.10, 0.28], "position": [0, 0.30, 0], "color": "#c0392b" },
       "explode": [0, 0.15, 0],

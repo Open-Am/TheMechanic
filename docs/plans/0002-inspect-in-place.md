@@ -1,7 +1,7 @@
 ---
 id: 0002
 title: Inspect parts in place
-status: proposed
+status: done
 date: 2026-10-10
 adrs: [0003, 0004, 0010, 0011]
 branch: plan/0002-inspect-in-place
