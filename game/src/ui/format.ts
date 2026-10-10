@@ -13,3 +13,10 @@ export function starText(stars: number): string {
   const n = Math.max(0, Math.min(3, Math.round(stars)));
   return "★".repeat(n) + "☆".repeat(3 - n);
 }
+
+/** The meter's colour band for a share of patience left (ADR 0015 thresholds: 50 and 20 percent). */
+export function patienceMood(share: number): "calm" | "waiting" | "annoyed" {
+  if (share < 0.2) return "annoyed";
+  if (share < 0.5) return "waiting";
+  return "calm";
+}

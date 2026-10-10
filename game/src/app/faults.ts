@@ -1,6 +1,6 @@
 // Free-play fault choice (ADR 0010: fault selection lives in app).
 
-import type { Fault, FaultId } from "../core/index.ts";
+import type { Customer, Fault, FaultId } from "../core/index.ts";
 
 /** Picks a fault uniformly at random, never `previous` when there is any other choice. `random` returns [0, 1). */
 export function pickFault(faults: readonly Fault[], previous: FaultId | null, random: () => number): Fault {
@@ -8,4 +8,11 @@ export function pickFault(faults: readonly Fault[], previous: FaultId | null, ra
   const choices = faults.length > 1 ? faults.filter((f) => f.id !== previous) : faults;
   const i = Math.min(choices.length - 1, Math.floor(random() * choices.length));
   return choices[i]!;
+}
+
+/** Picks a customer the same way: uniformly, never `previous` when there is another (ADR 0015). */
+export function pickCustomer(customers: readonly Customer[], previous: string | null, random: () => number): Customer {
+  if (customers.length === 0) throw new Error("No customers to pick from.");
+  const choices = customers.length > 1 ? customers.filter((c) => c.id !== previous) : customers;
+  return choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))]!;
 }

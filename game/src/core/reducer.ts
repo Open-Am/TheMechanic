@@ -1,8 +1,9 @@
 // The one place game rules are applied (ADR 0004, ADR 0010).
 // `apply` is pure: same inputs, same output. Time comes from the action, never from a clock.
 
+import { walkOutTime } from "./patience.ts";
 import { blockers, hiders, missingDependents } from "./rules.ts";
-import type { Action, ApplyResult, Fault, Machine, PartId, Refusal, RoundState } from "./types.ts";
+import type { Action, ApplyResult, Customer, Fault, Machine, PartId, Refusal, RoundState } from "./types.ts";
 
 export function initialState(machine: Machine): RoundState {
   return {
@@ -25,9 +26,11 @@ function withTime(state: RoundState, t: number, patch: Partial<RoundState>): App
   return { ok: true, state: { ...state, ...patch, t } };
 }
 
-export function apply(machine: Machine, fault: Fault, state: RoundState, action: Action): ApplyResult {
+/** `customer` is optional: without one there is no patience, as before ADR 0015. */
+export function apply(machine: Machine, fault: Fault, state: RoundState, action: Action, customer?: Customer): ApplyResult {
   if (state.endedAt !== null) return refuse(action, "round_over");
   if (!Number.isFinite(action.t) || action.t < state.t) return refuse(action, "time_went_backwards");
+  if (customer && action.t >= walkOutTime(state, customer)) return refuse(action, "customer_left");
 
   const partId = action.partId;
   const known = partId !== undefined && machine.parts.some((p) => p.id === partId);

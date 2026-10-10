@@ -9,7 +9,8 @@ import { apply, initialState, conditionText } from "../../game/src/core/reducer.
 import { isVisible, removalOrder, removableNow } from "../../game/src/core/rules.ts";
 import { scoreState } from "../../game/src/core/score.ts";
 import { validateAll } from "../../game/src/core/validate.ts";
-import type { Action, ActionType, Fault, FaultFile, Machine, PartId, RoundState } from "../../game/src/core/types.ts";
+import type { Action, ActionType, CustomerFile, Fault, FaultFile, Machine, PartId, RoundState } from "../../game/src/core/types.ts";
+import { walkOutTime } from "../../game/src/core/patience.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const machineId = process.argv[2] ?? "gen950";
@@ -70,6 +71,33 @@ for (const fault of faultFile.faults) {
   console.log(`   score ${s.total} (${s.elapsedSeconds}s + ${s.wrongParts} wrong + ${s.failedPulls} failed pulls)  ${"★".repeat(s.stars)}  ${s.complete ? "complete" : "INCOMPLETE"}`);
   if (!s.complete) allOk = false;
 }
+
+// A walked round (ADR 0015): the most impatient customer, a wrong part, then two failed pulls.
+const customers = JSON.parse(readFileSync(join(root, "game", "public", "customers.json"), "utf8")) as CustomerFile;
+const impatient = [...customers.customers].sort((a, b) => a.patience - b.patience)[0]!;
+const walkFault = faultFile.faults[0]!;
+console.log(`\n== walk-out ==  ${impatient.name} (patience ${impatient.patience}s) brings ${walkFault.id}`);
+let ws = initialState(machine);
+const walkLog: Action[] = [
+  { t: 5000, type: "remove", partId: "muffler" },
+  { t: 10000, type: "install", partId: "muffler" },
+  { t: 20000, type: "pull" },
+  { t: 40000, type: "pull" },
+  { t: 41000, type: "remove", partId: removalOrder(machine, walkFault)[0]! },
+];
+for (const action of walkLog) {
+  const r = apply(machine, walkFault, ws, action, impatient);
+  const label = `${String(action.t / 1000).padStart(3)}s  ${action.type} ${action.partId ?? ""}`;
+  if (!r.ok) {
+    console.log(`   ${label}  -> REFUSED ${r.refusal.reason}`);
+    break;
+  }
+  ws = r.state;
+  console.log(`   ${label}  (leaves at ${walkOutTime(ws, impatient) / 1000}s)`);
+}
+const walked = scoreState(machine, walkFault, ws, 60_000, impatient);
+console.log(`   ${impatient.name} took the generator away at ${walked.elapsedSeconds}s: outcome ${walked.outcome}, ${walked.stars} stars`);
+if (walked.outcome !== "walked") allOk = false;
 
 console.log(allOk ? "\nAll faults solved." : "\nSome faults did not complete.");
 process.exit(allOk ? 0 : 1);

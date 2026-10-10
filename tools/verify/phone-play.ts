@@ -199,7 +199,8 @@ async function putBack(id: string): Promise<void> {
   const chip = await evaluate<{ x: number; y: number }>(
     `(() => { const r = document.querySelector('.tray [data-part="${id}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
   );
-  await drag(chip.x, chip.y, VIEWPORT.width / 2, VIEWPORT.height * 0.35, 12);
+  // Drop over the machine, right of centre: clear of the diagnostic panel in the top-left corner.
+  await drag(chip.x, chip.y, VIEWPORT.width * 0.72, VIEWPORT.height * 0.5, 12);
   await waitFor(`${id} back on`, async () => !(await trayHas(id)), 3000);
 }
 
@@ -275,7 +276,24 @@ await sleep(1200);
 const fps = Number(/fps (\d+)/.exec(await diag())?.[1] ?? "0");
 await send("Emulation.setCPUThrottlingRate", { rate: 1 });
 
+// A forced walk-out (plan 0007): every customer gets 5 seconds of patience. The customer should react at 50 percent,
+// leave, and the walked result screen should show.
+let walkedOk = false;
+if (failures.length === 0) {
+  await send("Page.navigate", { url: url.replace("?diag", "?diag&patience=5") });
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await sleep(300);
+  await tapSelector(".briefing .primary");
+  await sleep(3000);
+  if (await evaluate<boolean>("!document.querySelector('.speech').hidden")) await screenshot("5-customer-line");
+  else failures.push("walk-out: the customer said nothing at 50 percent patience");
+  walkedOk = await waitFor("the walked result", () => evaluate<boolean>("!!document.querySelector('.result.walked')"), 12000).catch(() => false);
+  if (walkedOk) await screenshot("6-walked");
+  else failures.push("walk-out: no walked result screen after the patience ran out");
+}
+
 console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
+console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
 console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps`);
 console.log(`Console errors: ${consoleErrors.length}`);
 for (const e of consoleErrors) console.log(`   ${e}`);
