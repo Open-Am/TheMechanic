@@ -98,6 +98,51 @@ button.pull {
   background: rgb(0 0 0 / 0.35);
 }
 
+.patience {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 52px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140px;
+  height: 8px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.45);
+  overflow: hidden;
+}
+
+.patience .fill {
+  height: 100%;
+  width: 100%;
+  background: var(--success);
+  transition: width 0.25s linear, background-color 0.4s;
+}
+
+.patience[data-mood="waiting"] .fill {
+  background: var(--accent);
+}
+
+.patience[data-mood="annoyed"] .fill {
+  background: #d9534f;
+}
+
+.speech {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 72px);
+  left: var(--gutter);
+  right: var(--gutter);
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+  pointer-events: none;
+}
+
+.arrive {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .controls {
   position: absolute;
   left: 0;

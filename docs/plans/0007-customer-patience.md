@@ -1,7 +1,7 @@
 ---
 id: 0007
 title: Customers and their patience
-status: approved
+status: done
 date: 2026-10-10
 adrs: [0003, 0004, 0005, 0007, 0010, 0015]
 branch: plan/0007-customer-patience

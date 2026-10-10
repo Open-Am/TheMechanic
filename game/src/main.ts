@@ -2,7 +2,7 @@
 // mounts render and ui, and loads diagnostic mode only in development builds with ?diag (ADR 0007).
 
 import { createGame } from "./app/round.ts";
-import { validateAll, type FaultFile, type Machine } from "./core/index.ts";
+import { validateAll, validateCustomers, type CustomerFile, type FaultFile, type Machine } from "./core/index.ts";
 import { createAudio } from "./platform/local/audio.ts";
 import { createClock } from "./platform/local/clock.ts";
 import { loadRenderAssets } from "./render/model.ts";
@@ -16,6 +16,25 @@ async function loadMachine(id: string): Promise<{ machine: Machine; faults: Faul
   const [m, f] = await Promise.all([fetch(`${base}machine.json`), fetch(`${base}faults.json`)]);
   if (!m.ok || !f.ok) throw new Error(`Could not load ${id}: ${m.status} ${f.status}`);
   return { machine: (await m.json()) as Machine, faults: (await f.json()) as FaultFile };
+}
+
+/** customers.json (ADR 0015). If it is missing or invalid the game still runs, without customers. */
+async function loadCustomers(): Promise<CustomerFile | null> {
+  try {
+    const r = await fetch(`${import.meta.env.BASE_URL}customers.json`);
+    if (!r.ok) return null;
+    const file = (await r.json()) as CustomerFile;
+    const check = validateCustomers(file);
+    for (const issue of check.issues) console.warn(issue.message);
+    if (!check.ok) return null;
+    // Development only: ?patience=5 gives every customer 5 seconds, to see a walk-out quickly.
+    const forced = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get("patience")) : NaN;
+    if (forced > 0) for (const c of file.customers) c.patience = forced;
+    return file;
+  } catch (e) {
+    console.warn("Customers could not be loaded; playing without them.", e);
+    return null;
+  }
 }
 
 async function start(): Promise<void> {
@@ -42,7 +61,8 @@ async function start(): Promise<void> {
     return;
   }
 
-  const game = createGame({ ...data, clock: createClock(), audio: createAudio(), random: Math.random });
+  const customers = await loadCustomers();
+  const game = createGame({ ...data, clock: createClock(), audio: createAudio(), random: Math.random, ...(customers ? { customers } : {}) });
 
   // The model, its ground shadow and the environment come with the machine folder; nothing is fetched later (ADR 0010).
   const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`);

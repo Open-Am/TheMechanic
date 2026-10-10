@@ -34,7 +34,7 @@ export function mountDiagnostic(root: HTMLElement, game: Game): void {
     lastRefusal = null;
     draw();
   });
-  for (const name of ["removed", "installed", "inspected", "fixed", "pulled", "ended"] as const) game.events.on(name, draw);
+  for (const name of ["removed", "installed", "inspected", "fixed", "pulled", "ended", "patience", "left"] as const) game.events.on(name, draw);
 
   function draw(): void {
     if (collapsed) {
@@ -49,6 +49,7 @@ export function mountDiagnostic(root: HTMLElement, game: Game): void {
     panel.textContent = [
       `fps ${fps}  lighting ${document.documentElement.dataset.lighting ?? "-"}  model ${document.documentElement.dataset.model ?? "-"}`,
       `fault ${game.faultId ?? "-"}  culprit ${game.culprit ?? "-"}  fixed ${s.fixed}`,
+      `customer ${game.customerName ?? "-"}  patience ${Math.round(game.patience() * 100)}%  leaves at ${game.walkOutAt === null ? "-" : (game.walkOutAt / 1000).toFixed(1) + "s"}  outcome ${game.outcome ?? "-"}`,
       `last refusal: ${refusal}`,
       `removable: ${removableNow(game.machine, s).join(", ") || "-"}`,
       `tray: ${s.tray.join(", ") || "-"}`,
