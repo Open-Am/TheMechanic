@@ -20,4 +20,4 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0012](ADR-0012-tool-versions-and-asset-storage.md) | Tool versions, finding Blender, and storing asset files | accepted |
 | [0013](ADR-0013-visual-target-and-how-models-are-made.md) | Visual target and how the models are made | accepted |
 | [0014](ADR-0014-performance-budgets-and-realistic-lighting.md) | Performance budgets and realistic lighting | accepted |
-| [0015](ADR-0015-customer-patience-and-the-mechanics-hand.md) | The customer, their patience, and the mechanic's hand | proposed |
+| [0015](ADR-0015-customer-patience-and-the-mechanics-hand.md) | The customer, their patience, and the mechanic's hand | accepted |

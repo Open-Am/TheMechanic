@@ -1,7 +1,7 @@
 ---
 id: 0015
 title: The customer, their patience, and the mechanic's hand
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -63,3 +63,4 @@ Work this creates, for plans: the patience rule, customers.json and the result s
 ## History
 
 - 2026-10-10: proposed by Claude, from the owner's feedback quoted above and their choices of a patience meter with walk-out, a 3D customer, and a 3D hand on pulls.
+- 2026-10-10: accepted by the owner, who wrote "Approved".
