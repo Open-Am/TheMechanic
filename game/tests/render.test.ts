@@ -3,6 +3,9 @@ import { classify, GESTURE, screenDirection } from "../src/render/gesture.ts";
 import { MOTION_DEFAULTS, poseAt, resolveMotion } from "../src/render/motion.ts";
 import { clampOrbit, fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
+import { buildMachine, sizeHitVolumes } from "../src/render/placeholders.ts";
+import { firstPart, partIdOf } from "../src/render/picking.ts";
+import { Vector3 } from "three";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
 import { loadMachine } from "./helpers.ts";
 
@@ -209,5 +212,56 @@ describe("orbit", () => {
 
   it("world per pixel grows with distance", () => {
     expect(worldPerPixel(2, 0.8, 800)).toBeCloseTo(2 * worldPerPixel(1, 0.8, 800));
+  });
+});
+
+describe("placeholders", () => {
+  const view = buildMachine(machine);
+
+  it("one group per part, named exactly the part ID, at its placeholder position", () => {
+    expect([...view.parts.keys()].sort()).toEqual(machine.parts.map((p) => p.id).sort());
+    for (const part of machine.parts) {
+      const pv = view.parts.get(part.id)!;
+      expect(pv.group.name).toBe(part.id);
+      expect(pv.group.position.toArray()).toEqual(part.placeholder.position);
+    }
+  });
+
+  it("base pieces are present and are not parts", () => {
+    for (const b of machine.base) {
+      expect(view.root.getObjectByName(b.id)).toBeDefined();
+      expect(view.parts.has(b.id)).toBe(false);
+    }
+  });
+
+  it("a cylinder's long side follows its axis", () => {
+    const hose = machine.parts.find((p) => p.id === "fuel_hose")!;
+    const pv = view.parts.get("fuel_hose")!;
+    pv.mesh.geometry.computeBoundingBox();
+    const size = pv.mesh.geometry.boundingBox!.getSize(new Vector3()).toArray();
+    expect(size[1]).toBeCloseTo(hose.placeholder.size[1]);
+  });
+
+  it("hit volumes grow to the finger minimum and never shrink below the part", () => {
+    sizeHitVolumes(view, 0.05);
+    for (const pv of view.parts.values()) {
+      for (let i = 0; i < 3; i++) {
+        const s = pv.hit.scale.getComponent(i);
+        expect(s).toBeGreaterThanOrEqual(0.05);
+        expect(s).toBeGreaterThanOrEqual(pv.size[i]!);
+      }
+    }
+  });
+
+  it("picking walks up from the hit volume to the part, skipping parts not allowed", () => {
+    const ids = new Set(view.parts.keys());
+    const plug = view.parts.get("spark_plug")!;
+    const cap = view.parts.get("plug_cap")!;
+    expect(partIdOf(plug.hit, ids)).toBe("spark_plug");
+    expect(partIdOf(view.root, ids)).toBeNull();
+    const hits = [{ object: cap.hit }, { object: plug.hit }];
+    expect(firstPart(hits, ids, () => true)).toBe("plug_cap");
+    expect(firstPart(hits, ids, (id) => id !== "plug_cap")).toBe("spark_plug");
+    expect(firstPart(hits, ids, () => false)).toBeNull();
   });
 });
