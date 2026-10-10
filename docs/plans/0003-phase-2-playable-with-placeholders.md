@@ -3,7 +3,7 @@ id: 0003
 title: Phase 2, playable with placeholders
 status: approved
 date: 2026-10-10
-adrs: [0001, 0002, 0003, 0004, 0006, 0007, 0008, 0010, 0011]
+adrs: [0001, 0002, 0003, 0004, 0007, 0008, 0010, 0011, 0014]
 branch: plan/0003-phase-2-playable
 ---
 
@@ -19,7 +19,7 @@ A full round of `gen950` is playable in a portrait phone browser over the local 
 - **0002 Stack.** Vite, strict TypeScript, Three.js, plain DOM and CSS. Adds `three` and `@types/three`, both approved for Phase 2. Tweens, emitter and storage fallbacks written in the project. Plain message when WebGL fails.
 - **0003 Data.** Placeholders built from each part's `placeholder`; base pieces never come off. Symptom text from the strings file.
 - **0004 Rules.** The reducer decides; `ui` and `render` only propose. Refused actions are not logged.
-- **0006 Budgets.** 350 KB gzipped JavaScript, DPR capped at 2, one hemisphere and one directional light, no shadows, 30 fps at 4x CPU throttle.
+- **0014 Budgets.** 350 KB gzipped JavaScript, DPR capped at 2, 30 fps at 4x CPU throttle. This plan was approved under ADR 0006, which ADR 0014 superseded on 2026-10-10 with the same budgets. Phase 2 keeps one hemisphere and one directional light, the rig ADR 0014 keeps as its fallback; the image-based lighting arrives in a later plan.
 - **0007 Modes.** No visible response to a blocked tap beyond the same press acknowledgement every tap gets. Diagnostic overlay behind a build-time flag, enabled in development with `?diag`.
 - **0008 Motion.** Each part's `motion` drives its removal; install plays it in reverse; defaults in one render file; unknown types fall back to `slide`.
 - **0010 Layers.** `app` owns the round and emits events; `render` and `ui` never import each other; condition text only through `app.conditionOf`.

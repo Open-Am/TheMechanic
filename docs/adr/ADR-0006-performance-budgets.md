@@ -1,10 +1,10 @@
 ---
 id: 0006
 title: Performance budgets
-status: accepted
+status: superseded
 date: 2026-10-10
 supersedes: []
-superseded_by: null
+superseded_by: 0014
 ---
 
 # 0006. Performance budgets
@@ -34,3 +34,4 @@ Agents measure before merging anything that adds bytes or triangles. Visual ambi
 
 - 2026-10-10: proposed by Claude, from the brief.
 - 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.
+- 2026-10-10: superseded by ADR 0014, accepted by the owner, who wrote "I accept ADR 14". The budgets carry over unchanged; the lighting rule is replaced.

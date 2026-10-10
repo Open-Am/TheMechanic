@@ -1,6 +1,6 @@
 # Modelling brief
 
-Instructions for whoever models `gen950` in Phase 3: Claude in Blender, an approved AI tool, or a person. Design note under ADR 0013. Read that ADR, ADR 0006 (budgets) and ADR 0012 (Blender 4.5 LTS) first, and section 9 of the brief for scene conventions and scripts.
+Instructions for whoever models `gen950` in Phase 3: Claude in Blender, an approved AI tool, or a person. Design note under ADR 0013. Read that ADR, ADR 0014 (budgets and lighting) and ADR 0012 (Blender 4.5 LTS) first, and section 9 of the brief for scene conventions and scripts.
 
 ## The job
 
@@ -22,14 +22,14 @@ Model a used Yamaha ET950-pattern generator, the kind sold in Lagos as Tiger TG9
 5. **High and low poly.** Build detail on a high-poly copy (subdivision, small bevels, embossing). Make a low-poly game mesh within the triangle allocation below. Bake normal and ambient occlusion from high to low. Detail smaller than about 2 mm goes in the normal map, not the mesh.
 6. **UVs.** Even texel density across the exterior (target about 5 px per mm on the 2048 atlas for large exterior parts). Straighten UV shells on lettering and seams. Keep seams where real seams are.
 7. **Materials and wear.** Principled BSDF, baked to base colour, normal, and packed occlusion-roughness-metallic, as the brief says. See the material table and wear notes below.
-8. **Match.** Set a Blender camera to the angle and focal length of a reference photo, light it close to the game's lighting (one hemisphere and one directional light), render, and put the render beside the photo in one image. Save it as `assets/gen950/match/<part>-<n>.png`. List what differs: silhouette, proportions, colour, gloss, wear. Fix and repeat. A part is `modelled` only after a match image exists and its list has no silhouette or proportion problems left.
+8. **Match.** Set a Blender camera to the angle and focal length of a reference photo, light it as the game does (ADR 0014: the same environment map, the same key light direction, PBR Neutral tone mapping), render, and put the render beside the photo in one image. Save it as `assets/gen950/match/<part>-<n>.png`. List what differs: silhouette, proportions, colour, gloss, wear. Fix and repeat. A part is `modelled` only after a match image exists and its list has no silhouette or proportion problems left.
 9. **Check in the game.** Export, run the pipeline, and look at the part in the game at default zoom on a phone-sized viewport. The game's lighting is simpler than Cycles; a part that only looks right in Cycles is not done.
 
 Stop after five match rounds on one part, and report what still differs and why, rather than looping.
 
 ## Triangle allocation
 
-Total budget 60,000 (ADR 0006). The parts below add up to 50,000, keeping 10,000 spare for detail where the match loop shows it is needed.
+Total budget 60,000 (ADR 0014). The parts below add up to 50,000, keeping 10,000 spare for detail where the match loop shows it is needed.
 
 | Object | Triangles |
 | --- | --- |

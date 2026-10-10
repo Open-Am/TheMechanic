@@ -1,7 +1,7 @@
 ---
 id: 0014
 title: Performance budgets and realistic lighting
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: [0006]
 superseded_by: null
@@ -74,3 +74,4 @@ On acceptance: ADR 0006 becomes `superseded` with `superseded_by: 0014`, and ADR
 ## History
 
 - 2026-10-10: proposed by Claude, from the owner's instruction to "create a detailed ADR bringing that in, because we want that realism to make sense".
+- 2026-10-10: accepted by the owner, who wrote "I accept ADR 14". ADR 0006 is superseded and ADR 0002 limit 1 is narrowed.
