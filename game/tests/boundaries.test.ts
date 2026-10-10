@@ -42,7 +42,7 @@ function walk(dir: string): string[] {
 function layerOf(file: string): string | null {
   const rel = relative(src, file).split(sep);
   if (rel.length < 2) return null; // main.ts
-  if (rel[0] === "platform" && rel[1] === "interfaces.ts") return "platform/interfaces";
+  if (rel[0] === "platform" && (rel[1] === "interfaces" || rel[1] === "interfaces.ts")) return "platform/interfaces";
   return rel[0]!;
 }
 
@@ -74,7 +74,7 @@ function targetLayer(fromFile: string, spec: string): string | null {
   const abs = join(dirname(fromFile), spec);
   const rel = relative(src, abs).split(sep);
   if (rel[0] === "..") return "outside-src";
-  if (rel[0] === "platform" && rel[1] === "interfaces.ts") return "platform/interfaces";
+  if (rel[0] === "platform" && (rel[1] === "interfaces" || rel[1] === "interfaces.ts")) return "platform/interfaces";
   return rel[0]!;
 }
 
