@@ -29,7 +29,6 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 ## Owner decisions pending
 
 - Git LFS quota: ADR 0012 puts `.blend` files and textures in Git LFS. The storage and bandwidth allowance on the GitHub plan for `Open-Am/TheMechanic` is not checked.
-- Blender is not on PATH on the build machine (`C:\Program Files\Blender Foundation\Blender 4.5\blender.exe`). ADR 0012 reads it from `BLENDER`; the owner sets that variable or adds the folder to PATH.
 
 ## Raised during plan 0001
 
