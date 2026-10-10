@@ -6,3 +6,12 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 
 | ADR | Title | Status |
 | --- | --- | --- |
+| [0001](ADR-0001-scope-of-the-first-version.md) | Scope of the first version | accepted |
+| [0002](ADR-0002-stack-and-dependencies.md) | Stack and allowed dependencies | proposed |
+| [0003](ADR-0003-machine-and-fault-data-contracts.md) | Machine and fault data contracts | accepted |
+| [0004](ADR-0004-round-rules-scoring-and-action-log.md) | Round rules, scoring and the action log | accepted |
+| [0005](ADR-0005-daily-fault.md) | Daily fault | accepted |
+| [0006](ADR-0006-performance-budgets.md) | Performance budgets | accepted |
+| [0007](ADR-0007-player-mode-and-diagnostic-mode.md) | Player mode and diagnostic mode | accepted |
+| [0008](ADR-0008-part-motion-for-removal-animation.md) | Part motion field for removal and install animation | accepted |
+| [0009](ADR-0009-decision-and-documentation-process.md) | Decision and documentation process | accepted |
