@@ -1,7 +1,7 @@
 ---
 id: 0011
 title: Inspecting parts in place
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -36,3 +36,4 @@ The player can look before taking things apart, which rewards understanding the 
 ## History
 
 - 2026-10-10: proposed by Claude, from the owner's instruction "it depends if the part is visible, and only the visible part".
+- 2026-10-10: accepted by the owner, who wrote "adr 11 is approved".
