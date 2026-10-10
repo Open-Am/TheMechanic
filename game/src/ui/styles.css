@@ -148,8 +148,11 @@ button.pull {
 
 .chip {
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-height: 44px;
-  padding: 11px 13px;
+  padding: 5px 13px 5px 6px;
   font-size: 15px;
   border-radius: 999px;
   background: var(--surface);
@@ -157,6 +160,19 @@ button.pull {
   white-space: nowrap;
   touch-action: none;
   cursor: grab;
+}
+
+.chip img {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.06);
+  pointer-events: none;
+}
+
+.chip:not(:has(img)) {
+  padding-left: 13px;
 }
 
 .chip.lifted {

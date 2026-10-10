@@ -20,6 +20,7 @@ import { poseAt, resolveMotion, TIMING, type Pose } from "./motion.ts";
 import { fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart } from "./picking.ts";
 import { buildMachine, sizeHitVolumes, type PartView } from "./placeholders.ts";
+import { createThumbnailer } from "./thumbnails.ts";
 import { ease, Tweens } from "./tween.ts";
 
 /** Minimum finger target, CSS px (docs/design/interface.md). */
@@ -29,6 +30,8 @@ const DEFAULT_ORBIT = { azimuth: 0.55, polar: 1.12 };
 const BACKGROUND = "#1b1c1e";
 
 export interface RenderView {
+  /** A picture of one part as a data URL, for the tray. Null if it cannot be drawn. */
+  partImage(partId: PartId): string | null;
   dispose(): void;
 }
 
@@ -317,7 +320,10 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
   }
   frame = requestAnimationFrame(tick);
 
+  const partImage = createThumbnailer(renderer, view);
+
   return {
+    partImage,
     dispose() {
       cancelAnimationFrame(frame);
       observer.disconnect();

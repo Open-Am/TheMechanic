@@ -1,7 +1,7 @@
 ---
 id: 0003
 title: Phase 2, playable with placeholders
-status: approved
+status: done
 date: 2026-10-10
 adrs: [0001, 0002, 0003, 0004, 0007, 0008, 0010, 0011, 0014]
 branch: plan/0003-phase-2-playable
@@ -68,6 +68,7 @@ Done by a Haiku subagent on 2026-10-10. `game/src/main.ts` is empty; `platform/i
 8. **diagnostic.** `game/src/diagnostic/overlay.ts`: the last refusal reason, removable parts, fault and culprit, the live log, frame rate. Development builds only.
 9. **Budget script.** `tools/build/size.mjs` and the root `size` script.
 10. **Release note.** `docs/releases/0.2.0.md`.
+11. **Part images in the tray.** Added on 2026-10-10 after the owner tried the phone build: "Lets try to keep the image of the part in the tray too". Each tray chip shows a small rendered picture of its part beside the name. `render` draws each part alone into a small offscreen target once and caches it; `main.ts` hands that function to `ui`, so `ui` still never imports `render` (ADR 0010). The same code will picture the real models in Phase 3.
 
 ## Done when
 

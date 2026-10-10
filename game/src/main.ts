@@ -43,14 +43,16 @@ async function start(): Promise<void> {
 
   const game = createGame({ ...data, clock: createClock(), audio: createAudio(), random: Math.random });
 
+  let view;
   try {
-    mountRender(stage, game);
+    view = mountRender(stage, game);
   } catch (e) {
     console.error(e);
     showCannotRun(root, "webgl");
     return;
   }
-  mountUi(ui, stage, game);
+  // ui gets the part pictures as a function; it never imports render (ADR 0010).
+  mountUi(ui, stage, game, { partImage: view.partImage });
 
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("diag")) {
     const { mountDiagnostic } = await import("./diagnostic/overlay.ts");

@@ -170,6 +170,11 @@ async function tapSelector(selector: string): Promise<void> {
 
 const idle = () => waitFor("animations to finish", () => evaluate<boolean>("!window.__openAmDevRender.busy()"));
 const diag = () => evaluate<string>(`document.querySelector('[data-marker="open-am-diagnostic-overlay"]')?.textContent ?? ""`);
+/** Share of opaque pixels in a tray chip picture: 0 means missing or blank. */
+const chipPictureFill = (id: string) =>
+  evaluate<number>(
+    `(() => { const img = document.querySelector(${JSON.stringify(`.tray [data-part="${id}"] img`)}); if (!img || !img.naturalWidth) return 0; const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight; const x = c.getContext("2d"); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 200) n++; return n / (d.length / 4); })()`,
+  );
 const trayHas = (id: string) => evaluate<boolean>(`!!document.querySelector('.tray [data-part="${id}"]')`);
 
 async function pullOff(id: string): Promise<void> {
@@ -220,6 +225,8 @@ for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round+
   try {
     for (const id of order) {
       await pullOff(id);
+      const fill = await chipPictureFill(id);
+      if (fill < 0.03) throw new Error(`tray picture for ${id} is missing or blank (${(fill * 100).toFixed(1)}% opaque)`);
       if (!shots.has("working")) {
         shots.add("working");
         await idle();

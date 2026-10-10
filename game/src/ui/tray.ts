@@ -15,14 +15,25 @@ export interface Tray {
 }
 
 /** `overMachine(x, y)` says whether a release point is over the machine rather than the controls. */
-export function createTray(host: HTMLElement, game: Game, card: Card, overMachine: (x: number, y: number) => boolean): Tray {
+/** `partImage` returns a picture of a part for its chip, or null to show the name alone. */
+export function createTray(
+  host: HTMLElement,
+  game: Game,
+  card: Card,
+  overMachine: (x: number, y: number) => boolean,
+  partImage: (partId: PartId) => string | null,
+): Tray {
   const list = el("ul", { class: "tray", "aria-label": "Tray" });
   const empty = el("p", { class: "tray-empty", text: STRINGS.trayEmpty });
   host.append(list, empty);
 
   function chip(partId: PartId): HTMLElement {
     const name = game.machine.parts.find((p) => p.id === partId)?.name ?? partId;
-    const li = el("li", { class: "chip", role: "button", tabindex: "0", "data-part": partId, text: name });
+    const picture = () => {
+      const src = partImage(partId);
+      return src ? el("img", { src, alt: "", width: "32", height: "32", draggable: "false" }) : null;
+    };
+    const li = el("li", { class: "chip", role: "button", tabindex: "0", "data-part": partId }, picture(), el("span", { text: name }));
     let start: { x: number; y: number; id: number } | null = null;
     let ghost: HTMLElement | null = null;
 
@@ -33,7 +44,7 @@ export function createTray(host: HTMLElement, game: Game, card: Card, overMachin
     li.addEventListener("pointermove", (e) => {
       if (!start || e.pointerId !== start.id) return;
       if (!ghost && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= TAP_SLOP) {
-        ghost = el("div", { class: "chip ghost", text: name });
+        ghost = el("div", { class: "chip ghost" }, picture(), el("span", { text: name }));
         document.body.appendChild(ghost);
         li.classList.add("lifted");
       }

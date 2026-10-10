@@ -14,7 +14,12 @@ import "./styles.css";
 /** How long the failed-pull banner shows, ms (docs/design/animation.md). */
 const BANNER_MS = 3000;
 
-export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game): void {
+export interface UiOptions {
+  /** A picture of a part for its tray chip, or null. Supplied by main.ts. */
+  partImage?: (partId: string) => string | null;
+}
+
+export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, options: UiOptions = {}): void {
   const timer = el("div", { class: "timer", "aria-live": "off", text: "0:00" });
   const banner = el("div", { class: "banner", role: "status", hidden: "" });
   const pull = el("button", { class: "pull", type: "button", text: STRINGS.pullCord });
@@ -29,7 +34,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game): void
     const hit = document.elementFromPoint(x, y);
     return hit !== null && stage.contains(hit);
   };
-  const tray = createTray(trayHost, game, card, overMachine);
+  const tray = createTray(trayHost, game, card, overMachine, options.partImage ?? (() => null));
 
   let symptomText = "";
   let bannerTimer: ReturnType<typeof setTimeout> | null = null;
