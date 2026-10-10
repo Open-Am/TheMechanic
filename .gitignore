@@ -7,3 +7,5 @@ assets/*/reference/
 assets/*/export/*.glb
 *.blend1
 *.blend2
+__pycache__/
+*.pyc
