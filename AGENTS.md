@@ -88,6 +88,8 @@ Accounts, backend, leaderboards, community-submitted content, moderation, money,
 | `npm run verify:phone` | Plays every fault in headless Edge or Chrome at phone size with real gestures; screenshots, console errors, frame rate. `-- --out <dir>` for screenshots. |
 | `npm run assets` | Blender to validated GLB. (From Phase 3.) |
 
+Tools (ADR 0012): Node 24 (`.node-version`), Blender 4.5 LTS, Git LFS for `.blend` files and texture sources under `assets/`. Blender scripts find Blender through the `BLENDER` environment variable (the full path to the executable), then `blender` on PATH, and stop if neither works. On the build machine it is `C:\Program Files\Blender Foundation\Blender 4.5\blender.exe`.
+
 ## Writing conventions
 
 - Documents are plain Markdown, short sentences, no decoration. Say what is uncertain.

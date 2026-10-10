@@ -3,8 +3,6 @@
 
 import {
   Color,
-  DirectionalLight,
-  HemisphereLight,
   PerspectiveCamera,
   Quaternion,
   Raycaster,
@@ -21,6 +19,8 @@ import { fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits, t
 import { firstPart } from "./picking.ts";
 import { buildMachine, sizeHitVolumes, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
+import { createGround } from "./ground.ts";
+import { createLighting } from "./lighting.ts";
 import { ease, Tweens } from "./tween.ts";
 
 /** Minimum finger target, CSS px (docs/design/interface.md). */
@@ -48,10 +48,13 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
 
   const scene = new Scene();
   scene.background = new Color(BACKGROUND);
-  scene.add(new HemisphereLight(0xfff4e0, 0x2a2622, 1.6));
-  const sun = new DirectionalLight(0xffffff, 2.4);
-  sun.position.set(0.6, 1.4, 1.0);
-  scene.add(sun);
+  // ADR 0014. In development, ?lighting=fallback forces the simple rig to check it still works.
+  const forced = import.meta.env.DEV ? new URLSearchParams(location.search).get("lighting") : null;
+  const lighting = createLighting(renderer, forced);
+  lighting.addTo(scene);
+  // Diagnostic mode reads this; it may not import render (ADR 0010).
+  document.documentElement.dataset.lighting = lighting.rig;
+  scene.add(createGround(machine.size));
 
   const view = buildMachine(machine);
   scene.add(view.root);
@@ -320,7 +323,7 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
   }
   frame = requestAnimationFrame(tick);
 
-  const partImage = createThumbnailer(renderer, view);
+  const partImage = createThumbnailer(renderer, view, lighting);
 
   return {
     partImage,
@@ -333,6 +336,7 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onUp);
       el.removeEventListener("wheel", onWheel);
+      lighting.dispose();
       renderer.dispose();
       el.remove();
     },

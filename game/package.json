@@ -14,7 +14,7 @@
   },
   "type": "module",
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^24.19.2",
     "@types/three": "^0.186.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
@@ -23,5 +23,8 @@
   "private": true,
   "dependencies": {
     "three": "^0.186.1"
+  },
+  "engines": {
+    "node": ">=24 <25"
   }
 }

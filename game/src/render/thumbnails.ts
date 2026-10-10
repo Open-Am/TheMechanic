@@ -1,8 +1,11 @@
 // Pictures of single parts for the tray chips (plan 0003 step 11). Each part is drawn alone into a small offscreen
 // target once, read back, and cached as a data URL. ui receives this through main.ts, never by importing render.
+// Offscreen targets get no tone mapping or sRGB encoding from Three.js, so encodePicture applies the scene's own.
 
-import { DirectionalLight, HemisphereLight, Mesh, PerspectiveCamera, SRGBColorSpace, Scene, Vector3, WebGLRenderTarget, type WebGLRenderer } from "three";
+import { DataUtils, HalfFloatType, Mesh, PerspectiveCamera, Scene, UnsignedByteType, Vector3, WebGLRenderTarget, type WebGLRenderer } from "three";
 import type { PartId } from "../core/index.ts";
+import { encodePicture } from "./colour.ts";
+import { LIGHTING, type Lighting } from "./lighting.ts";
 import { fitDistance, position } from "./orbit.ts";
 import type { MachineView } from "./placeholders.ts";
 
@@ -12,14 +15,14 @@ const FOV_DEG = 30;
 /** The same three-quarter view as the main camera, so a part looks in the tray as it did on the machine. */
 const VIEW = { azimuth: 0.55, polar: 1.12 };
 
-export function createThumbnailer(renderer: WebGLRenderer, view: MachineView): (partId: PartId) => string | null {
+/** Pictures are lit by the same rig as the scene, so a part looks the same in the tray as on the machine. */
+export function createThumbnailer(renderer: WebGLRenderer, view: MachineView, lighting: Lighting): (partId: PartId) => string | null {
   const cache = new Map<PartId, string | null>();
   const scene = new Scene();
-  scene.add(new HemisphereLight(0xfff4e0, 0x2a2622, 1.6));
-  const sun = new DirectionalLight(0xffffff, 2.4);
-  sun.position.set(0.6, 1.4, 1.0);
-  scene.add(sun);
+  lighting.addTo(scene);
   const camera = new PerspectiveCamera(FOV_DEG, 1, 0.001, 10);
+  // Half float keeps dark tones smooth before tone mapping; the fallback rig means half float may be missing.
+  const halfFloat = lighting.rig === "ibl";
 
   function draw(partId: PartId): string | null {
     const pv = view.parts.get(partId);
@@ -42,17 +45,17 @@ export function createThumbnailer(renderer: WebGLRenderer, view: MachineView): (
     camera.updateProjectionMatrix();
     camera.lookAt(new Vector3(...c));
 
-    const target = new WebGLRenderTarget(THUMB_PX, THUMB_PX, { samples: 4 });
-    target.texture.colorSpace = SRGBColorSpace; // so the picture is encoded like the canvas, not left linear
+    const target = new WebGLRenderTarget(THUMB_PX, THUMB_PX, { samples: 4, type: halfFloat ? HalfFloatType : UnsignedByteType });
     const previousTarget = renderer.getRenderTarget();
     const previousAlpha = renderer.getClearAlpha();
-    const pixels = new Uint8Array(THUMB_PX * THUMB_PX * 4);
+    const count = THUMB_PX * THUMB_PX * 4;
+    const raw = halfFloat ? new Uint16Array(count) : new Uint8Array(count);
     try {
       renderer.setRenderTarget(target);
       renderer.setClearAlpha(0);
       renderer.clear();
       renderer.render(scene, camera);
-      renderer.readRenderTargetPixels(target, 0, 0, THUMB_PX, THUMB_PX, pixels);
+      renderer.readRenderTargetPixels(target, 0, 0, THUMB_PX, THUMB_PX, raw);
     } finally {
       renderer.setRenderTarget(previousTarget);
       renderer.setClearAlpha(previousAlpha);
@@ -61,14 +64,16 @@ export function createThumbnailer(renderer: WebGLRenderer, view: MachineView): (
       target.dispose();
     }
 
-    // WebGL rows run bottom to top; images run top to bottom.
+    const linear = new Float32Array(count);
+    if (halfFloat) for (let i = 0; i < count; i++) linear[i] = DataUtils.fromHalfFloat(raw[i]!);
+    else for (let i = 0; i < count; i++) linear[i] = raw[i]! / 255;
+
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = THUMB_PX;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     const image = ctx.createImageData(THUMB_PX, THUMB_PX);
-    const row = THUMB_PX * 4;
-    for (let y = 0; y < THUMB_PX; y++) image.data.set(pixels.subarray((THUMB_PX - 1 - y) * row, (THUMB_PX - y) * row), y * row);
+    image.data.set(encodePicture(linear, THUMB_PX, THUMB_PX, LIGHTING.exposure));
     ctx.putImageData(image, 0, 0);
     return canvas.toDataURL("image/png");
   }

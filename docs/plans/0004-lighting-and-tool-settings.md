@@ -1,7 +1,7 @@
 ---
 id: 0004
 title: Realistic lighting, first stage, and tool settings
-status: approved
+status: done
 date: 2026-10-10
 adrs: [0010, 0012, 0014]
 branch: plan/0004-lighting-and-tool-settings

@@ -1,7 +1,7 @@
 // Browser check for plan 0003: plays every fault in a Chromium browser at phone size, using real pointer gestures.
 // No dependencies: drives Edge or Chrome over the DevTools protocol with Node's own fetch and WebSocket.
 //
-//   node tools/verify/phone-play.ts [--out <dir>] [--browser <path>]
+//   node tools/verify/phone-play.ts [--out <dir>] [--browser <path>] [--lighting fallback]
 //
 // Starts the Vite dev server, opens the game with ?diag, pulls each part along its path, fixes the culprit, drags the
 // chips back, pulls the cord, and repeats with "Next customer" until all six faults are solved. Saves screenshots,
@@ -76,7 +76,8 @@ const vite = spawn(process.execPath, [join(root, "game", "node_modules", "vite",
   stdio: "ignore",
 });
 children.push(vite);
-const url = `http://localhost:${PORT}/?diag`;
+const lightingArg = arg("--lighting");
+const url = `http://localhost:${PORT}/?diag${lightingArg ? `&lighting=${encodeURIComponent(lightingArg)}` : ""}`;
 await waitFor("the dev server", async () => (await fetch(`http://localhost:${PORT}/`)).ok, 30000);
 
 const profile = mkdtempSync(join(tmpdir(), "open-am-browser-"));

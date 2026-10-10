@@ -6,6 +6,8 @@ import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, sizeHitVolumes } from "../src/render/placeholders.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { Vector3 } from "three";
+import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
+import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
 import { loadMachine } from "./helpers.ts";
 
@@ -263,5 +265,59 @@ describe("placeholders", () => {
     expect(firstPart(hits, ids, () => true)).toBe("plug_cap");
     expect(firstPart(hits, ids, (id) => id !== "plug_cap")).toBe("spark_plug");
     expect(firstPart(hits, ids, () => false)).toBeNull();
+  });
+});
+
+describe("lighting (ADR 0014)", () => {
+  it("uses image-based lighting when the GPU can build it, and falls back when not", () => {
+    expect(chooseRig({ halfFloatTargets: true })).toBe("ibl");
+    expect(chooseRig({ halfFloatTargets: false })).toBe("fallback");
+  });
+
+  it("a development override wins either way; anything else is ignored", () => {
+    expect(chooseRig({ halfFloatTargets: true, forced: "fallback" })).toBe("fallback");
+    expect(chooseRig({ halfFloatTargets: false, forced: "ibl" })).toBe("ibl");
+    expect(chooseRig({ halfFloatTargets: true, forced: "disco" })).toBe("ibl");
+    expect(chooseRig({ halfFloatTargets: true, forced: null })).toBe("ibl");
+  });
+
+  it("keeps one key light coming from above, and positive intensities", () => {
+    expect(LIGHTING.key.direction[1]).toBeGreaterThan(0);
+    for (const v of [LIGHTING.exposure, LIGHTING.environmentIntensity, LIGHTING.key.intensity, LIGHTING.fallback.hemisphere, LIGHTING.fallback.key]) expect(v).toBeGreaterThan(0);
+  });
+});
+
+describe("colour for tray pictures", () => {
+  it("PBR Neutral leaves black black, keeps mid tones nearly as they are, and never exceeds 1", () => {
+    expect(neutralToneMap(0, 0, 0)).toEqual([0, 0, 0]);
+    const [r] = neutralToneMap(0.5, 0.5, 0.5);
+    expect(r).toBeCloseTo(0.46, 2);
+    for (const v of [0.9, 2, 10, 1000]) for (const c of neutralToneMap(v, v * 0.5, 0.1)) expect(c).toBeLessThanOrEqual(1);
+  });
+
+  it("is monotonic for grey", () => {
+    let last = -1;
+    for (let v = 0; v <= 4; v += 0.05) {
+      const [g] = neutralToneMap(v, v, v);
+      expect(g).toBeGreaterThanOrEqual(last);
+      last = g;
+    }
+  });
+
+  it("sRGB encoding matches the standard at its anchor points and clamps", () => {
+    expect(linearToSrgb(0)).toBe(0);
+    expect(linearToSrgb(1)).toBeCloseTo(1, 9);
+    expect(linearToSrgb(0.214)).toBeCloseTo(0.5, 2);
+    expect(linearToSrgb(-1)).toBe(0);
+    expect(linearToSrgb(5)).toBeCloseTo(1, 9);
+  });
+
+  it("flips rows, un-premultiplies, and leaves empty pixels transparent", () => {
+    // 1 x 2 picture: bottom row (first in WebGL order) half-covered grey, top row empty.
+    const linear = [0.25, 0.25, 0.25, 0.5, 0, 0, 0, 0];
+    const out = encodePicture(linear, 1, 2, 1);
+    expect([...out.slice(0, 4)]).toEqual([0, 0, 0, 0]);
+    const grey = Math.round(linearToSrgb(neutralToneMap(0.5, 0.5, 0.5)[0]) * 255);
+    expect([...out.slice(4, 8)]).toEqual([grey, grey, grey, 128]);
   });
 });

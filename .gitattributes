@@ -3,3 +3,10 @@
 *.blend binary
 *.png binary
 *.jpg binary
+
+# Git LFS for Blender sources and texture sources (ADR 0012). The shipped GLB in game/public stays in plain git.
+assets/**/*.blend filter=lfs diff=lfs merge=lfs -text
+assets/**/*.png filter=lfs diff=lfs merge=lfs -text
+assets/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+assets/**/*.exr filter=lfs diff=lfs merge=lfs -text
+assets/**/*.tif filter=lfs diff=lfs merge=lfs -text
