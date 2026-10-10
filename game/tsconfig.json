@@ -17,5 +17,5 @@
     "noEmit": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "tests", "../tools/play", "../tools/verify"]
+  "include": ["src", "tests", "../tools/play", "../tools/verify", "../tools/pipeline"]
 }

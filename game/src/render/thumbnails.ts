@@ -2,7 +2,7 @@
 // target once, read back, and cached as a data URL. ui receives this through main.ts, never by importing render.
 // Offscreen targets get no tone mapping or sRGB encoding from Three.js, so encodePicture applies the scene's own.
 
-import { DataUtils, HalfFloatType, Mesh, PerspectiveCamera, Scene, UnsignedByteType, Vector3, WebGLRenderTarget, type WebGLRenderer } from "three";
+import { Box3, DataUtils, HalfFloatType, PerspectiveCamera, Scene, Sphere, UnsignedByteType, Vector3, WebGLRenderTarget, type Material, type Mesh, type WebGLRenderer } from "three";
 import type { PartId } from "../core/index.ts";
 import { encodePicture } from "./colour.ts";
 import { LIGHTING, type Lighting } from "./lighting.ts";
@@ -28,15 +28,26 @@ export function createThumbnailer(renderer: WebGLRenderer, view: MachineView, li
     const pv = view.parts.get(partId);
     if (!pv || typeof document === "undefined") return null;
 
-    // A copy of the visible mesh with a fresh material, so a part fading out mid-animation is still drawn solid.
-    const material = pv.mesh.material.clone();
-    material.transparent = false;
-    material.opacity = 1;
-    const mesh = new Mesh(pv.mesh.geometry, material);
+    // A copy of the visible part with fresh materials, so a part fading out mid-animation is still drawn solid.
+    const mesh = pv.visual.clone(true);
+    mesh.position.set(0, 0, 0);
+    mesh.scale.setScalar(1);
+    const materials: Material[] = [];
+    mesh.traverse((o) => {
+      const m = o as Mesh;
+      if (!m.isMesh) return;
+      const solid = (x: Material) => {
+        const c = x.clone();
+        c.transparent = false;
+        c.opacity = 1;
+        materials.push(c);
+        return c;
+      };
+      m.material = Array.isArray(m.material) ? m.material.map(solid) : solid(m.material);
+    });
     scene.add(mesh);
-
-    pv.mesh.geometry.computeBoundingSphere();
-    const sphere = pv.mesh.geometry.boundingSphere!;
+    mesh.updateMatrixWorld(true);
+    const sphere = new Box3().setFromObject(mesh).getBoundingSphere(new Sphere());
     const distance = fitDistance(sphere.radius, (FOV_DEG * Math.PI) / 180, 1, 1.08);
     const c: [number, number, number] = [sphere.center.x, sphere.center.y, sphere.center.z];
     camera.position.set(...position({ ...VIEW, distance }, c));
@@ -60,7 +71,7 @@ export function createThumbnailer(renderer: WebGLRenderer, view: MachineView, li
       renderer.setRenderTarget(previousTarget);
       renderer.setClearAlpha(previousAlpha);
       scene.remove(mesh);
-      material.dispose();
+      for (const m of materials) m.dispose();
       target.dispose();
     }
 

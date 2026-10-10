@@ -22,6 +22,9 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 
 - Capacitor look: a round cream cylinder (Nigerian video) or a black CBB61 box (listing). The placeholder is cream for now; the mechanic or a photo decides.
 - There is no tube frame. `base_frame` will be modelled as the die-cast base, rubber mounts and body shell. Its ID stays as it is (data contract).
+- Fuel tap position: not seen clearly in any photo. Plan 0005 puts it under the tank's left front corner with the lever facing left, and runs the hose down the left side into the filter compartment, so both can be seen and pulled. A photo of a real machine settles it.
+- Front panel variants: the Tiger TG950 has a full-width panel (round socket, warning label, switch, choke); other clones have a narrower panel with a blue Schuko socket and a meter, and the alternator further forward. The model follows the Tiger.
+- Spark plug angle: the plug leans up and back out of the head (Lagos back-view photo). The data's `motion.axis` can only be x, y or z, so the unscrew turns about y, which is close but not exact.
 
 ## Owner decisions pending
 

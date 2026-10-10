@@ -1,7 +1,7 @@
 ---
 id: 0005
 title: Phase 3a, the asset pipeline and a blocked-out model
-status: approved
+status: done
 date: 2026-10-10
 adrs: [0002, 0003, 0010, 0012, 0013, 0014]
 branch: plan/0005-asset-pipeline

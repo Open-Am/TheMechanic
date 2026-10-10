@@ -1,0 +1,29 @@
+{
+  "_source": "ADR 0014 budgets and the triangle allocation in docs/design/modelling-brief.md. Read by tools/blender/common.py and tools/pipeline/check.ts.",
+  "glbBytes": 5000000,
+  "glbAimBytes": 3000000,
+  "triangles": 60000,
+  "texturePx": 1024,
+  "atlasPx": 2048,
+  "atlasCount": 1,
+  "environmentBytes": 400000,
+  "groundBytes": 64000,
+  "allocation": {
+    "fuel_tank": 5000,
+    "recoil_starter": 4500,
+    "muffler": 4000,
+    "alternator_cover": 3500,
+    "carburetor": 4500,
+    "air_filter_cover": 1800,
+    "air_filter": 1200,
+    "fuel_tap": 1500,
+    "fuel_hose": 800,
+    "plug_cap": 1000,
+    "spark_plug": 1400,
+    "capacitor": 800,
+    "base_frame": 6000,
+    "base_engine": 9000,
+    "base_alternator": 3000,
+    "base_panel": 2000
+  }
+}

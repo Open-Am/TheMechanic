@@ -54,3 +54,4 @@ Work this creates, for a plan: add `engines` and `.node-version`, change `@types
 
 - 2026-10-10: proposed by Claude, after the owner asked for Blender to be installed and for this ADR to be written.
 - 2026-10-10: accepted by the owner, who wrote "I accept adr 12".
+- 2026-10-10: plan 0005 installed `@gltf-transform/cli` 4.5.0, pinned exactly: the newest release at least two weeks old that day (4.5.1 was newer). The Meshopt decoder comes from the `three` package, so `meshoptimizer` was not added.

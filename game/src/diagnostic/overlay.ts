@@ -47,7 +47,7 @@ export function mountDiagnostic(root: HTMLElement, game: Game): void {
       : "none";
     const log = game.log.map((a) => `${(a.t / 1000).toFixed(1)}s ${a.type} ${a.partId ?? ""}`).join("\n  ");
     panel.textContent = [
-      `fps ${fps}  lighting ${document.documentElement.dataset.lighting ?? "-"}`,
+      `fps ${fps}  lighting ${document.documentElement.dataset.lighting ?? "-"}  model ${document.documentElement.dataset.model ?? "-"}`,
       `fault ${game.faultId ?? "-"}  culprit ${game.culprit ?? "-"}  fixed ${s.fixed}`,
       `last refusal: ${refusal}`,
       `removable: ${removableNow(game.machine, s).join(", ") || "-"}`,

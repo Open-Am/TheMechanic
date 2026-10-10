@@ -5,6 +5,7 @@ import { createGame } from "./app/round.ts";
 import { validateAll, type FaultFile, type Machine } from "./core/index.ts";
 import { createAudio } from "./platform/local/audio.ts";
 import { createClock } from "./platform/local/clock.ts";
+import { loadRenderAssets } from "./render/model.ts";
 import { mountRender } from "./render/view.ts";
 import { mountUi, showCannotRun } from "./ui/index.ts";
 
@@ -43,9 +44,11 @@ async function start(): Promise<void> {
 
   const game = createGame({ ...data, clock: createClock(), audio: createAudio(), random: Math.random });
 
+  // The model, its ground shadow and the environment come with the machine folder; nothing is fetched later (ADR 0010).
+  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`);
   let view;
   try {
-    view = mountRender(stage, game);
+    view = mountRender(stage, game, assets);
   } catch (e) {
     console.error(e);
     showCannotRun(root, "webgl");

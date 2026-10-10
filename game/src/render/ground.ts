@@ -1,5 +1,6 @@
 // The ground under the machine (ADR 0014): a dark surface that fades at its edges, with a soft contact shadow.
-// This shadow is drawn in code from the machine's footprint as a stand-in; Phase 3 replaces it with one baked in Blender.
+// The shadow is the one baked in Blender (tools/blender/bake_ground.py) when it loaded; otherwise it is drawn from the
+// machine's footprint. The baked image spans the same 3x area as this plane.
 
 import { CanvasTexture, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace } from "three";
 import type { Vec3 } from "../core/index.ts";
@@ -12,7 +13,7 @@ const SPAN = 3;
 /** Shadow strength in the middle, and how far it spreads past the footprint, as a share of the footprint. */
 export const GROUND = { shadowAlpha: 0.62, spread: 0.18, floorAlpha: 0.07 } as const;
 
-export function createGround(size: Vec3): Mesh {
+export function createGround(size: Vec3, baked: CanvasImageSource | null = null): Mesh {
   const span = Math.max(size[0], size[2]) * SPAN;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = PX;
@@ -26,13 +27,17 @@ export function createGround(size: Vec3): Mesh {
   ctx.fillStyle = floor;
   ctx.fillRect(0, 0, PX, PX);
 
-  // The contact shadow: the footprint, blurred.
-  const w = (size[0] / span) * PX;
-  const d = (size[2] / span) * PX;
-  ctx.filter = `blur(${Math.round(Math.max(w, d) * GROUND.spread)}px)`;
-  ctx.fillStyle = `rgba(0, 0, 0, ${GROUND.shadowAlpha})`;
-  ctx.fillRect(c - w / 2, c - d / 2, w, d);
-  ctx.filter = "none";
+  if (baked) {
+    ctx.drawImage(baked, 0, 0, PX, PX);
+  } else {
+    // The contact shadow: the footprint, blurred.
+    const w = (size[0] / span) * PX;
+    const d = (size[2] / span) * PX;
+    ctx.filter = `blur(${Math.round(Math.max(w, d) * GROUND.spread)}px)`;
+    ctx.fillStyle = `rgba(0, 0, 0, ${GROUND.shadowAlpha})`;
+    ctx.fillRect(c - w / 2, c - d / 2, w, d);
+    ctx.filter = "none";
+  }
 
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
