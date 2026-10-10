@@ -11,10 +11,12 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0003](ADR-0003-machine-and-fault-data-contracts.md) | Machine and fault data contracts | accepted |
 | [0004](ADR-0004-round-rules-scoring-and-action-log.md) | Round rules, scoring and the action log | accepted |
 | [0005](ADR-0005-daily-fault.md) | Daily fault | accepted |
-| [0006](ADR-0006-performance-budgets.md) | Performance budgets | accepted |
+| [0006](ADR-0006-performance-budgets.md) | Performance budgets | superseded (superseded by 0014) |
 | [0007](ADR-0007-player-mode-and-diagnostic-mode.md) | Player mode and diagnostic mode | accepted |
 | [0008](ADR-0008-part-motion-for-removal-animation.md) | Part motion field for removal and install animation | accepted |
 | [0009](ADR-0009-decision-and-documentation-process.md) | Decision and documentation process | accepted |
 | [0010](ADR-0010-module-layout-and-boundaries.md) | Module layout and boundaries | accepted |
 | [0011](ADR-0011-inspecting-parts-in-place.md) | Inspecting parts in place | accepted |
 | [0012](ADR-0012-tool-versions-and-asset-storage.md) | Tool versions, finding Blender, and storing asset files | accepted |
+| [0013](ADR-0013-visual-target-and-how-models-are-made.md) | Visual target and how the models are made | accepted |
+| [0014](ADR-0014-performance-budgets-and-realistic-lighting.md) | Performance budgets and realistic lighting | accepted |

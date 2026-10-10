@@ -67,7 +67,7 @@ Unit tests are part of every piece of work, written while the code is written. A
 - Do not change a field name or an ID in the data contracts without an ADR.
 - The machine content is an unverified draft. Do not "correct" it from your own knowledge. Add doubts to `docs/open-questions.md`.
 - Player mode gives no hint and no feedback when a blocked part is tapped. Diagnostic mode is internal and compiled out of production builds. See ADR 0007.
-- Keep within the performance budgets in ADR 0006.
+- Keep within the performance budgets in ADR 0014.
 
 ## Do not build these
 
