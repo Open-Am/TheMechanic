@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const blend = join(root, "assets", "gen950", "blend", "gen950.blend");
-const blender = (script) => [join(root, "tools", "run-blender.mjs"), join(root, "tools", "blender", script), "--blend", blend];
+const handBlend = join(root, "assets", "hand", "blend", "hand.blend");
+const blender = (script, file = blend, ...args) => [join(root, "tools", "run-blender.mjs"), join(root, "tools", "blender", script), "--blend", file, ...(args.length ? ["--", ...args] : [])];
+const handGlb = join(root, "assets", "hand", "export", "hand.glb");
+const handOpt = join(root, "assets", "hand", "export", "hand.optimised.glb");
 
 const steps = [
   ["Validate the model", blender("validate.py")],
@@ -15,6 +18,9 @@ const steps = [
   ["Bake the ground shadow", blender("bake_ground.py")],
   ["Optimise", [join(root, "tools", "pipeline", "optimise.mjs")]],
   ["Check and copy into the game", [join(root, "tools", "pipeline", "check.ts")]],
+  ["Validate and export the hand", blender("hand.py", handBlend, "export")],
+  ["Optimise the hand", [join(root, "tools", "pipeline", "optimise.mjs"), handGlb, handOpt]],
+  ["Check and copy the hand", [join(root, "tools", "pipeline", "check.ts"), "--hand"]],
 ];
 
 for (const [label, args] of steps) {

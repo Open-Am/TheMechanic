@@ -11,6 +11,17 @@ Design note for Phase 2 (plan 0003). The motion vocabulary itself is ADR 0008.
 
 Install is the same in reverse: the part fades in near the bottom of the screen, flies to its exploded position, then plays its motion backwards into place.
 
+## The mechanic's hand (plan 0008)
+
+On an accepted removal the hand reaches in before the part moves, closes its grip, rides along with the part's motion, then opens and pulls back as the part drifts to the tray. On a put-back it brings the part in already gripping, pushes it home, then lets go and pulls back. It comes in from the side the part comes off (its explode direction), leaning towards the camera, so it reaches around the machine rather than through it. A blocked pull shows no hand (ADR 0007). The numbers live in `game/src/render/handpose.ts`.
+
+| Hand | Target |
+| --- | --- |
+| Reach and grip, before the part moves | 0.18 s; the grip closes over the last 40 percent |
+| Release | 0.12 s |
+| Withdraw | 0.25 s, back the way it came |
+| Start of the reach | 0.32 m from the part |
+
 Input is not blocked during an animation. The reducer has already accepted the action; the animation only shows it.
 
 ## Motion defaults

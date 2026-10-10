@@ -25,5 +25,11 @@
     "base_engine": 9000,
     "base_alternator": 3000,
     "base_panel": 2000
+  },
+  "hand": {
+    "_source": "ADR 0015: the hand with its animation",
+    "triangles": 4000,
+    "bytes": 400000,
+    "texturePx": 1024
   }
 }

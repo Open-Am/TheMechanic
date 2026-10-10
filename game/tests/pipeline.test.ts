@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { checkFileSize, checkModel, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { checkFileSize, checkHand, checkModel, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -185,5 +185,29 @@ describe("companion files", () => {
   it("the shipped environment map is within budget", () => {
     const bytes = readFileSync(join(root, "game", "public", "env", "workshop.hdr")).length;
     expect(checkFileSize("env", bytes, budgets.environmentBytes, true)).toEqual([]);
+  });
+});
+
+describe("the mechanic's hand (ADR 0015, plan 0008)", () => {
+  const handJson = (name: string, tris: number, morph: boolean) => ({
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ name, mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1, ...(morph ? { targets: [{ POSITION: 2 }] } : {}) }], ...(morph ? { extras: { targetNames: ["grip"] } } : {}) }],
+    accessors: [{ count: tris * 3 }, { count: tris * 3 }, { count: tris * 3 }],
+  });
+
+  it("the shipped hand passes: one node, a grip morph, within budget", () => {
+    const glb = readGlb(new Uint8Array(readFileSync(join(root, "game", "public", "hand", "hand.glb"))));
+    expect(checkHand(glb, budgets).errors).toEqual([]);
+  });
+
+  it("rejects a misnamed node, a missing grip morph, and too many triangles or bytes", () => {
+    expect(checkHand(readGlb(makeGlb(handJson("Hand.001", 100, true))), budgets).errors.join(" ")).toMatch(/mechanic_hand/);
+    expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, false))), budgets).errors.join(" ")).toMatch(/no "grip" morph/);
+    expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 4001, true))), budgets).errors.join(" ")).toMatch(/over its budget of 4000/);
+    const big = { ...readGlb(makeGlb(handJson("mechanic_hand", 100, true))), byteLength: 400_001 };
+    expect(checkHand(big, budgets).errors.join(" ")).toMatch(/over its 400 KB budget/);
+    expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true))), budgets).errors).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@
 //
 // The checks are pure functions, exported for game/tests/pipeline.test.ts.
 
-import { copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,13 +19,14 @@ export interface Budgets {
   environmentBytes: number;
   groundBytes: number;
   allocation: Record<string, number>;
+  hand: { triangles: number; bytes: number; texturePx: number };
 }
 
 interface GltfJson {
   scene?: number;
   scenes?: Array<{ nodes?: number[] }>;
   nodes?: Array<{ name?: string; mesh?: number; children?: number[] }>;
-  meshes?: Array<{ primitives: Array<{ mode?: number; indices?: number; attributes: Record<string, number> }> }>;
+  meshes?: Array<{ primitives: Array<{ mode?: number; indices?: number; attributes: Record<string, number>; targets?: unknown[] }>; extras?: { targetNames?: string[] } }>;
   accessors?: Array<{ count: number }>;
   images?: Array<{ bufferView?: number; mimeType?: string; uri?: string }>;
   textures?: Array<{ source?: number; extensions?: Record<string, { source?: number }> }>;
@@ -201,6 +202,29 @@ export function materialsUsingImages(json: GltfJson, images: ReadonlySet<number>
   return out;
 }
 
+/** The mechanic's hand (ADR 0015, plan 0008): one node named mechanic_hand with a "grip" morph, within its budget. */
+export function checkHand(glb: Glb, budgets: Budgets): CheckResult {
+  const errors: string[] = [];
+  const roots = rootNodes(glb.json);
+  if (roots.length !== 1 || roots[0]!.name !== "mechanic_hand") {
+    errors.push(`The hand must be one root node named "mechanic_hand"; found ${roots.map((r) => r.name || "(unnamed)").join(", ") || "none"}.`);
+  }
+  const triangles = roots.reduce((n, r) => n + nodeTriangles(glb.json, r.index), 0);
+  if (triangles > budgets.hand.triangles) errors.push(`The hand has ${triangles} triangles, over its budget of ${budgets.hand.triangles}.`);
+  if (glb.byteLength > budgets.hand.bytes) errors.push(`The hand is ${(glb.byteLength / 1000).toFixed(1)} KB, over its ${budgets.hand.bytes / 1000} KB budget.`);
+  const node = roots[0] ? glb.json.nodes?.[roots[0].index] : undefined;
+  const mesh = node?.mesh !== undefined ? glb.json.meshes?.[node.mesh] : undefined;
+  const hasTargets = mesh?.primitives.every((p) => Array.isArray(p.targets) && p.targets.length > 0) ?? false;
+  if (!hasTargets || !(mesh?.extras?.targetNames ?? []).includes("grip")) errors.push(`The hand has no "grip" morph target.`);
+  for (const [i, img] of (glb.json.images ?? []).entries()) {
+    const bv = img.bufferView !== undefined ? glb.json.bufferViews?.[img.bufferView] : undefined;
+    if (!bv || !glb.bin) continue;
+    const size = imageSize(glb.bin.subarray(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength));
+    if (size && Math.max(size.width, size.height) > budgets.hand.texturePx) errors.push(`Hand image ${i} is ${size.width} x ${size.height}, over ${budgets.hand.texturePx} px.`);
+  }
+  return { errors, warnings: [], triangles };
+}
+
 /** A companion file (environment, ground shadow) against its byte budget. */
 export function checkFileSize(label: string, bytes: number | null, budget: number, required: boolean): string[] {
   if (bytes === null) return required ? [`${label} is missing.`] : [];
@@ -209,9 +233,30 @@ export function checkFileSize(label: string, bytes: number | null, budget: numbe
 
 // ---- Command line ----
 
+function mainHand(root: string, argv: string[]): void {
+  const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "hand", "export", "hand.optimised.glb"));
+  const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
+  if (!existsSync(input)) {
+    console.error(`No hand at ${input}.`);
+    process.exit(1);
+  }
+  const glb = readGlb(new Uint8Array(readFileSync(input)));
+  const result = checkHand(glb, budgets);
+  for (const e of result.errors) console.log(`error: ${e}`);
+  console.log(`Checked ${input}: ${(glb.byteLength / 1000).toFixed(1)} KB, ${result.triangles} triangles, ${result.errors.length} error(s).`);
+  if (result.errors.length) process.exit(1);
+  if (!argv.includes("--no-copy")) {
+    const out = join(root, "game", "public", "hand");
+    mkdirSync(out, { recursive: true });
+    copyFileSync(input, join(out, "hand.glb"));
+    console.log(`Copied hand.glb to ${out}`);
+  }
+}
+
 function main(): void {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const argv = process.argv.slice(2);
+  if (argv.includes("--hand")) return mainHand(root, argv.filter((a) => a !== "--hand"));
   const copy = !argv.includes("--no-copy");
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "gen950", "export", "model.optimised.glb"));
   const groundIn = join(root, "assets", "gen950", "export", "ground.png");

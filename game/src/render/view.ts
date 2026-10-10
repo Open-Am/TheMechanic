@@ -17,6 +17,7 @@ import { classify, screenDirection, type GestureState, type ScreenDirection } fr
 import { poseAt, resolveMotion, TIMING, type Pose } from "./motion.ts";
 import { fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart } from "./picking.ts";
+import { createHandRig, type HandRig } from "./handrig.ts";
 import type { RenderAssets } from "./model.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
@@ -39,7 +40,7 @@ export interface RenderView {
 const AXES = { x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, 1) };
 
 /** Throws if WebGL is not available, so main can show the "cannot run" message. `assets` come from loadRenderAssets. */
-export function mountRender(container: HTMLElement, game: Game, assets: RenderAssets = { model: null, environment: null, ground: null }): RenderView {
+export function mountRender(container: HTMLElement, game: Game, assets: RenderAssets = { model: null, environment: null, ground: null, hand: null }): RenderView {
   const machine: Machine = game.machine;
   const renderer = new WebGLRenderer({ antialias: window.devicePixelRatio < 2, powerPreference: "low-power" });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio)); // ADR 0006
@@ -91,6 +92,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   // ---- Animation ----
 
   const tweens = new Tweens();
+  const hand: HandRig | null = assets.hand ? createHandRig(scene, camera, assets.hand, tweens) : null;
+
+  /** A part's centre and rough radius, for the hand to grip. */
+  function gripTarget(pv: PartView): { centre: Vector3; radius: number } {
+    return { centre: pv.group.position.clone(), radius: Math.max(...pv.size) / 2 };
+  }
   const tmpQ = new Quaternion();
 
   function applyPose(pv: PartView, pose: Pose): void {
@@ -128,13 +135,18 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const m = resolveMotion(part.motion);
     let from: Vector3 | null = null;
     let to: Vector3 | null = null;
+    // The hand reaches in and grips first, then rides along with the part's motion (plan 0008).
+    const g = gripTarget(pv);
+    const reach = hand ? [hand.reach(pv.group, g.centre, g.radius, new Vector3(...part.explode))] : [];
     tweens.play(
       id,
+      ...reach,
       { duration: m.duration, update: (p) => applyPose(pv, poseAt(m, part.explode, p)) },
       {
         duration: TIMING.drift,
         ease: ease.inOutCubic,
         update: (p) => {
+          if (from === null) hand?.release(); // let go as the part drifts to the tray
           from ??= pv.group.position.clone();
           to ??= trayPoint(from);
           pv.group.position.lerpVectors(from, to, p);
@@ -161,6 +173,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     applyPose(pv, out);
     pv.group.position.copy(start);
     setOpacity(pv, 0);
+    // The hand brings the part in from the tray and pushes it home (plan 0008).
+    if (hand) hand.holdAt(pv.group, start.clone(), Math.max(...pv.size) / 2, new Vector3(...part.explode));
     tweens.play(
       id,
       {
@@ -171,7 +185,14 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           setOpacity(pv, p);
         },
       },
-      { duration: m.duration, update: (p) => applyPose(pv, poseAt(m, part.explode, 1 - p)), done: () => reset(pv) },
+      {
+        duration: m.duration,
+        update: (p) => applyPose(pv, poseAt(m, part.explode, 1 - p)),
+        done: () => {
+          hand?.release();
+          reset(pv);
+        },
+      },
     );
   }
 
@@ -188,6 +209,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     game.events.on("removed", (e) => animateRemove(e.partId)),
     game.events.on("installed", (e) => animateInstall(e.partId)),
     game.events.on("started", () => {
+      hand?.hide();
       for (const pv of view.parts.values()) reset(pv);
       tweens.finish("camera");
       target.copy(center);
@@ -303,7 +325,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       }
       return null;
     };
-    (window as unknown as Record<string, unknown>).__openAmDevRender = { probe, busy: () => tweens.size > 0, marker: "open-am-dev-hook" };
+    (window as unknown as Record<string, unknown>).__openAmDevRender = { probe, busy: () => tweens.size > 0, handGripping: () => hand?.gripping ?? false, hasHand: () => hand !== null, marker: "open-am-dev-hook" };
   }
 
   // ---- Loop ----
