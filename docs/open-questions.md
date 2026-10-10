@@ -11,5 +11,8 @@ See the checklist at the end of `reference/generator-reference-pack.md`. Nothing
 - Blender is not installed on the build machine. Needed from Phase 3.
 - The Phase 2 done-criterion needs a real phone on the local network. The owner does the real check; agents test in emulation.
 - "Open Am" is a working title. It appears in share text and the page title.
-- Hidden in-game switch for diagnostic mode: ADR 0007 proposes a build flag only. The owner may want a hidden gesture as well.
-- Tap acknowledgement in player mode: ADR 0007 proposes a tiny uniform press on every tapped part. The owner may strike it.
+
+## Raised during plan 0001
+
+- `@types/node` (types only, development only) was added so tests type-check. ADR 0002 does not list it. Owner to accept into ADR 0002 by a history line, or ask for tests to be excluded from `tsc`.
+- Should a player be allowed to inspect a part that is still on the machine? The reducer refuses it, following the brief (inspection happens from the tray). A mechanic looks at parts in place too; this may deserve a design discussion before Phase 2.

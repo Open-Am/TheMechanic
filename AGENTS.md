@@ -69,6 +69,8 @@ Accounts, backend, leaderboards, community-submitted content, moderation, money,
 | `npm run dev` | Game dev server, reachable on the local network. (From Phase 1.) |
 | `npm test` | Core tests. (From Phase 1.) |
 | `npm run build` | Static production build. (From Phase 2.) |
+| `npm run play` | Text-mode player: solves every fault from an action log and prints the steps and score. |
+| `npm run typecheck` | TypeScript check of the game, its tests and the play script. |
 | `npm run assets` | Blender to validated GLB. (From Phase 3.) |
 
 ## Writing conventions

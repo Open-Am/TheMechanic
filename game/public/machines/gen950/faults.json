@@ -1,0 +1,66 @@
+{
+  "machine": "gen950",
+  "schema": 1,
+  "faults": [
+    {
+      "id": "fouled_plug",
+      "complaint": "E no gree start at all.",
+      "symptom": "no_start",
+      "culprit": "spark_plug",
+      "inspectBad": "Tip is black and oily. No spark can jump.",
+      "fix": "Clean the plug",
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "clogged_jet",
+      "complaint": "E go start, then e go off.",
+      "symptom": "starts_then_dies",
+      "culprit": "carburetor",
+      "inspectBad": "Sticky gum in the bowl. The jet is blocked.",
+      "fix": "Clean the bowl and jet",
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "blocked_fuel_tap",
+      "complaint": "E work small, then e quench like say fuel finish.",
+      "symptom": "starts_then_dies",
+      "culprit": "fuel_tap",
+      "inspectBad": "Strainer is packed with dirt. Fuel only drips.",
+      "fix": "Clean the strainer",
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "dead_capacitor",
+      "complaint": "Gen dey work but light no dey come.",
+      "symptom": "runs_no_output",
+      "culprit": "capacitor",
+      "inspectBad": "Case is swollen. It holds no charge.",
+      "fix": "Fit a new capacitor",
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "choked_muffler",
+      "complaint": "E no get power again; small load dey quench am.",
+      "symptom": "runs_weak",
+      "culprit": "muffler",
+      "inspectBad": "Outlet is caked with hard carbon.",
+      "fix": "Clear the carbon",
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "dirty_air_filter",
+      "complaint": "E dey smoke well well, e dey drink fuel.",
+      "symptom": "runs_weak",
+      "culprit": "air_filter",
+      "inspectBad": "Clogged with dust and oil. Air can barely pass.",
+      "fix": "Wash the filter",
+      "author": "core",
+      "verified": false
+    }
+  ]
+}
