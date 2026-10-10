@@ -1,7 +1,7 @@
 ---
 id: 0008
 title: The mechanic's hand
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0007, 0008, 0010, 0012, 0013, 0014, 0015]
 branch: plan/0008-mechanics-hand
@@ -12,6 +12,8 @@ branch: plan/0008-mechanics-hand
 ## Goal
 
 When a part comes off, the mechanic's hand reaches in from the bottom right of the screen, closes its grip on the part, carries it along its removal motion, and drops it into the tray. Putting a part back runs the same in reverse. A blocked pull shows no hand. The hand is a real-size 3D model of a Lagos mechanic's right hand and forearm, in a worn work-shirt sleeve, made in Blender by script, checked against reference photos of hands, and within the ADR 0015 budget.
+
+Approved by the owner on 2026-10-11, who wrote "I approve plan 0008".
 
 ## ADRs relied on
 
