@@ -5,9 +5,9 @@
   "verified": false,
   "size": [0.367, 0.375, 0.312],
   "base": [
-    { "id": "base_frame", "placeholder": { "shape": "box", "size": [0.36, 0.02, 0.30], "position": [0, 0.01, 0], "color": "#2b2b2b" } },
+    { "id": "base_frame", "placeholder": { "shape": "box", "size": [0.36, 0.02, 0.30], "position": [0, 0.01, 0], "color": "#1d1d1f" } },
     { "id": "base_engine", "placeholder": { "shape": "box", "size": [0.16, 0.18, 0.16], "position": [-0.08, 0.12, 0], "color": "#8a8f94" } },
-    { "id": "base_alternator", "placeholder": { "shape": "box", "size": [0.09, 0.16, 0.16], "position": [0.045, 0.11, 0], "color": "#6f7479" } },
+    { "id": "base_alternator", "placeholder": { "shape": "box", "size": [0.09, 0.16, 0.16], "position": [0.045, 0.11, 0], "color": "#a7a8aa" } },
     { "id": "base_panel", "placeholder": { "shape": "box", "size": [0.12, 0.08, 0.01], "position": [0.10, 0.15, 0.145], "color": "#1f1f1f" } }
   ],
   "parts": [
@@ -27,7 +27,7 @@
       "does": "Turns the fuel on and off. Its strainer catches dirt.",
       "requires": ["fuel_hose"],
       "inspectOk": "Strainer is clean. Fuel runs freely.",
-      "placeholder": { "shape": "box", "size": [0.03, 0.04, 0.03], "position": [-0.02, 0.225, 0.13], "color": "#b08d57" },
+      "placeholder": { "shape": "box", "size": [0.03, 0.04, 0.03], "position": [-0.02, 0.225, 0.13], "color": "#b9b8b2" },
       "explode": [0, 0, 0.10],
       "motion": { "type": "unscrew", "axis": "y", "turns": 1 }
     },
@@ -38,7 +38,7 @@
       "requires": ["fuel_tap"],
       "hiddenBy": [],
       "inspectOk": "Clean inside. Fuel smells fresh.",
-      "placeholder": { "shape": "box", "size": [0.34, 0.10, 0.28], "position": [0, 0.30, 0], "color": "#c0392b" },
+      "placeholder": { "shape": "box", "size": [0.34, 0.10, 0.28], "position": [0, 0.30, 0], "color": "#2456b4" },
       "explode": [0, 0.15, 0],
       "motion": { "type": "lift" }
     },
@@ -108,7 +108,7 @@
       "does": "Quiets the exhaust and lets the smoke out.",
       "requires": [],
       "inspectOk": "A thin layer of soot. Gas passes freely.",
-      "placeholder": { "shape": "box", "size": [0.10, 0.07, 0.05], "position": [-0.02, 0.09, -0.115], "color": "#5a5a5a" },
+      "placeholder": { "shape": "box", "size": [0.10, 0.07, 0.05], "position": [-0.02, 0.09, -0.115], "color": "#26262a" },
       "explode": [0, 0, -0.12],
       "motion": { "type": "unbolt", "axis": "z" }
     },
@@ -118,7 +118,7 @@
       "does": "Protects the electrical end of the generator.",
       "requires": [],
       "inspectOk": "Not cracked. Vents are clear.",
-      "placeholder": { "shape": "box", "size": [0.05, 0.16, 0.16], "position": [0.115, 0.11, 0], "color": "#2b2b2b" },
+      "placeholder": { "shape": "box", "size": [0.05, 0.16, 0.16], "position": [0.115, 0.11, 0], "color": "#b3b4b6" },
       "explode": [0.12, 0, 0],
       "motion": { "type": "unbolt", "axis": "x" }
     },
@@ -128,7 +128,7 @@
       "does": "Starts the generator's voltage and keeps it steady.",
       "requires": ["alternator_cover"],
       "inspectOk": "Case is flat and clean. Holding charge.",
-      "placeholder": { "shape": "box", "size": [0.03, 0.05, 0.03], "position": [0.105, 0.11, 0.03], "color": "#f2f2f2" },
+      "placeholder": { "shape": "box", "size": [0.03, 0.05, 0.03], "position": [0.105, 0.11, 0.03], "color": "#e8e2cf" },
       "explode": [0.10, 0, 0],
       "motion": { "type": "unclip", "axis": "y" }
     }
