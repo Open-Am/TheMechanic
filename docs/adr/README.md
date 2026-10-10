@@ -16,3 +16,4 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0008](ADR-0008-part-motion-for-removal-animation.md) | Part motion field for removal and install animation | accepted |
 | [0009](ADR-0009-decision-and-documentation-process.md) | Decision and documentation process | accepted |
 | [0010](ADR-0010-module-layout-and-boundaries.md) | Module layout and boundaries | accepted |
+| [0011](ADR-0011-inspecting-parts-in-place.md) | Inspecting parts in place | proposed |

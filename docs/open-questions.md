@@ -14,4 +14,3 @@ See the checklist at the end of `reference/generator-reference-pack.md`. Nothing
 
 ## Raised during plan 0001
 
-- Should a player be allowed to inspect a part that is still on the machine? The reducer refuses it, following the brief (inspection happens from the tray). A mechanic looks at parts in place too; this may deserve a design discussion before Phase 2.
