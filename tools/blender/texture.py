@@ -220,6 +220,9 @@ def authoring(base_name, group, image):
             metal_out = math_node("MULTIPLY", math_node("SUBTRACT", 1.0, dust), metal_out)
 
     link(t, colour, bsdf.inputs["Base Color"])
+    colour_node = n.new("NodeReroute")
+    colour_node.name = "BASECOLOR"
+    link(t, colour, colour_node.inputs[0])
     for name, value in (("Roughness", rough_out), ("Metallic", metal_out)):
         if isinstance(value, float):
             bsdf.inputs[name].default_value = value
@@ -280,8 +283,11 @@ def bake(objects, kind, image, samples=1, **kw):
     bpy.ops.object.bake(type=kind, margin=6, use_clear=True, **kw)
 
 
-def bake_metallic(objects, image):
-    """Metallic has no bake pass: route the METALLIC value through emission for one EMIT bake."""
+def bake_through_emission(objects, image, reroute):
+    """Bakes a value by routing a named reroute (BASECOLOR, METALLIC) through emission for one EMIT bake.
+
+    Base colour goes this way too: Cycles' diffuse colour pass is weighted by (1 - metallic), so it bakes metals
+    nearly black (found on the filler cap, plan 0006)."""
     saved = []
     for o in objects:
         for slot in o.material_slots:
@@ -289,7 +295,7 @@ def bake_metallic(objects, image):
             out = next(x for x in t.nodes if x.type == "OUTPUT_MATERIAL")
             old = out.inputs["Surface"].links[0].from_socket
             em = t.nodes.new("ShaderNodeEmission")
-            t.links.new(t.nodes["METALLIC"].outputs[0], em.inputs["Color"])
+            t.links.new(t.nodes[reroute].outputs[0], em.inputs["Color"])
             t.links.new(em.outputs["Emission"], out.inputs["Surface"])
             saved.append((t, out, old, em))
     bake(objects, "EMIT", image)
@@ -364,11 +370,11 @@ def main():
                 slot.material = made[base_name]
 
         base_img = new_image(f"{group}_basecolor", size, False)
-        bake(objects, "DIFFUSE", base_img, pass_filter={"COLOR"})
+        bake_through_emission(objects, base_img, "BASECOLOR")
         rough_img = new_image(f"{group}_rough", size, True)
         bake(objects, "ROUGHNESS", rough_img)
         metal_img = new_image(f"{group}_metal", size, True)
-        bake_metallic(objects, metal_img)
+        bake_through_emission(objects, metal_img, "METALLIC")
         ao_img = new_image(f"{group}_ao", size, True)
         bake(objects, "AO", ao_img, samples=24)
         normal_img = new_image(f"{group}_normal", size, True)
