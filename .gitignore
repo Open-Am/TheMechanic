@@ -10,3 +10,5 @@ assets/*/export/*.glb
 __pycache__/
 *.pyc
 assets/*/export/*.png
+# Match images hold third-party reference photos (ADR 0013): local only, like the references.
+assets/*/match/

@@ -5,10 +5,10 @@
   "verified": false,
   "size": [0.367, 0.375, 0.312],
   "base": [
-    { "id": "base_frame", "placeholder": { "shape": "box", "size": [0.3, 0.046, 0.24], "position": [0, 0.023, 0], "color": "#1d1d1f" } },
-    { "id": "base_engine", "placeholder": { "shape": "box", "size": [0.16, 0.1625, 0.24], "position": [0.04, 0.1313, -0.03], "color": "#8a8f94" } },
-    { "id": "base_alternator", "placeholder": { "shape": "box", "size": [0.11, 0.185, 0.17], "position": [-0.105, 0.1275, -0.005], "color": "#a7a8aa" } },
-    { "id": "base_panel", "placeholder": { "shape": "box", "size": [0.18, 0.173, 0.066], "position": [0.06, 0.1285, 0.128], "color": "#1f1f1f" } }
+    { "id": "base_frame", "placeholder": { "shape": "box", "size": [0.304, 0.058, 0.254], "position": [0, 0.029, 0], "color": "#1d1d1f" } },
+    { "id": "base_engine", "placeholder": { "shape": "box", "size": [0.151, 0.1625, 0.24], "position": [0.0355, 0.1362, -0.03], "color": "#8a8f94" } },
+    { "id": "base_alternator", "placeholder": { "shape": "box", "size": [0.11, 0.173, 0.17], "position": [-0.105, 0.1335, -0.01], "color": "#a7a8aa" } },
+    { "id": "base_panel", "placeholder": { "shape": "box", "size": [0.28, 0.195, 0.0655], "position": [-0.025, 0.1475, 0.1278], "color": "#1f1f1f" } }
   ],
   "parts": [
     {
@@ -17,8 +17,8 @@
       "does": "Carries fuel from the tap to the carburetor.",
       "requires": [],
       "inspectOk": "No cracks. Not blocked.",
-      "placeholder": { "shape": "cylinder", "axis": "y", "size": [0.0621, 0.0806, 0.0278], "position": [-0.0342, 0.135, 0.1239], "color": "#111111" },
-      "explode": [0, 0, 0.10],
+      "placeholder": { "shape": "cylinder", "axis": "y", "size": [0.0692, 0.096, 0.0222], "position": [-0.1471, 0.1534, 0.116], "color": "#111111" },
+      "explode": [-0.08, 0, 0.04],
       "motion": { "type": "pull" }
     },
     {
@@ -27,8 +27,8 @@
       "does": "Turns the fuel on and off. Its strainer catches dirt.",
       "requires": ["fuel_hose"],
       "inspectOk": "Strainer is clean. Fuel runs freely.",
-      "placeholder": { "shape": "box", "size": [0.03, 0.042, 0.0335], "position": [-0.06, 0.194, 0.1292], "color": "#b9b8b2" },
-      "explode": [0, 0, 0.10],
+      "placeholder": { "shape": "box", "size": [0.026, 0.043, 0.03], "position": [-0.174, 0.2215, 0.11], "color": "#b9b8b2" },
+      "explode": [-0.08, 0, 0],
       "motion": { "type": "unscrew", "axis": "y", "turns": 1 }
     },
     {
@@ -38,7 +38,7 @@
       "requires": ["fuel_tap"],
       "hiddenBy": [],
       "inspectOk": "Clean inside. Fuel smells fresh.",
-      "placeholder": { "shape": "box", "size": [0.336, 0.1736, 0.285], "position": [0, 0.3048, 0], "color": "#2456b4" },
+      "placeholder": { "shape": "box", "size": [0.338, 0.1517, 0.292], "position": [0, 0.3189, 0], "color": "#2456b4" },
       "explode": [0, 0.15, 0],
       "motion": { "type": "lift" }
     },
@@ -48,7 +48,7 @@
       "does": "Holds the air filter in place.",
       "requires": [],
       "inspectOk": "Not cracked. Clips are fine.",
-      "placeholder": { "shape": "box", "size": [0.17, 0.075, 0.011], "position": [0.06, 0.085, 0.1615], "color": "#222222" },
+      "placeholder": { "shape": "box", "size": [0.25, 0.09, 0.011], "position": [-0.025, 0.1, 0.1605], "color": "#222222" },
       "explode": [0, 0, 0.12],
       "motion": { "type": "unclip", "axis": "x" }
     },
@@ -58,7 +58,7 @@
       "does": "Keeps dust out of the engine.",
       "requires": ["air_filter_cover"],
       "inspectOk": "A little dusty. Air passes easily.",
-      "placeholder": { "shape": "box", "size": [0.1, 0.05, 0.02], "position": [0.07, 0.085, 0.142], "color": "#d9c27a" },
+      "placeholder": { "shape": "box", "size": [0.1, 0.05, 0.02], "position": [-0.06, 0.1, 0.142], "color": "#d9c27a" },
       "explode": [0, 0, 0.12],
       "motion": { "type": "slide" }
     },
@@ -68,7 +68,7 @@
       "does": "Mixes fuel with air in the right amount.",
       "requires": ["air_filter", "fuel_hose"],
       "inspectOk": "Bowl is clean. Jet is clear.",
-      "placeholder": { "shape": "box", "size": [0.0605, 0.062, 0.035], "position": [0.0223, 0.084, 0.115], "color": "#a9adb1" },
+      "placeholder": { "shape": "box", "size": [0.0605, 0.062, 0.035], "position": [-0.0828, 0.097, 0.117], "color": "#a9adb1" },
       "explode": [0, 0, 0.12],
       "motion": { "type": "unbolt", "axis": "z" }
     },
@@ -118,7 +118,7 @@
       "does": "Protects the electrical end of the generator.",
       "requires": [],
       "inspectOk": "Not cracked. Vents are clear.",
-      "placeholder": { "shape": "box", "size": [0.021, 0.172, 0.172], "position": [-0.1715, 0.135, -0.005], "color": "#b3b4b6" },
+      "placeholder": { "shape": "box", "size": [0.021, 0.172, 0.172], "position": [-0.1725, 0.135, -0.01], "color": "#b3b4b6" },
       "explode": [-0.12, 0, 0],
       "motion": { "type": "unbolt", "axis": "x" }
     },
@@ -128,7 +128,7 @@
       "does": "Starts the generator's voltage and keeps it steady.",
       "requires": ["alternator_cover"],
       "inspectOk": "Case is flat and clean. Holding charge.",
-      "placeholder": { "shape": "box", "size": [0.034, 0.034, 0.054], "position": [-0.14, 0.135, 0.002], "color": "#e8e2cf" },
+      "placeholder": { "shape": "box", "size": [0.034, 0.034, 0.054], "position": [-0.14, 0.135, -0.008], "color": "#e8e2cf" },
       "explode": [-0.1, 0, 0],
       "motion": { "type": "unclip", "axis": "y" }
     }

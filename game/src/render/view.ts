@@ -17,7 +17,8 @@ import { classify, screenDirection, type GestureState, type ScreenDirection } fr
 import { poseAt, resolveMotion, TIMING, type Pose } from "./motion.ts";
 import { fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart } from "./picking.ts";
-import { buildMachine, sizeHitVolumes, type PartView } from "./placeholders.ts";
+import type { RenderAssets } from "./model.ts";
+import { buildMachine, setPartOpacity, sizeHitVolumes, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
 import { createGround } from "./ground.ts";
 import { createLighting } from "./lighting.ts";
@@ -37,8 +38,8 @@ export interface RenderView {
 
 const AXES = { x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, 1) };
 
-/** Throws if WebGL is not available, so main can show the "cannot run" message. */
-export function mountRender(container: HTMLElement, game: Game): RenderView {
+/** Throws if WebGL is not available, so main can show the "cannot run" message. `assets` come from loadRenderAssets. */
+export function mountRender(container: HTMLElement, game: Game, assets: RenderAssets = { model: null, environment: null, ground: null }): RenderView {
   const machine: Machine = game.machine;
   const renderer = new WebGLRenderer({ antialias: window.devicePixelRatio < 2, powerPreference: "low-power" });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio)); // ADR 0006
@@ -50,13 +51,14 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
   scene.background = new Color(BACKGROUND);
   // ADR 0014. In development, ?lighting=fallback forces the simple rig to check it still works.
   const forced = import.meta.env.DEV ? new URLSearchParams(location.search).get("lighting") : null;
-  const lighting = createLighting(renderer, forced);
+  const lighting = createLighting(renderer, forced, assets.environment);
   lighting.addTo(scene);
   // Diagnostic mode reads this; it may not import render (ADR 0010).
   document.documentElement.dataset.lighting = lighting.rig;
-  scene.add(createGround(machine.size));
+  scene.add(createGround(machine.size, assets.ground));
 
-  const view = buildMachine(machine);
+  const view = buildMachine(machine, assets.model);
+  document.documentElement.dataset.model = assets.model ? (view.fallbacks.length ? "partial" : "glb") : "placeholders";
   scene.add(view.root);
   const partIds = new Set(view.parts.keys());
 
@@ -96,10 +98,7 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
     pv.group.quaternion.copy(tmpQ.setFromAxisAngle(AXES[pose.axis], pose.angle));
   }
 
-  function setOpacity(pv: PartView, o: number): void {
-    pv.mesh.material.transparent = o < 1;
-    pv.mesh.material.opacity = o;
-  }
+  const setOpacity = setPartOpacity;
 
   /** A point near the bottom of the screen at the part's depth: where the tray is. */
   function trayPoint(from: Vector3): Vector3 {
@@ -112,7 +111,7 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
     pv.group.visible = true;
     pv.group.position.set(...pv.home);
     pv.group.quaternion.identity();
-    pv.mesh.scale.setScalar(1);
+    pv.visual.scale.setScalar(1);
     setOpacity(pv, 1);
   }
 
@@ -181,7 +180,7 @@ export function mountRender(container: HTMLElement, game: Game): RenderView {
     if (!pv) return;
     tweens.play(`press:${id}`, {
       duration: TIMING.press,
-      update: (p) => pv.mesh.scale.setScalar(1 + (TIMING.pressScale - 1) * Math.sin(Math.PI * p)),
+      update: (p) => pv.visual.scale.setScalar(1 + (TIMING.pressScale - 1) * Math.sin(Math.PI * p)),
     });
   }
 

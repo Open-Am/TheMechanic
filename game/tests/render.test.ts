@@ -3,9 +3,10 @@ import { classify, GESTURE, screenDirection } from "../src/render/gesture.ts";
 import { MOTION_DEFAULTS, poseAt, resolveMotion } from "../src/render/motion.ts";
 import { clampOrbit, fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
-import { buildMachine, sizeHitVolumes } from "../src/render/placeholders.ts";
+import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
+import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
-import { Vector3 } from "three";
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from "three";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -239,8 +240,9 @@ describe("placeholders", () => {
   it("a cylinder's long side follows its axis", () => {
     const hose = machine.parts.find((p) => p.id === "fuel_hose")!;
     const pv = view.parts.get("fuel_hose")!;
-    pv.mesh.geometry.computeBoundingBox();
-    const size = pv.mesh.geometry.boundingBox!.getSize(new Vector3()).toArray();
+    const geometry = pv.meshes[0]!.geometry;
+    geometry.computeBoundingBox();
+    const size = geometry.boundingBox!.getSize(new Vector3()).toArray();
     expect(size[1]).toBeCloseTo(hose.placeholder.size[1]);
   });
 
@@ -283,7 +285,7 @@ describe("lighting (ADR 0014)", () => {
 
   it("keeps one key light coming from above, and positive intensities", () => {
     expect(LIGHTING.key.direction[1]).toBeGreaterThan(0);
-    for (const v of [LIGHTING.exposure, LIGHTING.environmentIntensity, LIGHTING.key.intensity, LIGHTING.fallback.hemisphere, LIGHTING.fallback.key]) expect(v).toBeGreaterThan(0);
+    for (const v of [LIGHTING.exposure, LIGHTING.environmentIntensity, LIGHTING.hdrIntensity, LIGHTING.key.intensity, LIGHTING.fallback.hemisphere, LIGHTING.fallback.key]) expect(v).toBeGreaterThan(0);
   });
 });
 
@@ -319,5 +321,88 @@ describe("colour for tray pictures", () => {
     expect([...out.slice(0, 4)]).toEqual([0, 0, 0, 0]);
     const grey = Math.round(linearToSrgb(neutralToneMap(0.5, 0.5, 0.5)[0]) * 255);
     expect([...out.slice(4, 8)]).toEqual([grey, grey, grey, 128]);
+  });
+});
+
+describe("building the machine from a model (brief section 8)", () => {
+  /** A stand-in GLB scene: one node per given ID, each a mesh at a position, sharing one material. */
+  function fakeModel(ids: string[], shared = new MeshStandardMaterial()) {
+    const scene = new Group();
+    ids.forEach((id, i) => {
+      const node = new Mesh(new BoxGeometry(0.02, 0.03, 0.04), shared);
+      node.name = id;
+      node.position.set(i * 0.01, 0.1, 0);
+      scene.add(node);
+    });
+    return { scene, shared };
+  }
+  const allIds = [...machine.parts.map((p) => p.id), ...machine.base.map((b) => b.id)];
+
+  it("matches nodes to IDs and reports missing and extra names", () => {
+    expect(matchNodes(["muffler", "Cube.001"], ["muffler", "spark_plug"])).toEqual({ found: ["muffler"], missing: ["spark_plug"], extra: ["Cube.001"] });
+  });
+
+  it("uses every model node, homes each part at its node's position, and sizes it from its bounds", () => {
+    const { scene } = fakeModel(allIds);
+    const tank = scene.getObjectByName("fuel_tank")!;
+    const home = tank.position.toArray();
+    const view = buildMachine(machine, scene);
+    expect(view.fallbacks).toEqual([]);
+    const pv = view.parts.get("fuel_tank")!;
+    expect(pv.source).toBe("model");
+    expect(pv.home).toEqual(home);
+    expect(pv.group.position.toArray()).toEqual(home);
+    expect(pv.size[0]).toBeCloseTo(0.02);
+    expect(pv.group.name).toBe("fuel_tank");
+  });
+
+  it("falls back to the placeholder for a part the model lacks, and warns", () => {
+    const { scene } = fakeModel(allIds.filter((id) => id !== "capacitor"));
+    const warn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (m: string) => warnings.push(m);
+    try {
+      const view = buildMachine(machine, scene);
+      expect(view.fallbacks).toEqual(["capacitor"]);
+      expect(view.parts.get("capacitor")!.source).toBe("placeholder");
+      expect(view.parts.get("capacitor")!.home).toEqual(machine.parts.find((p) => p.id === "capacitor")!.placeholder.position);
+      expect(warnings.join(" ")).toMatch(/capacitor/);
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  it("gives each part its own materials, so fading one never fades another", () => {
+    const { scene, shared } = fakeModel(allIds);
+    const view = buildMachine(machine, scene);
+    const a = view.parts.get("muffler")!;
+    const b = view.parts.get("recoil_starter")!;
+    setPartOpacity(a, 0.3);
+    expect((a.meshes[0]!.material as MeshStandardMaterial).opacity).toBe(0.3);
+    expect((b.meshes[0]!.material as MeshStandardMaterial).opacity).toBe(1);
+    expect(shared.opacity).toBe(1);
+  });
+
+  it("with no model, every part is a placeholder and nothing is reported missing", () => {
+    const view = buildMachine(machine, null);
+    expect(view.fallbacks).toEqual([]);
+    expect([...view.parts.values()].every((p) => p.source === "placeholder")).toBe(true);
+  });
+});
+
+describe("quantized model nodes", () => {
+  it("keeps each node's own scale, so resetting the part's visual never resizes the geometry", () => {
+    const scene = new Group();
+    for (const id of [...machine.parts.map((p) => p.id), ...machine.base.map((b) => b.id)]) {
+      const node = new Mesh(new BoxGeometry(2, 2, 2), new MeshStandardMaterial());
+      node.name = id;
+      node.scale.setScalar(0.05); // as KHR_mesh_quantization stores it: a 2-unit box decoded to 0.1 m
+      scene.add(node);
+    }
+    const view = buildMachine(machine, scene);
+    const pv = view.parts.get("fuel_tank")!;
+    pv.visual.scale.setScalar(1); // what reset() and the press pulse do
+    expect(pv.size[0]).toBeCloseTo(0.1);
+    expect(pv.visual.children[0]!.scale.x).toBeCloseTo(0.05);
   });
 });

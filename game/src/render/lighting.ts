@@ -1,5 +1,5 @@
 // The lighting rig (ADR 0014). One place for the environment, the key light, tone mapping and exposure, and the fallback.
-// Until Phase 3 brings a real HDR environment, the environment is Three.js RoomEnvironment, generated in code.
+// The environment is the real HDR map from game/public/env when it loaded, otherwise Three.js RoomEnvironment, generated in code.
 
 import { DirectionalLight, HemisphereLight, NeutralToneMapping, PMREMGenerator, type Scene, type Texture, type WebGLRenderer } from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -10,8 +10,9 @@ export type Rig = "ibl" | "fallback";
 export const LIGHTING = {
   /** PBR Neutral tone mapping exposure. */
   exposure: 0.9,
-  /** How strongly materials pick up the environment. */
+  /** How strongly materials pick up the environment: the generated studio is bright, the street HDR darker. */
   environmentIntensity: 0.55,
+  hdrIntensity: 1.25,
   /** Blur of the generated studio before prefiltering. */
   roomSigma: 0.04,
   /** The key light: one directional light, from the front right and above. */
@@ -51,18 +52,24 @@ function keyLight(intensity: number, color: number): DirectionalLight {
   return light;
 }
 
-export function createLighting(renderer: WebGLRenderer, forced: string | null = null): Lighting {
+/** `equirect` is the loaded HDR environment, or null to generate a studio instead. */
+export function createLighting(renderer: WebGLRenderer, forced: string | null = null, equirect: Texture | null = null): Lighting {
   renderer.toneMapping = NeutralToneMapping;
   renderer.toneMappingExposure = LIGHTING.exposure;
 
   let rig = chooseRig({ halfFloatTargets: halfFloatTargets(renderer), forced });
   let environment: Texture | null = null;
+  const fromHdr = equirect !== null;
   if (rig === "ibl") {
     try {
       const pmrem = new PMREMGenerator(renderer);
-      const room = new RoomEnvironment();
-      environment = pmrem.fromScene(room, LIGHTING.roomSigma).texture;
-      room.dispose();
+      if (equirect) {
+        environment = pmrem.fromEquirectangular(equirect).texture;
+      } else {
+        const room = new RoomEnvironment();
+        environment = pmrem.fromScene(room, LIGHTING.roomSigma).texture;
+        room.dispose();
+      }
       pmrem.dispose();
     } catch (e) {
       console.warn("Environment lighting failed; using the simple rig.", e);
@@ -75,7 +82,7 @@ export function createLighting(renderer: WebGLRenderer, forced: string | null = 
     addTo(scene) {
       if (rig === "ibl" && environment) {
         scene.environment = environment;
-        scene.environmentIntensity = LIGHTING.environmentIntensity;
+        scene.environmentIntensity = fromHdr ? LIGHTING.hdrIntensity : LIGHTING.environmentIntensity;
         scene.add(keyLight(LIGHTING.key.intensity, LIGHTING.key.color));
       } else {
         const f = LIGHTING.fallback;
