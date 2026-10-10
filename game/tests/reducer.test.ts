@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { apply, conditionText, initialState } from "../src/core/reducer.ts";
-import { blockers, canInstall, canRemove, necessarySet, removableNow, removalOrder } from "../src/core/rules.ts";
+import { blockers, canInstall, canRemove, hiders, isVisible, necessarySet, removableNow, removalOrder } from "../src/core/rules.ts";
 import type { Action, RoundState } from "../src/core/types.ts";
 import { faultById, loadFaults, loadMachine } from "./helpers.ts";
 
@@ -78,6 +78,37 @@ describe("remove", () => {
     expect(refusal(s, { t: 3, type: "remove", partId: "carburetor" }).parts).toEqual(["fuel_hose"]);
     s = step(s, { t: 3, type: "remove", partId: "fuel_hose" });
     expect(canRemove(machine, s, "carburetor")).toBe(true);
+  });
+});
+
+describe("visibility (ADR 0011)", () => {
+  it("parts with no requires are visible at the start", () => {
+    const s = initialState(machine);
+    for (const p of machine.parts.filter((x) => x.requires.length === 0)) expect(isVisible(machine, s, p.id), p.id).toBe(true);
+  });
+
+  it("the fuel tank is visible at the start although it cannot come off", () => {
+    const s = initialState(machine);
+    expect(canRemove(machine, s, "fuel_tank")).toBe(false);
+    expect(hiders(machine, s, "fuel_tank")).toEqual([]);
+    expect(isVisible(machine, s, "fuel_tank")).toBe(true);
+  });
+
+  it("an absent hiddenBy defaults to requires", () => {
+    let s = initialState(machine);
+    expect(hiders(machine, s, "spark_plug")).toEqual(["plug_cap"]);
+    expect(hiders(machine, s, "capacitor")).toEqual(["alternator_cover"]);
+    expect(hiders(machine, s, "carburetor").sort()).toEqual(["air_filter", "fuel_hose"]);
+    s = step(s, { t: 1, type: "remove", partId: "plug_cap" });
+    expect(hiders(machine, s, "spark_plug")).toEqual([]);
+    expect(isVisible(machine, s, "spark_plug")).toBe(true);
+  });
+
+  it("a part in the tray is not visible in place, and an unknown part hides behind nothing", () => {
+    const s = step(initialState(machine), { t: 1, type: "remove", partId: "muffler" });
+    expect(isVisible(machine, s, "muffler")).toBe(false);
+    expect(hiders(machine, s, "ghost")).toEqual([]);
+    expect(isVisible(machine, s, "ghost")).toBe(false);
   });
 });
 

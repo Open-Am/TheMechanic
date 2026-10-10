@@ -38,6 +38,8 @@ export interface Part {
   name: string;
   does: string;
   requires: PartId[];
+  /** Parts that hide this one while installed (ADR 0011). Absent means the same as `requires`. */
+  hiddenBy?: PartId[];
   inspectOk: string;
   placeholder: Placeholder;
   explode: Vec3;
@@ -103,6 +105,7 @@ export type RefusalReason =
   | "round_over"
   | "not_installed"
   | "blocked_by"
+  | "hidden_by"
   | "not_in_tray"
   | "dependents_missing"
   | "not_culprit"
@@ -113,7 +116,7 @@ export type RefusalReason =
 export interface Refusal {
   reason: RefusalReason;
   action: Action;
-  /** For blocked_by: installed parts from `requires`. For dependents_missing: parts that must go back first. For parts_missing: the parts still in the tray. */
+  /** For blocked_by: installed parts from `requires`. For hidden_by: installed parts that hide it. For dependents_missing: parts that must go back first. For parts_missing: the parts still in the tray. */
   parts?: PartId[];
 }
 
