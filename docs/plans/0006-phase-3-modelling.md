@@ -1,7 +1,7 @@
 ---
 id: 0006
 title: Phase 3b, modelling the parts towards the real machine
-status: proposed
+status: approved
 date: 2026-10-10
 adrs: [0003, 0012, 0013, 0014]
 branch: plan/0006-modelling
@@ -14,6 +14,8 @@ branch: plan/0006-modelling
 Starting from plan 0005's blocked model, take each part as far towards the real ET950-pattern machine as the references allow, following `docs/design/modelling-brief.md`: secondary forms, a low-poly game mesh within its allocation, baked normals and occlusion, materials and Lagos wear, and a photo-match loop on every part. Each part ends at `modelled` or `textured`, with match images that show where it stands. Only the owner sets `approved`.
 
 This plan can be approved now and started after plan 0005, or held until the owner's own photos arrive. The owner said on 2026-10-10: "When I get the images, we can try to improve on it." Parts can be redone when better references come.
+
+Approved by the owner on 2026-10-10, who wrote "I approve." in answer to approving plans 0005 and 0006.
 
 ## ADRs relied on
 

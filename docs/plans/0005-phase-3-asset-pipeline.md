@@ -1,7 +1,7 @@
 ---
 id: 0005
 title: Phase 3a, the asset pipeline and a blocked-out model
-status: proposed
+status: approved
 date: 2026-10-10
 adrs: [0002, 0003, 0010, 0012, 0013, 0014]
 branch: plan/0005-asset-pipeline
@@ -12,6 +12,8 @@ branch: plan/0005-asset-pipeline
 ## Goal
 
 `npm run assets` takes `assets/gen950/blend/gen950.blend` to a validated, compressed `game/public/machines/gen950/model.glb`, and the game loads it in place of the placeholders. Every part and base piece is at least `blocked` in `assets/gen950/STATUS.md`: real size and silhouette from the references, in place, named right. The Blender look-development scene uses the same lighting as the game, with a real HDR environment and a baked ground shadow. This meets the brief's Phase 3 done line ("blocked-out geometry is enough to pass"). The realism work that ADR 0013 asks for is plan 0006, which builds on this.
+
+Approved by the owner on 2026-10-10, who wrote "I approve." in answer to approving plans 0005 and 0006.
 
 ## ADRs relied on
 
