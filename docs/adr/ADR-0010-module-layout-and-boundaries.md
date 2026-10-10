@@ -1,7 +1,7 @@
 ---
 id: 0010
 title: Module layout and boundaries
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -53,3 +53,4 @@ Rules exist in exactly one place. The interface can be rebuilt or restyled witho
 ## History
 
 - 2026-10-10: proposed by Claude, from discussion with the owner.
+- 2026-10-10: accepted by the owner, who wrote "please accept both adr 2 and 10".

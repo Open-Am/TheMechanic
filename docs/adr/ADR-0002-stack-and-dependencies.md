@@ -1,7 +1,7 @@
 ---
 id: 0002
 title: Stack, dependencies and accepted limits
-status: proposed
+status: accepted
 date: 2026-10-10
 supersedes: []
 superseded_by: null
@@ -61,3 +61,4 @@ Small, auditable bundle; zero running cost; instant play from a link. Agents wri
 
 - 2026-10-10: proposed by Claude, from the brief.
 - 2026-10-10: rewritten after the owner asked for the stack to be argued and for two limits to remain changeable: hiding game logic, and notifications.
+- 2026-10-10: accepted by the owner, who wrote "please accept both adr 2 and 10".
