@@ -7,6 +7,7 @@ Design note, first written for Phase 2 (plan 0003). Not a decision: the gestures
 Portrait first. From top to bottom:
 
 - Timer, top centre. `m:ss`. Hidden on the briefing and result screens.
+- Mute button, top right beside the timer: a speaker, slashed when muted, 44 px square, labelled "Sound on" or "Sound off" with `aria-pressed`. Muted means no sound and no vibration. The choice is kept in the browser under `openam.muted`, with a memory fallback when storage is blocked. Sound starts on (plan 0013, ADR 0018).
 - The machine, centred in the space above the pull cord and tray. The canvas sits behind everything else and runs to the bottom of the screen, so a carried part and the hand stay drawn over the controls; only the framing moves. As the tray wraps onto more rows the machine glides up to stay clear of them (since 0.9.3), and if the free space gets too short for it the camera stands back. It always keeps at least 40 percent of the screen's height.
 - "Pull cord" button, full width, above the tray. Enabled only when the tray is empty.
 - The tray, chips along the bottom, wrapping onto more rows as parts come off. It does not scroll: chips take every drag for putting parts back, so a scrolling tray could not be scrolled by touch.

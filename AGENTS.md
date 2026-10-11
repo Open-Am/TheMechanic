@@ -87,6 +87,7 @@ Accounts, backend, leaderboards, community-submitted content, moderation, money,
 | `npm run size` | Gzipped JavaScript in `game/dist` against the 350 KB budget. Run after `npm run build`. |
 | `npm run verify:phone` | Plays every fault in headless Edge or Chrome at phone size with real gestures; screenshots, console errors, frame rate. `-- --out <dir>` for screenshots. |
 | `npm run assets` | Blender to validated GLB. (From Phase 3.) |
+| `npm run audio` | Blender encodes the chosen sounds to mono Ogg Opus, then checks them into `game/public/audio` (plan 0013). Fails until all ten files exist. |
 
 Tools (ADR 0012): Node 24 (`.node-version`), Blender 4.5 LTS, Git LFS for `.blend` files and texture sources under `assets/`. Blender scripts find Blender through the `BLENDER` environment variable (the full path to the executable), then `blender` on PATH, and stop if neither works. On the build machine it is `C:\Program Files\Blender Foundation\Blender 4.5\blender.exe`.
 
