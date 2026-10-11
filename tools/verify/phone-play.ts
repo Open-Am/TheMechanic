@@ -246,17 +246,29 @@ async function pullOff(id: string): Promise<void> {
       await doubleTap(p.x, p.y);
       await sleep(350);
       await noteHidden(`loosening ${id}`);
-      // Plan 0011: a part held on by fasteners is undone with the right tool, fastener by fastener.
+      // Plan 0011: a part held on by fasteners is undone with the right tool, fastener by fastener. Watch the tool in
+      // the hand through the whole loosening, not at one moment.
       const count = FASTENED.get(id) ?? 0;
-      if (count > 0) {
-        const tool = await evaluate<string | null>("window.__openAmDevRender.tool()");
-        if (tool) toolsSeen.add(tool);
-        if (tool && !fastenerShots.has(tool)) {
-          fastenerShots.add(tool);
-          await screenshot(`12-hand-${tool}`);
+      const used = new Set<string>();
+      toolsUsed.set(id, used);
+      let isLoose = false;
+      for (const end = Date.now() + 4000; Date.now() < end; ) {
+        if ((await looseNow()).includes(id)) {
+          isLoose = true;
+          break;
         }
+        const tool = await evaluate<string | null>("window.__openAmDevRender.tool()");
+        if (tool) {
+          used.add(tool);
+          toolsSeen.add(tool);
+          if (!fastenerShots.has(tool)) {
+            fastenerShots.add(tool);
+            await screenshot(`12-hand-${tool}`);
+          }
+        }
+        await sleep(40);
       }
-      if (await waitFor(`${id} loose`, async () => (await looseNow()).includes(id), 4000).catch(() => false)) {
+      if (isLoose) {
         if (count > 0) {
           const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners(${JSON.stringify(id)})`);
           if (outs.length !== count || outs.some((d) => d < 0.006)) failures.push(`fasteners: ${id} came loose with its fasteners not all out (${outs.map((d) => (d * 1000).toFixed(1)).join(", ")} mm)`);
@@ -279,6 +291,8 @@ async function pullOff(id: string): Promise<void> {
 /** Parts with fasteners in machine.json, and how many (plan 0011). */
 const FASTENED = new Map(machine.parts.filter((p) => (p.fasteners ?? []).length > 0).map((p) => [p.id, p.fasteners!.length]));
 const toolsSeen = new Set<string>();
+/** The tools seen in the hand during each part's last loosening. */
+const toolsUsed = new Map<string, Set<string>>();
 const fastenerShots = new Set<string>();
 const fastenedOut = new Set<string>();
 const fastenedBackIn = new Set<string>();
@@ -481,6 +495,45 @@ for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round+
 
 for (const f of faultFile.faults) if (!solved.has(f.id) && !failures.some((x) => x.startsWith(f.id))) failures.push(`${f.id}: never came up or not solved`);
 
+// Plan 0011: no fault needs the fuel tank (four screws) or the recoil starter (four bolts) off, so take them off in a
+// round of their own: the screwdriver for the screws, the spanner for the bolts, every fastener out before the part is
+// free, and done up again when it goes back.
+const toolRound: string[] = [];
+{
+  const EXPECT: Array<[string, string]> = [["fuel_tank", "screwdriver"], ["recoil_starter", "spanner"]];
+  await send("Page.navigate", { url });
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await sleep(300);
+  await tapSelector(".briefing .primary");
+  await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+  const order: string[] = [];
+  const add = (id: string) => {
+    if (order.includes(id)) return;
+    for (const dep of machine.parts.find((p) => p.id === id)?.requires ?? []) add(dep);
+    order.push(id);
+  };
+  for (const [id] of EXPECT) add(id);
+  try {
+    for (const id of order) await pullOff(id);
+    for (const [id, want] of EXPECT) {
+      const used = [...(toolsUsed.get(id) ?? [])];
+      if (used.length !== 1 || used[0] !== want) failures.push(`tools: ${id} was undone with ${used.join(" and ") || "no tool"}, not the ${want}`);
+      else if (!fastenedOut.has(id)) failures.push(`tools: ${id} came loose before its fasteners were out`);
+      else if (!(await trayHas(id))) failures.push(`tools: ${id} did not reach the tray`);
+    }
+    for (const id of [...order].reverse()) await putBack(id);
+    for (const [id, want] of EXPECT) {
+      if (fastenedBackIn.has(id) && !failures.some((f) => f.includes(id))) toolRound.push(`${id} with the ${want}`);
+    }
+  } catch (e) {
+    failures.push(`tools: ${(e as Error).message}`);
+    await screenshot("fail-tools");
+  }
+  await send("Page.navigate", { url });
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await sleep(300);
+}
+
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
 if (failures.length === 0) await tapSelector(".briefing .primary");
 await send("Emulation.setCPUThrottlingRate", { rate: 4 });
@@ -511,7 +564,9 @@ console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}
 console.log(`Checks: ${checks.join("; ") || "not run"}`);
 console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done up again on ${[...fastenedBackIn].join(", ") || "none"}; tools seen: ${[...toolsSeen].join(", ") || "none"}`);
 if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
-if (!toolsSeen.has("spanner")) failures.push("fasteners: the spanner was never seen in the hand");
+for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
+console.log(`Tools round: ${toolRound.length ? `undone, to the tray and done up again: ${toolRound.join("; ")}` : "not passed"}`);
+if (toolRound.length !== 2 && !failures.some((x) => x.startsWith("tools:"))) failures.push("tools: the fuel tank and recoil starter round did not pass");
 console.log(`Hand inside the machine: at most ${(worstHidden.share * 100).toFixed(0)}% of its points hidden${worstHidden.where ? ` (${worstHidden.where})` : ""}, limit ${HIDDEN_LIMIT * 100}%`);
 if (worstHidden.share > HIDDEN_LIMIT) failures.push(`hand: ${(worstHidden.share * 100).toFixed(0)}% of it went inside the machine, ${worstHidden.where}`);
 if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen carrying a part");
