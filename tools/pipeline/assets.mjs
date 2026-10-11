@@ -14,6 +14,9 @@ const handOpt = join(root, "assets", "hand", "export", "hand.optimised.glb");
 const toolsBlend = join(root, "assets", "tools", "blend", "tools.blend");
 const toolsGlb = join(root, "assets", "tools", "export", "tools.glb");
 const toolsOpt = join(root, "assets", "tools", "export", "tools.optimised.glb");
+const toolboxBlend = join(root, "assets", "toolbox", "blend", "toolbox.blend");
+const toolboxGlb = join(root, "assets", "toolbox", "export", "toolbox.glb");
+const toolboxOpt = join(root, "assets", "toolbox", "export", "toolbox.optimised.glb");
 
 const steps = [
   ["Validate the model", blender("validate.py")],
@@ -27,6 +30,9 @@ const steps = [
   ["Validate and export the tools", blender("tools.py", toolsBlend, "export")],
   ["Optimise the tools", [join(root, "tools", "pipeline", "optimise.mjs"), toolsGlb, toolsOpt]],
   ["Check and copy the tools", [join(root, "tools", "pipeline", "check.ts"), "--tools"]],
+  ["Validate and export the toolbox", blender("toolbox.py", toolboxBlend, "export")],
+  ["Optimise the toolbox", [join(root, "tools", "pipeline", "optimise.mjs"), toolboxGlb, toolboxOpt, "--keep-empty"]],
+  ["Check and copy the toolbox", [join(root, "tools", "pipeline", "check.ts"), "--toolbox"]],
 ];
 
 for (const [label, args] of steps) {
