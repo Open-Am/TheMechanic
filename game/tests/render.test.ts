@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOUBLE_TAP, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
+import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
 import { CARRY, carryPose, carryProgress, LOOSEN, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion } from "../src/render/motion.ts";
 import { clampOrbit, fitDistance, FRAME, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
@@ -505,6 +505,30 @@ describe("deliberate removal: double tap, then carry (plan 0010, ADR 0020)", () 
     expect(doubleTapPart(first, tap("alternator_cover", 200, 103, 102, ["alternator_cover"]))).toBeNull();
     // A second tap on the base, with the hose's hit volume under it, also counts.
     expect(doubleTapPart(first, tap(null, 200, 103, 102, ["fuel_hose"]))).toBe("fuel_hose");
+  });
+
+  it("a double tap whose second tap shows a neighbour takes hold of the part where the first tap touched it (0.9.4)", () => {
+    // In 0.9.3 the hand fell back to the part's origin, deep inside the machine for a muffler (verify:phone, 43-66%).
+    const onMuffler = { part: "muffler", point: "on the muffler's shell" };
+    const onCover = { part: "alternator_cover", point: "on the alternator cover" };
+    expect(doubleTapGrasp("muffler", onMuffler, onCover)).toBe(onMuffler);
+    // The second tap's own spot wins when it is on the part: it is where the finger is now.
+    const again = { part: "muffler", point: "a little to the left" };
+    expect(doubleTapGrasp("muffler", onMuffler, again)).toBe(again);
+    // Neither tap showed the part (both landed on its finger-sized hit volume only): no spot to take hold of.
+    expect(doubleTapGrasp("muffler", onCover, onCover)).toBeNull();
+    expect(doubleTapGrasp("muffler", null, null)).toBeNull();
+  });
+
+  it("the machine holds still between the two taps of a double tap, so the second lands where the first did (0.9.4)", () => {
+    // In 0.9.3 the reframe above a growing tray glided on between the taps and moved the part from under the finger.
+    const first = tap("muffler", 1000); // lifts at 1080
+    expect(awaitingSecondTap(first, 1080)).toBe(true);
+    expect(awaitingSecondTap(first, 1080 + DOUBLE_TAP.ms)).toBe(true);
+    expect(awaitingSecondTap(first, 1081 + DOUBLE_TAP.ms)).toBe(false);
+    // A tap on nothing starts no double tap, and no tap holds nothing.
+    expect(awaitingSecondTap(tap(null, 1000), 1100)).toBe(false);
+    expect(awaitingSecondTap(null, 1100)).toBe(false);
   });
 
   it("only a loose part is carried; every other drag turns the machine, removable or not (ADR 0007)", () => {
