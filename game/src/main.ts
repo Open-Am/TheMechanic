@@ -109,7 +109,9 @@ async function start(): Promise<void> {
     { createContext: browserContext, vibrate: browserVibrate(navigator), ...(import.meta.env.DEV ? { onPlay: (moment: Moment, audible: boolean) => void heard.push({ moment, audible, at: Math.round(performance.now()) }) } : {}) },
     muted.get(),
   );
-  // Browsers start audio only inside a gesture: every tap or key tries until the context runs. The first is Start.
+  const game = createGame({ ...data, clock, audio, random: Math.random, scores, ...(customers ? { customers } : {}) });
+  // Browsers start audio only inside a gesture. Start unlocks it: "started" is sent from inside its tap (ADR 0018). If
+  // the browser still holds it back, every later tap or key tries again until the context runs. Nothing before Start.
   const unlock = (): void => {
     if (audio.contextState() === "running") {
       window.removeEventListener("click", unlock, true);
@@ -118,12 +120,12 @@ async function start(): Promise<void> {
     }
     audio.unlock();
   };
-  window.addEventListener("click", unlock, true);
-  window.addEventListener("keydown", unlock, true);
-  const game = createGame({ ...data, clock, audio, random: Math.random, scores, ...(customers ? { customers } : {}) });
   // The files download once, after the first Start (ADR 0023): never before, and not again on later rounds.
   const stopLoading = game.events.on("started", () => {
     stopLoading();
+    audio.unlock();
+    window.addEventListener("click", unlock, true);
+    window.addEventListener("keydown", unlock, true);
     void loadSounds(audio);
   });
   if (import.meta.env.DEV) {
