@@ -1,7 +1,7 @@
 ---
 id: 0012
 title: The toolbox, and the hand fetching and returning its tools
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0001, 0004, 0007, 0010, 0012, 0013, 0014, 0020, 0021]
 branch: plan/0012-the-toolbox
@@ -12,6 +12,8 @@ branch: plan/0012-the-toolbox
 ## Goal
 
 A worn metal mechanic's toolbox sits on the ground beside the generator, lid open, with the spanner and the screwdriver in it. When the player loosens a part that has fasteners, the hand leaves the pointer, goes to the toolbox, picks up the right tool, undoes the fasteners, frees the part, puts the tool back in the toolbox and returns to the pointer. Putting a part back runs the same trip. The toolbox is scenery only. Nothing changes in the rules or the score.
+
+Approved by the owner on 2026-10-11, who wrote "Plan 12, 15 and adr 22 is approved."
 
 ## ADRs relied on
 

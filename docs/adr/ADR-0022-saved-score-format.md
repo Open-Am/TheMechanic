@@ -1,7 +1,7 @@
 ---
 id: 0022
 title: What the game saves in the browser
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: []
 superseded_by: null
@@ -31,3 +31,4 @@ The saved data stays small (about one short record a day) and a format change ca
 ## History
 
 - 2026-10-11: proposed by Claude, from the gap found while drafting plan 0014.
+- 2026-10-11: accepted by the owner, who wrote "Plan 12, 15 and adr 22 is approved."

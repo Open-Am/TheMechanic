@@ -21,7 +21,7 @@ import {
 } from "three";
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId } from "../core/index.ts";
-import { doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
+import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
 import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, poseAt, resolveMotion, spannerSwing, TIMING, type Pose } from "./motion.ts";
 import { fitDistance, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
@@ -210,8 +210,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const loose = new Set<PartId>();
   const loosening = new Set<PartId>();
 
-  /** Loosens a part: the hand undoes it and it sits loose. Does nothing at all if it cannot come off now (ADR 0007). */
-  function loosen(id: PartId, then?: () => void): void {
+  /**
+   * Loosens a part: the hand undoes it and it sits loose. Does nothing at all if it cannot come off now (ADR 0007). The
+   * hand takes hold at `at`, where the player touched the part, if given; otherwise at the last spot under the pointer
+   * if that is on the part, else at the part's origin.
+   */
+  function loosen(id: PartId, then?: () => void, at?: Surface | null): void {
     if (!game.running || loose.has(id) || loosening.has(id) || !game.state.installed.has(id)) return;
     if (!canRemove(machine, game.state, id)) return;
     const pv = view.parts.get(id);
@@ -219,7 +223,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const part = partById(id);
     const m = resolveMotion(part.motion);
     loosening.add(id);
-    const s = lastSurface && lastSurface.part === id ? lastSurface : surfaceOfPart(pv);
+    const s = at ?? (lastSurface && lastSurface.part === id ? lastSurface : surfaceOfPart(pv));
     const freeing: TweenSpec[] = pv.fasteners.length
       ? [...fastenerSteps(pv), { duration: FASTEN.freeSeconds, ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) }, ...toolReturn()]
       : [
@@ -644,6 +648,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   let lastSurface: Surface | null = null;
   let mouseAt: { x: number; y: number } | null = null;
   let lastTap: Tap | null = null;
+  /** The spot under the pointer when `lastTap` came down. */
+  let lastTapSurface: Surface | null = null;
   let drag: {
     id: number;
     touch: boolean;
@@ -779,9 +785,15 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       const tap: Tap = { part: d.part, under, down: d.downT, up: e.timeStamp, x: e.clientX, y: e.clientY };
       const part = doubleTapPart(lastTap, tap);
       if (part) {
+        // The hand takes hold where a tap touched the part, not at the part's origin inside the machine (0.9.4).
+        const at = doubleTapGrasp(part, lastTapSurface, d.surface);
         lastTap = null;
-        loosen(part);
-      } else lastTap = tap;
+        lastTapSurface = null;
+        loosen(part, undefined, at);
+      } else {
+        lastTap = tap;
+        lastTapSurface = d.surface;
+      }
     }
     if (loosening.size > 0 || carry) return; // the hand is busy with a part
     if (d.touch) hand?.withdraw();
@@ -963,8 +975,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
     last = now;
     tweens.update(dt);
-    // Settle into the space above the controls, but never under a finger that is carrying or turning.
-    if (cover !== coverWanted && !drag && !carry && !chip) {
+    // Settle into the space above the controls, but never under a finger that is carrying or turning, nor between the
+    // two taps of a double tap (0.9.4).
+    if (cover !== coverWanted && !drag && !carry && !chip && !awaitingSecondTap(lastTap, now)) {
       const next = cover + (coverWanted - cover) * (1 - Math.pow(0.5, dt / REFRAME_HALF_LIFE));
       cover = Math.abs(coverWanted - next) < 0.5 ? coverWanted : next;
       applyFraming();
