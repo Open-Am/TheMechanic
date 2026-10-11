@@ -276,7 +276,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     return { right: [e[0]!, e[1]!, e[2]!], up: [e[4]!, e[5]!, e[6]!], forward: new Vector3(-e[8]!, -e[9]!, -e[10]!) };
   };
 
-  /** Where tools come from and go back to: just off screen at the lower left. (ADR 0021, proposed, would put a toolbox here.) */
+  /** Where tools come from and go back to: just off screen at the lower left. (ADR 0021 puts a toolbox here; plan 0012.) */
   function toolSource(): Vector3 {
     const sc = screen();
     return camera.position.clone().addScaledVector(new Vector3(...sc.right), -0.3).addScaledVector(new Vector3(...sc.up), -0.5).addScaledVector(sc.forward, 0.45);

@@ -501,7 +501,8 @@ for (const f of faultFile.faults) if (!solved.has(f.id) && !failures.some((x) =>
 const toolRound: string[] = [];
 {
   const EXPECT: Array<[string, string]> = [["fuel_tank", "screwdriver"], ["recoil_starter", "spanner"]];
-  await send("Page.navigate", { url });
+  // Ten minutes of patience: with retry turns this round can outlast the shortest customer (80 s).
+  await send("Page.navigate", { url: url.replace("?diag", "?diag&patience=600") });
   await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
   await sleep(300);
   await tapSelector(".briefing .primary");
