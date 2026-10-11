@@ -41,3 +41,10 @@ export const TEMPLATES = {
   walkedTitle: (name: string) => `${name} took the generator to another mechanic.`,
   speech: (name: string, line: string) => `${name}: “${line}”`,
 } as const;
+
+/** The share text's words (ADR 0005). Its three lines are put together by shareText in format.ts. */
+export const SHARE = {
+  title: (day: number) => `Open Am · Day ${day}`,
+  fixed: (seconds: number, wrong: string, stars: string) => `Fixed in ${seconds}s · ${wrong} · ${stars}`,
+  wrongParts: (n: number) => (n === 1 ? "1 wrong part" : `${n} wrong parts`),
+} as const;

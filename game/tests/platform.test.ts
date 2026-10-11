@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createAudio } from "../src/platform/local/audio.ts";
 import { createClock } from "../src/platform/local/clock.ts";
 import { createDailyProvider } from "../src/platform/local/daily.ts";
+import { type NavigatorLike, createShare, hasShareSheet } from "../src/platform/local/share.ts";
 import { SCORES_KEY, createScoreStore, parseSaved, safeStorage } from "../src/platform/local/scores.ts";
 import type { StoredResult } from "../src/platform/interfaces/index.ts";
 import { dailyFaultId, dayNumber } from "../src/core/daily.ts";
@@ -223,5 +224,62 @@ describe("score store (ADR 0005, ADR 0022, ADR 0024)", () => {
     await store.record(r);
     r.score.total = 1;
     expect((await store.best("fouled_plug"))!.score.total).toBe(42);
+  });
+});
+
+describe("share (ADR 0005, plan 0014 reading 9)", () => {
+  function nav(opts: { sheet?: "ok" | "cancel" | "fail"; clipboard?: "ok" | "fail" }) {
+    const sent: Array<[string, string]> = [];
+    const n: NavigatorLike = {};
+    if (opts.sheet) {
+      n.share = async ({ text }) => {
+        if (opts.sheet === "cancel") throw Object.assign(new Error("cancelled"), { name: "AbortError" });
+        if (opts.sheet === "fail") throw Object.assign(new Error("no"), { name: "NotAllowedError" });
+        sent.push(["sheet", text]);
+      };
+    }
+    if (opts.clipboard) {
+      n.clipboard = {
+        async writeText(text) {
+          if (opts.clipboard === "fail") throw new Error("denied");
+          sent.push(["clipboard", text]);
+        },
+      };
+    }
+    return { n, sent };
+  }
+
+  it("uses the share sheet when there is one", async () => {
+    const { n, sent } = nav({ sheet: "ok", clipboard: "ok" });
+    expect(await createShare(n).share("hi")).toBe("sheet");
+    expect(sent).toEqual([["sheet", "hi"]]);
+    expect(hasShareSheet(n)).toBe(true);
+  });
+
+  it("a cancelled sheet returns none and never touches the clipboard", async () => {
+    const { n, sent } = nav({ sheet: "cancel", clipboard: "ok" });
+    expect(await createShare(n).share("hi")).toBe("none");
+    expect(sent).toEqual([]);
+  });
+
+  it("another sheet error falls back to the clipboard", async () => {
+    const { n, sent } = nav({ sheet: "fail", clipboard: "ok" });
+    expect(await createShare(n).share("hi")).toBe("clipboard");
+    expect(sent).toEqual([["clipboard", "hi"]]);
+  });
+
+  it("no sheet uses the clipboard", async () => {
+    const { n, sent } = nav({ clipboard: "ok" });
+    expect(await createShare(n).share("hi")).toBe("clipboard");
+    expect(sent).toEqual([["clipboard", "hi"]]);
+    expect(hasShareSheet(n)).toBe(false);
+  });
+
+  it("both missing or both failing returns none", async () => {
+    expect(await createShare({}).share("hi")).toBe("none");
+    expect(await createShare(null).share("hi")).toBe("none");
+    expect(await createShare(nav({ clipboard: "fail" }).n).share("hi")).toBe("none");
+    expect(await createShare(nav({ sheet: "fail", clipboard: "fail" }).n).share("hi")).toBe("none");
+    expect(hasShareSheet(null)).toBe(false);
   });
 });

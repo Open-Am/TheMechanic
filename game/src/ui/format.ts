@@ -1,5 +1,8 @@
 // Pure formatting helpers for the interface.
 
+import type { ScoreBreakdown } from "../core/index.ts";
+import { SHARE } from "./strings.ts";
+
 /** Milliseconds as m:ss. Negative or invalid input shows 0:00. */
 /** CSS px above the controls (pull cord and tray) that still count as dropping on the tray (ADR 0020 tuning). */
 export const DROP_REACH = 64;
@@ -17,6 +20,25 @@ export function formatTime(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * The share text for a fixed daily (ADR 0005): title, result, link. Seconds are the score's whole seconds, never m:ss.
+ * Failed pulls are not shown, as in ADR 0005's example.
+ */
+export function shareText(day: number, score: ScoreBreakdown, url: string): string {
+  return [SHARE.title(day), SHARE.fixed(score.elapsedSeconds, SHARE.wrongParts(score.wrongParts), starText(score.stars)), url].join("\n");
+}
+
+/**
+ * The link in the share text: the build's base path (relative, "./") resolved against the page's address, with no
+ * query or hash, so ?diag and ?today never leak.
+ */
+export function shareUrl(pageHref: string, basePath: string): string {
+  const u = new URL(basePath, pageHref);
+  u.search = "";
+  u.hash = "";
+  return u.href;
 }
 
 /** Filled and empty stars, always three characters. */
