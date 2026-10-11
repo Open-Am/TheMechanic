@@ -24,12 +24,19 @@
     "base_frame": 6000,
     "base_engine": 9000,
     "base_alternator": 3000,
-    "base_panel": 2000
+    "base_panel": 2000,
+    "fasteners": 3000
   },
   "hand": {
     "_source": "ADR 0015: the hand with its animation",
     "triangles": 4000,
     "bytes": 400000,
     "texturePx": 1024
+  },
+  "tools": {
+    "_source": "ADR 0020: the spanner and screwdriver in the hand",
+    "triangles": 2000,
+    "bytes": 100000,
+    "texturePx": 512
   }
 }

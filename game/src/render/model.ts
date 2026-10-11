@@ -16,6 +16,39 @@ export interface RenderAssets {
   ground: ImageBitmap | null;
   /** The mechanic's hand (plan 0008), or null: parts then move on their own. */
   hand: Object3D | null;
+  /** The spanner and screwdriver (plan 0011), or null: the hand then turns fasteners with its fingers. */
+  tools?: Tools | null;
+}
+
+export interface Tool {
+  object: Object3D;
+  /** Where the hand closes on it, in the tool's own frame. */
+  grip: [number, number, number];
+}
+
+export interface Tools {
+  spanner: Tool;
+  screwdriver: Tool;
+}
+
+/** Picks the two tools out of tools.glb by name (the loader keeps the original name in userData.name). */
+function pickTools(scene: Object3D | null): Tools | null {
+  if (!scene) return null;
+  const find = (name: string): Tool | null => {
+    let found: Object3D | null = null;
+    scene.traverse((o) => {
+      if (!found && (o.userData?.["name"] === name || o.name === name)) found = o;
+    });
+    if (!found) return null;
+    const obj: Object3D = found;
+    const g = obj.userData?.["grip_point"] as unknown;
+    const grip: [number, number, number] = Array.isArray(g) && g.length === 3 ? [Number(g[0]), Number(g[1]), Number(g[2])] : [0, 0, 0];
+    obj.removeFromParent();
+    return { object: obj, grip };
+  };
+  const spanner = find("spanner");
+  const screwdriver = find("screwdriver");
+  return spanner && screwdriver ? { spanner, screwdriver } : null;
 }
 
 async function fetchOk(url: string): Promise<Response | null> {
@@ -70,13 +103,14 @@ async function loadImage(url: string): Promise<ImageBitmap | null> {
   }
 }
 
-/** `machineBase`, `envUrl` and `handUrl` are URLs relative to the page. Never throws. */
-export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null): Promise<RenderAssets> {
-  const [model, environment, ground, hand] = await Promise.all([
+/** `machineBase`, `envUrl`, `handUrl` and `toolsUrl` are URLs relative to the page. Never throws. */
+export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null, toolsUrl: string | null = null): Promise<RenderAssets> {
+  const [model, environment, ground, hand, tools] = await Promise.all([
     loadModel(`${machineBase}model.glb`),
     loadEnvironment(envUrl),
     loadImage(`${machineBase}ground.png`),
     handUrl ? loadModel(handUrl) : Promise.resolve(null),
+    toolsUrl ? loadModel(toolsUrl) : Promise.resolve(null),
   ]);
-  return { model, environment, ground, hand };
+  return { model, environment, ground, hand, tools: pickTools(tools) };
 }

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { checkFileSize, checkHand, checkModel, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { checkFileSize, checkHand, checkModel, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -131,6 +131,21 @@ describe("the model contract and budgets (ADR 0014)", () => {
     expect(r.errors.join(" ")).toMatch(/2 materials use images larger than 1024 px \(exterior, second\)/);
     expect(r.errors.join(" ")).toMatch(/external file \(outside.png\)/);
   });
+
+  it("textures: a material without a baked base colour texture is an error (an unbaked model)", () => {
+    // Plan 0011 found an export from an unbaked .blend (model.py rerun, texture.py not) passing with 0 errors.
+    const json = {
+      ...modelJson(all),
+      images: [{ bufferView: 0, mimeType: "image/png" }],
+      bufferViews: [{ byteOffset: 0, byteLength: 32 }],
+      textures: [{ source: 0 }],
+      materials: [{ name: "baked_exterior", pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }, { name: "tank_paint", pbrMetallicRoughness: { baseColorFactor: [0.1, 0.3, 0.7, 1] } }],
+    };
+    const r = checkModel(readGlb(makeGlb(json, new Uint8Array(32))), ids, budgets);
+    expect(r.errors.join(" ")).toMatch(/"tank_paint" has no base colour texture/);
+    const baked = { ...json, materials: [json.materials[0]] };
+    expect(checkModel(readGlb(makeGlb(baked, new Uint8Array(32))), ids, budgets).errors).toEqual([]);
+  });
 });
 
 describe("atlas counting", () => {
@@ -222,5 +237,67 @@ describe("the mechanic's hand (ADRs 0015 and 0020)", () => {
     const big = { ...readGlb(makeGlb(handJson("mechanic_hand", 100, true))), byteLength: 400_001 };
     expect(checkHand(big, budgets).errors.join(" ")).toMatch(/over its 400 KB budget/);
     expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true))), budgets).errors).toEqual([]);
+  });
+});
+
+describe("fasteners in the model (ADR 0020, plan 0011)", () => {
+  /** Parts and base as roots; each fastener a child of its part, drawing `tris` triangles. */
+  const withFasteners = (fasteners: Record<string, string[]>, tris = 10, parentOf?: (part: string) => string) => {
+    const names = [...ids.parts, ...ids.base];
+    const nodes: Array<{ name: string; mesh: number; children?: number[] }> = names.map((name, i) => ({ name, mesh: i }));
+    const meshes = names.map((_, i) => ({ primitives: [{ attributes: { POSITION: i * 2 }, indices: i * 2 + 1 }] }));
+    const accessors = names.flatMap(() => [{ count: 30 }, { count: 30 }]);
+    for (const [part, list] of Object.entries(fasteners)) {
+      for (const id of list) {
+        const m = meshes.length;
+        meshes.push({ primitives: [{ attributes: { POSITION: accessors.length }, indices: accessors.length + 1 }] });
+        accessors.push({ count: tris * 3 }, { count: tris * 3 });
+        nodes.push({ name: id, mesh: m });
+        const parent = nodes.find((n) => n.name === (parentOf ? parentOf(part) : part))!;
+        parent.children = [...(parent.children ?? []), nodes.length - 1];
+      }
+    }
+    return readGlb(makeGlb({ scene: 0, scenes: [{ nodes: names.map((_, i) => i) }], nodes, meshes, accessors }));
+  };
+  const fasteners = Object.fromEntries(machine.parts.filter((p) => p.fasteners?.length).map((p) => [p.id, p.fasteners!.map((f) => f.id)]));
+  const all = { ...ids, fasteners };
+
+  it("accepts every fastener as a node under its part", () => {
+    expect(checkModel(withFasteners(fasteners), all, budgets).errors).toEqual([]);
+  });
+
+  it("reports a missing fastener node, and one that is not under its part", () => {
+    const missing = { ...fasteners, alternator_cover: fasteners["alternator_cover"]!.slice(1) };
+    expect(checkModel(withFasteners(missing), all, budgets).errors.join(" ")).toMatch(/No node named "alternator_cover.bolt_1"/);
+    const elsewhere = checkModel(withFasteners(fasteners, 10, (part) => (part === "muffler" ? "fuel_tank" : part)), all, budgets).errors.join(" ");
+    expect(elsewhere).toMatch(/"muffler.nut_1" must be a node under "muffler"/);
+  });
+
+  it("counts fasteners against their own allocation, not their part's", () => {
+    const many = Object.values(fasteners).flat().length;
+    const per = Math.floor(budgets.allocation["fasteners"]! / many) + 1;
+    expect(checkModel(withFasteners(fasteners, per), all, budgets).errors.join(" ")).toMatch(/fasteners have \d+ triangles, over their allocation/);
+  });
+});
+
+describe("the tools (ADR 0020, plan 0011)", () => {
+  const toolsJson = (names: string[], extras = true, tris = 100) => ({
+    scene: 0,
+    scenes: [{ nodes: names.map((_, i) => i) }],
+    nodes: names.map((name, i) => ({ name, mesh: i, ...(extras ? { extras: { grip_point: [0.08, 0, 0] } } : {}) })),
+    meshes: names.map((_, i) => ({ primitives: [{ attributes: { POSITION: i * 2 }, indices: i * 2 + 1 }] })),
+    accessors: names.flatMap(() => [{ count: tris * 3 }, { count: tris * 3 }]),
+  });
+
+  it("the shipped tools pass: a spanner and a screwdriver with grip points, within budget", () => {
+    const glb = readGlb(new Uint8Array(readFileSync(join(root, "game", "public", "hand", "tools.glb"))));
+    expect(checkTools(glb, budgets).errors).toEqual([]);
+  });
+
+  it("rejects a missing tool, a stray node, a missing grip point, and too many triangles", () => {
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner"]))), budgets).errors.join(" ")).toMatch(/No root node named "screwdriver"/);
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver", "hammer"]))), budgets).errors.join(" ")).toMatch(/"hammer" is not a tool/);
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], false))), budgets).errors.join(" ")).toMatch(/no grip_point/);
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], true, 1001))), budgets).errors.join(" ")).toMatch(/over their budget of 2000/);
   });
 });

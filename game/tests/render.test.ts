@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
-import { CARRY, carryPose, carryProgress, LOOSEN, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion } from "../src/render/motion.ts";
+import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion, spannerSwing } from "../src/render/motion.ts";
 import { clampOrbit, fitDistance, FRAME, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
-import { armAnchor, basisToQuaternion, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut } from "../src/render/handpose.ts";
+import { armAnchor, basisToQuaternion, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut, toolBasis, toolFor } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -688,5 +688,73 @@ describe("the hand as the pointer (plan 0010, ADR 0020)", () => {
     expect(followShare(0)).toBe(0);
     expect(followShare(0.1, 0)).toBe(1);
     expect(followShare(1)).toBeGreaterThan(0.99);
+  });
+});
+
+describe("fasteners and tools (plan 0011, ADR 0020)", () => {
+  it("a fastener turns out and ends standing proud of its hole", () => {
+    expect(fastenerPose(0)).toEqual({ angle: 0, out: 0 });
+    const out = fastenerPose(1);
+    expect(out.out).toBeCloseTo(FASTEN.backOut);
+    expect(out.angle).toBeCloseTo(FASTEN.turns * 2 * Math.PI);
+    expect(fastenerPose(2)).toEqual(fastenerPose(1));
+  });
+
+  it("the spanner swings in strokes on the bolt and never spins round it", () => {
+    for (let q = 0; q <= 1; q += 0.01) {
+      const a = spannerSwing(q);
+      expect(a).toBeGreaterThanOrEqual(-1e-9);
+      expect(a).toBeLessThanOrEqual((FASTEN.spannerStroke * Math.PI) / 180 + 1e-9);
+    }
+  });
+
+  it("four bolts take under a second and a half; a part without fasteners keeps its own time", () => {
+    const four = loosenPlan("unbolt", 4);
+    expect(four.fastenerStarts).toEqual([0, FASTEN.outSeconds, 2 * FASTEN.outSeconds, 3 * FASTEN.outSeconds]);
+    expect(four.total).toBeLessThan(1.5);
+    expect(four.freeSeconds).toBe(FASTEN.freeSeconds);
+    const none = loosenPlan("pull", 0);
+    expect(none.fastenerStarts).toEqual([]);
+    expect(none.total).toBe(LOOSEN.seconds.pull);
+  });
+
+  it("screws take the screwdriver, bolts and nuts the spanner", () => {
+    expect(toolFor("screw")).toBe("screwdriver");
+    expect(toolFor("bolt")).toBe("spanner");
+    expect(toolFor("nut")).toBe("spanner");
+  });
+
+  it("a tool lies along the fastener's axis, its handle towards the lower right of the screen", () => {
+    const right: Vec3 = [1, 0, 0];
+    const up: Vec3 = [0, 1, 0];
+    const b = toolBasis([0, 0, 1], right, up, 0);
+    expect(b.z).toEqual([0, 0, 1]);
+    expect(b.x[0]).toBeGreaterThan(0); // right
+    expect(b.x[1]).toBeLessThan(0); // down
+    const len = (v: Vec3) => Math.hypot(...v);
+    expect(len(b.x)).toBeCloseTo(1);
+    expect(b.x[0] * b.z[0] + b.x[1] * b.z[1] + b.x[2] * b.z[2]).toBeCloseTo(0);
+    // Turning swings the handle about the axis and keeps it across the axis.
+    const t = toolBasis([0, 0, 1], right, up, Math.PI / 2);
+    expect(t.x[0] * b.x[0] + t.x[1] * b.x[1] + t.x[2] * b.x[2]).toBeCloseTo(0);
+    // A fastener seen end on still gets a handle.
+    expect(len(toolBasis([1, -1, 0].map((v) => v / Math.SQRT2) as Vec3, right, up, 0).x)).toBeCloseTo(1);
+  });
+
+  it("with no model, every fastener gets a stand-in at its position, in its own pivot", () => {
+    const view = buildMachine(machine, null);
+    for (const part of machine.parts) {
+      const pv = view.parts.get(part.id)!;
+      expect(pv.fasteners.map((f) => f.id)).toEqual((part.fasteners ?? []).map((f) => f.id));
+      for (const f of pv.fasteners) {
+        const spec = part.fasteners!.find((x) => x.id === f.id)!;
+        expect(f.source).toBe("placeholder");
+        expect(f.pivot.children.length).toBe(1);
+        const world = new Vector3().copy(f.rest).add(new Vector3(...pv.home));
+        expect(world.x).toBeCloseTo(spec.position[0]);
+        expect(world.y).toBeCloseTo(spec.position[1]);
+        expect(world.z).toBeCloseTo(spec.position[2]);
+      }
+    }
   });
 });

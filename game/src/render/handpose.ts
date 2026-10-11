@@ -150,3 +150,33 @@ export function followShare(dt: number, halfLife: number = HAND.followHalfLife):
   if (!(halfLife > 0)) return 1;
   return 1 - Math.pow(0.5, dt / halfLife);
 }
+
+// ---- Tools on fasteners (plan 0011, ADR 0020) ----
+
+/** Which tool a fastener needs: a screwdriver for screws, a spanner for bolts and nuts. */
+export function toolFor(kind: "bolt" | "screw" | "nut"): "spanner" | "screwdriver" {
+  return kind === "screw" ? "screwdriver" : "spanner";
+}
+
+/**
+ * How a tool sits on a fastener, as a basis (its local x, y, z in world space), the same for both tools. The tool's local z lies along the
+ * fastener's axis (out of the hole). A screwdriver turns with the screw by `angle`. A spanner lies across the bolt with
+ * its handle (local x) towards the lower right of the screen, so the hand holding it stays in view, swung about the
+ * bolt's axis by `angle`.
+ */
+export function toolBasis(axis: Vec3, screenRight: Vec3, screenUp: Vec3, angle: number): { x: Vec3; y: Vec3; z: Vec3 } {
+  const z = normalize(axis);
+  const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const flat = (v: Vec3): Vec3 => sub(v, scale(z, dot(v, z)));
+  // The handle's direction before the swing: towards the lower right of the screen, in the plane across the axis.
+  let x = flat(sub(screenRight, screenUp));
+  if (Math.hypot(...x) < 1e-6) x = flat(screenRight);
+  if (Math.hypot(...x) < 1e-6) x = flat([1, 0, 0]);
+  x = normalize(x);
+  const y0 = cross(z, x);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const xr = add(scale(x, c), scale(y0, s));
+  const yr = cross(z, xr);
+  return { x: xr, y: yr, z };
+}

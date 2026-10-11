@@ -31,6 +31,11 @@ GROUPS = {
     "exterior": (2048, ["fuel_tank", "recoil_starter", "muffler", "alternator_cover", "air_filter_cover", "base_frame", "base_alternator", "base_engine", "base_panel"]),
     "small": (1024, ["carburetor", "fuel_tap", "fuel_hose", "air_filter", "spark_plug", "plug_cap", "capacitor"]),
 }
+# Fasteners (plan 0011) bake with their part's group.
+for _part in common.load_machine()["parts"]:
+    for _group, (_size, _names) in GROUPS.items():
+        if _part["id"] in _names:
+            _names.extend(f["id"] for f in _part.get("fasteners", []))
 TEX_DIR = os.path.join(common.ASSET_DIR, "textures")
 
 # Wear profile per modelling material: (profile, metal under chips or None, dust amount 0..1).
@@ -58,6 +63,10 @@ PROFILES = {
     "skin": ("skin", None, 0.0),
     "nail": ("nail", None, 0.15),
     "cloth": ("cloth", None, 0.15),
+    # The spanner and screwdriver (plan 0011): worn chrome and a grubby plastic handle.
+    "chrome": ("metal", None, 0.2),
+    "handle_yellow": ("plastic", None, 0.3),
+    "handle_black": ("plastic", None, 0.3),
 }
 GREASE = (0.012, 0.010, 0.009)
 DUST = (0.36, 0.31, 0.25)  # Lagos laterite dust, linear-ish, reddish brown
@@ -73,7 +82,7 @@ def srgb_to_linear(hex_colour):
 
 # ---- Step 1: atlas UVs ----
 
-def layout_uvs(objects):
+def layout_uvs(objects, margin=0.004):
     bpy.ops.object.mode_set(mode="OBJECT") if bpy.context.object and bpy.context.object.mode != "OBJECT" else None
     bpy.ops.object.select_all(action="DESELECT")
     for o in objects:
@@ -83,8 +92,8 @@ def layout_uvs(objects):
     bpy.context.view_layer.objects.active = objects[0]
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.004, scale_to_bounds=False)
-    bpy.ops.uv.pack_islands(margin=0.004, rotate=True)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=margin, scale_to_bounds=False)
+    bpy.ops.uv.pack_islands(margin=margin, rotate=True)
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
@@ -385,7 +394,8 @@ def bake_groups(groups, tex_dir):
             if any(s.material and s.material.name.startswith("baked_") for s in o.material_slots):
                 common.fail(f"'{o.name}' is already textured. Run model.py (or block.py) first to rebuild it.")
         print(f"[{group}] {len(objects)} objects, {size} px")
-        layout_uvs(objects)
+        # Islands keep apart by more than the bake margin, or colour bleeds between them (plan 0011: the tools at 512 px).
+        layout_uvs(objects, max(0.004, 1.5 * scene.render.bake.margin / size))
 
         target = new_image(f"{group}_target", size, False)
         made = {}

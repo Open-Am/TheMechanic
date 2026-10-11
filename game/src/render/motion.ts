@@ -186,3 +186,58 @@ export function carryPose(m: ResolvedMotion, explode: Vec3, c: number): Pose {
 export function carryProgress(dragPx: number): number {
   return clamp01(dragPx / CARRY.outPx);
 }
+
+// ---- Fasteners (plan 0011, ADR 0020) ----
+
+/** How the hand undoes and does up fasteners. Tuning lives here. */
+export const FASTEN = {
+  /** Seconds to turn one fastener out. */
+  outSeconds: 0.25,
+  /** Turns while it backs out. */
+  turns: 2,
+  /** Metres it stands proud of its hole once out. */
+  backOut: 0.008,
+  /** Seconds to do one up again (put-back, before the cord is pulled). */
+  upSeconds: 0.15,
+  /** Seconds the part takes to come free once its fasteners are out (shorter than without fasteners). */
+  freeSeconds: 0.3,
+  /** Degrees the spanner swings on each stroke; it ratchets back between strokes. */
+  spannerStroke: 60,
+} as const;
+
+/** A fastener's pose as it turns out: q from 0 (done up) to 1 (out). Angle in radians about its axis, out in metres. */
+export function fastenerPose(q: number): { angle: number; out: number } {
+  const t = clamp01(q);
+  return { angle: FASTEN.turns * 2 * Math.PI * t, out: FASTEN.backOut * t };
+}
+
+/**
+ * The spanner's swing about the bolt's axis while it turns the bolt out: strokes of FASTEN.spannerStroke that follow
+ * the bolt, each followed by a quick swing back, so the spanner stays on the bolt and never spins round it.
+ */
+export function spannerSwing(q: number): number {
+  const strokes = (FASTEN.turns * 360) / FASTEN.spannerStroke;
+  const s = clamp01(q) * strokes;
+  const f = s - Math.floor(Math.min(s, strokes - 1e-9));
+  const forward = 0.8; // share of each stroke spent turning; the rest swings back
+  const k = f < forward ? f / forward : 1 - (f - forward) / (1 - forward);
+  return (FASTEN.spannerStroke * Math.PI) / 180 * (q >= 1 ? 1 : k);
+}
+
+/** When each step of loosening a part happens, in seconds from the start. */
+export interface LoosenPlan {
+  /** Start time of each fastener, in order. */
+  fastenerStarts: number[];
+  /** When the part itself starts to come free, and for how long. */
+  freeStart: number;
+  freeSeconds: number;
+  total: number;
+}
+
+export function loosenPlan(type: MotionType, fastenerCount: number): LoosenPlan {
+  const n = Math.max(0, Math.floor(fastenerCount));
+  if (n === 0) return { fastenerStarts: [], freeStart: 0, freeSeconds: LOOSEN.seconds[type], total: LOOSEN.seconds[type] };
+  const fastenerStarts = Array.from({ length: n }, (_, i) => i * FASTEN.outSeconds);
+  const freeStart = n * FASTEN.outSeconds;
+  return { fastenerStarts, freeStart, freeSeconds: FASTEN.freeSeconds, total: freeStart + FASTEN.freeSeconds };
+}

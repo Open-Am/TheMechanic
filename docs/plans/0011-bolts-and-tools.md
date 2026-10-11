@@ -67,6 +67,10 @@ The fuel tap's lever screws, the tank handle's screws and the carburettor's bowl
 - `npm run verify:phone` passes as in step 7, with no console errors and at least 30 fps at 4x CPU throttle in headless Edge.
 - `assets/gen950/STATUS.md` records the fasteners per part with what still differs; the counts are marked unverified until the mechanic checks them. The owner looks on the phone.
 
+## Results (2026-10-11)
+
+Steps 1 to 8 are built; see `docs/releases/0.10.0.md`. The status stays `approved`, not `done`, for two reasons. The owner has not yet looked on the phone, and the phone preview is republished by the coordinating session. Also, `npm run verify:phone` passed on the final run but failed in two of six runs on the known `HAND.maxPush` gap (the capacitor carried from above), which waits on the owner. Every other check passes: `npm test` (262), `typecheck`, `docs:check`, `build`, `size` (183.1 KB), `assets` (23,658 triangles with 20 fastener nodes, 1.04 MB; tools 1,160 triangles, 48.6 KB) and `verify:drop`.
+
 ## Release note line
 
 Added: bolts, screws and nuts on the parts that have them. Loosening a part, the hand takes a spanner or screwdriver and turns each one out before the part comes free; they go with the part and are done up again when it goes back (plan 0011, ADR 0020).

@@ -16,7 +16,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(__file__))
 import common  # noqa: E402
@@ -67,9 +67,9 @@ def recoil_starter(M):
     back = disc(0.084, 0.004, (0.143, dome[1], dome[0]), "x", M["slot"], verts=40)
 
     pieces = [shell, ring, hub, reel, back]
+    # The four bolt ears; their bolts are fasteners in machine.json, built by fasteners() (plan 0011).
     for z, y in ((-0.13, 0.205), (-0.13, 0.077), (0.115, 0.232), (0.06, 0.045)):
         pieces.append(box((0.004, 0.022, 0.022), (0.124, y, z), M["black_steel"], bevel=0.003))
-        pieces.append(cyl(0.0055, 0.006, (0.127, y, z), "x", M["zinc"], verts=6))
     # T-handle on its cord, just in front of the vent ring.
     pieces.append(cyl(0.0035, 0.03, (0.172, 0.13, 0.135), "x", M["rubber"], verts=8))
     grip = bevelled(box((0.022, 0.07, 0.018), (0.19, 0.13, 0.142), M["black_plastic"]), 0.006, 3)
@@ -123,12 +123,11 @@ def muffler(M):
             cutters.append(box((0.044, 0.006, 0.02), (col, y, -0.143), M["slot"]))
             hoods.append(bevelled(box((0.048, 0.006, 0.004), (col, y + 0.005, -0.1465), M["exhaust"]), 0.0018, 2))
     cut(shield, cutters)
-    dimples = [disc(0.007, 0.003, (x, 0.1225, -0.146), "z", M["exhaust"], verts=16, bevel=0.0012) for x in (-0.11, -0.03)]
     pipe = tube([(0.002, 0.13, -0.11), (0.018, 0.14, -0.106), (0.03, 0.15, -0.1)], 0.011, M["exhaust"], resolution=6)
     flange = bevelled(box((0.004, 0.032, 0.062), (0.033, 0.15, -0.1), M["exhaust"]), 0.002)
     spout = cyl(0.011, 0.02, (-0.152, 0.078, -0.118), "x", M["exhaust"], verts=16)
     mesh = disc(0.009, 0.002, (-0.163, 0.078, -0.118), "x", M["slot"], verts=16)
-    return [can, shield, *hoods, *dimples, pipe, flange, spout, mesh]
+    return [can, shield, *hoods, pipe, flange, spout, mesh]  # the shield's bolts and the flange nuts are fasteners
 
 
 # ---- Alternator end cover ----
@@ -146,11 +145,7 @@ def alternator_cover(M):
         slots.append(s)
     cut(plate, slots)
     boss = disc(0.02, 0.008, (c[0] - 0.01, c[1], c[2]), "x", M["cast_aluminium"], verts=32, bevel=0.002)
-    pieces = [plate, boss]
-    for angle in (45, 135, 225, 315):
-        b = cyl(0.0055, 0.005, (c[0] - 0.009, c[1] + 0.072, c[2]), "x", M["zinc"], verts=6)
-        rotate_about(b, "x", angle, c)
-        pieces.append(b)
+    pieces = [plate, boss]  # its four bolts are fasteners
     wire = mat("earth_wire", "#7fa63a", 0.0, 0.6)
     pieces.append(tube([(c[0] - 0.009, c[1] + 0.081, c[2] + 0.01), (c[0] - 0.012, c[1] + 0.084, c[2] + 0.03), (c[0] - 0.006, c[1] + 0.07, c[2] + 0.06)], 0.0022, wire, resolution=6))
     return pieces
@@ -228,9 +223,9 @@ def carburetor(M):
     body = bevelled(box((0.04, 0.034, 0.03), c, M["cast_aluminium"]), 0.004, 2)
     throat = disc(0.012, 0.016, (c[0], c[1] + 0.004, c[2] + 0.012), "z", M["cast_aluminium"], verts=24, bevel=0.002)
     cut(throat, [cyl(0.008, 0.03, (c[0], c[1] + 0.004, c[2] + 0.014), "z", M["slot"], verts=20)])
-    outline = hull(circle_points(-0.0185, 0.0, 0.009, 16) + circle_points(0.0185, 0.0, 0.009, 16) + circle_points(0.0, 0.0, 0.016, 24))
+    outline = hull(circle_points(-0.024, 0.0, 0.0085, 16) + circle_points(0.024, 0.0, 0.0085, 16) + circle_points(0.0, 0.0, 0.016, 24))
     flange = prism([(x + c[0], y + c[1] + 0.004) for x, y in outline], "xy", c[2] - 0.019, c[2] - 0.015, M["cast_aluminium"], bevel=0.0012, segments=1)
-    cut(flange, [cyl(0.004, 0.02, (c[0] + dx, c[1] + 0.004, c[2] - 0.017), "z", M["slot"], verts=12) for dx in (-0.0185, 0.0185)] + [cyl(0.008, 0.02, (c[0], c[1] + 0.004, c[2] - 0.017), "z", M["slot"], verts=20)])
+    cut(flange, [cyl(0.004, 0.02, (c[0] + dx, c[1] + 0.004, c[2] - 0.017), "z", M["slot"], verts=12) for dx in (-0.024, 0.024)] + [cyl(0.008, 0.02, (c[0], c[1] + 0.004, c[2] - 0.017), "z", M["slot"], verts=20)])
     bowl = disc(0.017, 0.022, (c[0], c[1] - 0.028, c[2]), "y", M["bright_metal"], verts=32, bevel=0.003)
     bowl_bolt = cyl(0.004, 0.006, (c[0], c[1] - 0.042, c[2]), "y", M["brass"], verts=6)
     drain = cyl(0.0022, 0.008, (c[0] + 0.016, c[1] - 0.032, c[2]), "x", M["brass"], verts=8)
@@ -299,9 +294,7 @@ def air_filter_cover(M):
     cutters = [cyl(0.0045, 0.02, (x, 0.1, 0.16), "z", M["slot"], verts=12) for x in (-0.075, -0.06)]
     cutters.append(bevelled(box((0.045, 0.014, 0.008), (0.07, 0.1, 0.162), M["slot"]), 0.003))
     cut(door, cutters)
-    bolts = [cyl(0.0075, 0.005, (x, 0.1, 0.1635), "z", M["zinc"], verts=6) for x in (-0.1, 0.03)]
-    washers = [cyl(0.009, 0.0015, (x, 0.1, 0.1615), "z", M["zinc"], verts=16) for x in (-0.1, 0.03)]
-    return [door, *bolts, *washers]
+    return [door]  # its two bolts are fasteners
 
 
 def air_filter(M):
@@ -378,12 +371,66 @@ BUILDERS.update({
     "base_panel": ("base", base_panel),
 })
 
+# ---- Fasteners (plan 0011, ADR 0020) ----
+# Built from machine.json, one object per fastener named by its id, parented to its part, in the "fasteners" collection,
+# its origin at its head so the game can turn it about its axis. Hex bolt with a washer, Phillips pan-head screw, hex
+# nut with a washer and the stud's end showing. All drafts, like the data (docs/open-questions.md).
+
+FASTENERS = "fasteners"
+
+
+def fastener_pieces(f, M):
+    pos = f["position"]
+    a = f["axis"]
+    letter = "xyz"[[abs(v) for v in a].index(max(abs(v) for v in a))]
+    at = lambda k: (pos[0] + a[0] * k, pos[1] + a[1] * k, pos[2] + a[2] * k)  # noqa: E731
+    kind = f["kind"]
+    if kind == "screw":
+        head = disc(0.0045, 0.0026, pos, letter, M["zinc"], verts=12, bevel=0.0008)
+        cross = []
+        for long_axis in [c for c in "xyz" if c != letter]:
+            size = [0.0012 if c != long_axis else 0.0062 for c in "xyz"]
+            size["xyz".index(letter)] = 0.0012
+            cross.append(box(tuple(size), at(0.0013), M["slot"]))
+        return [head, *cross]
+    washer = cyl(0.0078, 0.0012, at(-0.0031), letter, M["zinc"], verts=16)
+    if kind == "nut":
+        nut = cyl(0.006, 0.005, pos, letter, M["zinc"], verts=6)
+        stud = cyl(0.0031, 0.004, at(0.004), letter, M["bright_metal"], verts=8)
+        return [nut, stud, washer]
+    head = cyl(0.0055, 0.005, pos, letter, M["zinc"], verts=6)
+    return [head, washer]
+
+
+def build_fasteners(part_name, machine, M):
+    """(Re)builds a part's fasteners from the data. Returns their objects."""
+    col = common.ensure_collection(FASTENERS)
+    for o in list(col.objects):
+        if o.name.startswith(part_name + "."):
+            bpy.data.objects.remove(o, do_unlink=True)
+    part = next((p for p in machine["parts"] if p["id"] == part_name), None)
+    parent = bpy.data.objects.get(part_name)
+    made = []
+    for f in (part or {}).get("fasteners", []):
+        obj = join(fastener_pieces(f, M), f["id"], col)
+        # Origin at the head, so the game turns it about its own axis.
+        head = Vector(common.gl(*f["position"]))
+        obj.data.transform(Matrix.Translation(obj.location - head))
+        obj.location = head
+        if parent:
+            obj.parent = parent
+            obj.matrix_parent_inverse = parent.matrix_world.inverted()
+        made.append(obj)
+    return made
+
+
 def main():
     wanted = common.args() or list(BUILDERS)
     unknown = [w for w in wanted if w not in BUILDERS]
     if unknown:
         common.fail(f"model.py has no builder for: {', '.join(unknown)}. Known: {', '.join(BUILDERS)}")
     M = materials()
+    machine = common.load_machine()
     bounds = {}
     for name in wanted:
         old = bpy.data.objects.get(name)
@@ -399,6 +446,9 @@ def main():
             "triangles": common.triangle_count(obj),
         }
         print(f"Modelled {name}: {bounds[name]['triangles']} triangles (allocation {common.ALLOCATION.get(name)})")
+        made = build_fasteners(name, machine, M)
+        if made:
+            print(f"  with {len(made)} fasteners: {sum(common.triangle_count(o) for o in made)} triangles")
     for obj in list(bpy.context.scene.collection.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
     bpy.ops.wm.save_mainfile()

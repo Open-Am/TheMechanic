@@ -246,7 +246,35 @@ async function pullOff(id: string): Promise<void> {
       await doubleTap(p.x, p.y);
       await sleep(350);
       await noteHidden(`loosening ${id}`);
-      if (await waitFor(`${id} loose`, async () => (await looseNow()).includes(id), 3000).catch(() => false)) {
+      // Plan 0011: a part held on by fasteners is undone with the right tool, fastener by fastener. Watch the tool in
+      // the hand through the whole loosening, not at one moment.
+      const count = FASTENED.get(id) ?? 0;
+      const used = new Set<string>();
+      toolsUsed.set(id, used);
+      let isLoose = false;
+      for (const end = Date.now() + 4000; Date.now() < end; ) {
+        if ((await looseNow()).includes(id)) {
+          isLoose = true;
+          break;
+        }
+        const tool = await evaluate<string | null>("window.__openAmDevRender.tool()");
+        if (tool) {
+          used.add(tool);
+          toolsSeen.add(tool);
+          if (!fastenerShots.has(tool)) {
+            fastenerShots.add(tool);
+            await screenshot(`12-hand-${tool}`);
+          }
+        }
+        await sleep(40);
+      }
+      if (isLoose) {
+        if (count > 0) {
+          const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners(${JSON.stringify(id)})`);
+          if (outs.length !== count || outs.some((d) => d < 0.006)) failures.push(`fasteners: ${id} came loose with its fasteners not all out (${outs.map((d) => (d * 1000).toFixed(1)).join(", ")} mm)`);
+          else fastenedOut.add(id);
+          if (await evaluate<string | null>("window.__openAmDevRender.tool()")) failures.push(`fasteners: the tool was still out after ${id} came loose`);
+        }
         await idle();
         const q = (await probe(id)) ?? p; // a loose part sits a few millimetres proud
         const tray = await trayAt();
@@ -260,6 +288,15 @@ async function pullOff(id: string): Promise<void> {
   throw new Error(`could not take ${id} off`);
 }
 
+/** Parts with fasteners in machine.json, and how many (plan 0011). */
+const FASTENED = new Map(machine.parts.filter((p) => (p.fasteners ?? []).length > 0).map((p) => [p.id, p.fasteners!.length]));
+const toolsSeen = new Set<string>();
+/** The tools seen in the hand during each part's last loosening. */
+const toolsUsed = new Map<string, Set<string>>();
+const fastenerShots = new Set<string>();
+const fastenedOut = new Set<string>();
+const fastenedBackIn = new Set<string>();
+
 async function putBack(id: string): Promise<void> {
   await idle();
   const chip = await evaluate<{ x: number; y: number }>(
@@ -268,6 +305,12 @@ async function putBack(id: string): Promise<void> {
   // Drop over the machine, right of centre: clear of the diagnostic panel in the top-left corner.
   await drag(chip.x, chip.y, VIEWPORT.width * 0.72, VIEWPORT.height * 0.5, 12);
   await waitFor(`${id} back on`, async () => !(await trayHas(id)), 3000);
+  if (FASTENED.has(id)) {
+    await idle();
+    const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners(${JSON.stringify(id)})`);
+    if (outs.some((d) => d > 0.0005)) failures.push(`fasteners: ${id} went back on with its fasteners not done up`);
+    else fastenedBackIn.add(id);
+  }
 }
 
 // ---- The run ----
@@ -297,7 +340,12 @@ let worstHidden = { share: 0, where: "" };
 const HIDDEN_LIMIT = 0.1;
 async function noteHidden(where: string): Promise<void> {
   const share = await evaluate<number>("window.__openAmDevRender.handHidden()");
-  if (process.env.HIDDEN_DEBUG && share > 0.05) console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}`);
+  if (process.env.HIDDEN_DEBUG && share > 0.05) {
+    const need = await evaluate<number>("window.__openAmDevRender.handNeed()");
+    const o = await orbitNow();
+    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; azimuth ${o.azimuth.toFixed(2)} polar ${o.polar.toFixed(2)}`);
+    if (share > HIDDEN_LIMIT) await screenshot(`hidden-${where.replace(/[^a-z0-9]+/gi, "-")}`);
+  }
   if (share > worstHidden.share) worstHidden = { share, where };
 }
 {
@@ -452,6 +500,62 @@ for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round+
 
 for (const f of faultFile.faults) if (!solved.has(f.id) && !failures.some((x) => x.startsWith(f.id))) failures.push(`${f.id}: never came up or not solved`);
 
+// Plan 0011: no fault needs the fuel tank (four screws) or the recoil starter (four bolts) off, so take them off in a
+// round of their own: the screwdriver for the screws, the spanner for the bolts, every fastener out before the part is
+// free, and done up again when it goes back.
+const toolRound: string[] = [];
+{
+  const EXPECT: Array<[string, string]> = [["fuel_tank", "screwdriver"], ["recoil_starter", "spanner"]];
+  // Ten minutes of patience: with retry turns this round can outlast the shortest customer (80 s).
+  await send("Page.navigate", { url: url.replace("?diag", "?diag&patience=600") });
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await sleep(300);
+  await tapSelector(".briefing .primary");
+  await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+  const order: string[] = [];
+  const add = (id: string) => {
+    if (order.includes(id)) return;
+    for (const dep of machine.parts.find((p) => p.id === id)?.requires ?? []) add(dep);
+    order.push(id);
+  };
+  for (const [id] of EXPECT) add(id);
+  try {
+    for (const id of order) await pullOff(id);
+    for (const [id, want] of EXPECT) {
+      const used = [...(toolsUsed.get(id) ?? [])];
+      if (used.length !== 1 || used[0] !== want) failures.push(`tools: ${id} was undone with ${used.join(" and ") || "no tool"}, not the ${want}`);
+      else if (!fastenedOut.has(id)) failures.push(`tools: ${id} came loose before its fasteners were out`);
+      else if (!(await trayHas(id))) failures.push(`tools: ${id} did not reach the tray`);
+    }
+    for (const id of [...order].reverse()) await putBack(id);
+    for (const [id, want] of EXPECT) {
+      if (fastenedBackIn.has(id) && !failures.some((f) => f.includes(id))) toolRound.push(`${id} with the ${want}`);
+    }
+    // The cord pulled while the starter's bolts are coming out: the tool goes away and the bolts are done up again.
+    await idle();
+    const st = await waitFor("the recoil starter in view", () => probe("recoil_starter"), 3000).catch(() => null);
+    if (st) {
+      await doubleTap(st.x, st.y);
+      const midway = await waitFor("the spanner out", () => evaluate<string | null>("window.__openAmDevRender.tool()"), 2000).catch(() => null);
+      await tapSelector(".pull");
+      await sleep(800);
+      const toolAfter = await evaluate<string | null>("window.__openAmDevRender.tool()");
+      const toolShown = await evaluate<boolean>("window.__openAmDevRender.toolVisible()");
+      const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners("recoil_starter")`);
+      if (!midway) failures.push("tools: the spanner was not out to test pulling the cord mid-loosening");
+      else if (toolAfter || toolShown) failures.push(`tools: the ${toolAfter ?? "tool"} stayed out after the cord was pulled mid-loosening`);
+      else if (outs.some((d) => d > 0.0005)) failures.push(`tools: the starter's bolts stayed out after the cord was pulled mid-loosening (${outs.map((d) => (d * 1000).toFixed(1)).join(", ")} mm)`);
+      else toolRound.push("the cord pulled mid-loosening puts the spanner away and the bolts back in");
+    } else failures.push("tools: the recoil starter was not in view to test pulling the cord mid-loosening");
+  } catch (e) {
+    failures.push(`tools: ${(e as Error).message}`);
+    await screenshot("fail-tools");
+  }
+  await send("Page.navigate", { url });
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await sleep(300);
+}
+
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
 if (failures.length === 0) await tapSelector(".briefing .primary");
 await send("Emulation.setCPUThrottlingRate", { rate: 4 });
@@ -480,6 +584,11 @@ console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
 console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
 console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}`);
 console.log(`Checks: ${checks.join("; ") || "not run"}`);
+console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done up again on ${[...fastenedBackIn].join(", ") || "none"}; tools seen: ${[...toolsSeen].join(", ") || "none"}`);
+if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
+for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
+console.log(`Tools round: ${toolRound.length ? `undone, to the tray and done up again: ${toolRound.join("; ")}` : "not passed"}`);
+if (toolRound.length !== 3 && !failures.some((x) => x.startsWith("tools:"))) failures.push("tools: the fuel tank and recoil starter round did not pass");
 console.log(`Hand inside the machine: at most ${(worstHidden.share * 100).toFixed(0)}% of its points hidden${worstHidden.where ? ` (${worstHidden.where})` : ""}, limit ${HIDDEN_LIMIT * 100}%`);
 if (worstHidden.share > HIDDEN_LIMIT) failures.push(`hand: ${(worstHidden.share * 100).toFixed(0)}% of it went inside the machine, ${worstHidden.where}`);
 if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen carrying a part");
