@@ -27,7 +27,7 @@ export interface AudioEnv {
   /** Makes the AudioContext, or null where Web Audio is missing. Called once, from the first unlock(). */
   createContext?: () => ContextLike | null;
   /** navigator.vibrate, bound, or undefined where the phone has none. */
-  vibrate?: (pattern: number | number[]) => boolean;
+  vibrate?: ((pattern: number | number[]) => boolean) | undefined;
   /** Defaults to the global setTimeout. */
   setTimeout?: (fn: () => void, ms: number) => unknown;
   /** Told of every play: the moment and whether it could be heard. For the development hooks. */
