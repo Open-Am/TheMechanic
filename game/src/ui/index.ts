@@ -6,8 +6,8 @@ import type { Game, RoundRecord } from "../app/round.ts";
 import type { ScoreBreakdown } from "../core/index.ts";
 import { briefingScreen, setBriefingLoading } from "./briefing.ts";
 import { createCard } from "./card.ts";
-import { el } from "./dom.ts";
-import { formatTime, inDropZone, patienceMood, progressShare, shareOffered, shareText } from "./format.ts";
+import { el, speakerIcon } from "./dom.ts";
+import { formatTime, inDropZone, patienceMood, progressShare, shareOffered, shareText, soundButton } from "./format.ts";
 import { type ResultExtras, type ShareRoute, resultScreen } from "./result.ts";
 import { startScreen } from "./start.ts";
 import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "./strings.ts";
@@ -30,6 +30,8 @@ export interface UiOptions {
   daily?: () => Promise<DailyStatus>;
   /** Sends the share text (ADR 0005). `sheet` is true when the phone has a share sheet; `url` is the page's link. */
   share?: { send(text: string): Promise<ShareRoute>; sheet: boolean; url: string };
+  /** Sound and vibration on or off, remembered by main.ts (ADR 0018). Without it there is no mute button. */
+  sound?: { muted: boolean; setMuted(muted: boolean): void };
 }
 
 export interface Ui {
@@ -58,7 +60,8 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   const trayHost = el("div", { class: "tray-host" });
   const dropHint = el("div", { class: "drop-hint", hidden: "", text: STRINGS.dropHere });
   const controls = el("div", { class: "controls" }, banner, pull, trayHost);
-  const hud = el("div", { class: "hud", hidden: "" }, timer, meter, speech, controls);
+  const mute = options.sound ? muteButton(options.sound) : null;
+  const hud = el("div", { class: "hud", hidden: "" }, timer, mute, meter, speech, controls);
   const overlays = el("div", { class: "overlays" });
   root.append(hud, overlays);
 
@@ -253,4 +256,23 @@ export function showCannotRun(root: HTMLElement, reason: "webgl" | "data"): void
       el("p", { text: reason === "webgl" ? STRINGS.cannotRunWebgl : STRINGS.cannotRunData }),
     ),
   );
+}
+
+/** The mute button at the top right of the working screen (plan 0013 step 7): sound and vibration off or on. */
+function muteButton(sound: { muted: boolean; setMuted(muted: boolean): void }): HTMLButtonElement {
+  const button = el("button", { class: "mute", type: "button" });
+  let muted = sound.muted;
+  const show = () => {
+    const s = soundButton(muted);
+    button.setAttribute("aria-label", s.label);
+    button.setAttribute("aria-pressed", s.pressed);
+    button.replaceChildren(speakerIcon(muted));
+  };
+  button.addEventListener("click", () => {
+    muted = !muted;
+    sound.setMuted(muted);
+    show();
+  });
+  show();
+  return button;
 }

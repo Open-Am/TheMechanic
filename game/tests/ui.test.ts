@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SYMPTOMS } from "../src/core/types.ts";
 import type { ScoreBreakdown } from "../src/core/types.ts";
-import { DROP_REACH, dailyButtonText, formatTime, inDropZone, patienceMood, shareOffered, shareText, shareUrl, starText, todayResultText } from "../src/ui/format.ts";
+import { DROP_REACH, dailyButtonText, formatTime, inDropZone, patienceMood, shareOffered, shareText, shareUrl, soundButton, starText, todayResultText } from "../src/ui/format.ts";
 import { SHARE, STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
 import { loadFaults } from "./helpers.ts";
 
@@ -133,5 +133,14 @@ describe("start screen text (plan 0014 readings 1, 5; ADR 0024)", () => {
   it("every share and daily template gives text", () => {
     expect(TEMPLATES.dailyDay(0)).toBe("Today's fault · Day 0");
     expect(SHARE.wrongParts(1)).toBe("1 wrong part");
+  });
+});
+
+describe("the mute button (plan 0013 step 7)", () => {
+  it("is pressed and reads Sound off when muted, and reads Sound on otherwise", () => {
+    expect(soundButton(true)).toEqual({ label: "Sound off", pressed: "true" });
+    expect(soundButton(false)).toEqual({ label: "Sound on", pressed: "false" });
+    expect(soundButton(true).label).toBe(STRINGS.soundOff);
+    expect(soundButton(false).label).toBe(STRINGS.soundOn);
   });
 });
