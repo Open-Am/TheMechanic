@@ -15,9 +15,11 @@ Landscape works but is not tuned. Safe-area insets are respected (`viewport-fit=
 
 ## Screens
 
-- **Briefing.** The customer's complaint in quotes, then the symptom text, then "Start". The machine loads behind it. The timer starts when "Start" is pressed.
+- **Loading.** Before any script runs, the page shows a thin pulsing bar with no words. It is replaced by the start screen as soon as `machine.json`, `faults.json` and `customers.json` arrive (plan 0014).
+- **Start.** "Open Am", then "Today's fault · Day N" and "Free play". Once today's scored attempt is used the daily button reads "Today's fault · practice", and the screen shows today's result ("Day N: score 52 ★★☆", "Day N: the customer walked", or "Day N: Not finished" for a daily left mid-round, ADR 0024). "Next customer" on the result screen comes back here (plan 0014).
+- **Briefing.** For today's fault, "Today's fault · Day N", or "Practice, not scored". Then the customer's complaint in quotes, the symptom text, and "Start". The model, environment and hand load behind it: until they are in, a progress bar (files arrived out of files requested) sits above "Start", which is disabled. The timer starts when "Start" is pressed; for a scored daily that also uses up the day's attempt (ADR 0024).
 - **Working.** The layout above.
-- **Result.** "It starts!", the time, wrong parts and failed pulls, the total score and the stars, then "Next customer".
+- **Result.** "It starts!", the time, wrong parts and failed pulls, the total score and the stars, then "Best" (the lowest fixed total for this fault, kept in the browser) and "New best" when this round set it. Practice shows "Not scored" and no best. A scored daily that ended with the engine running shows "Share": the phone's share sheet, otherwise the clipboard ("Copied"), otherwise the text in a box to copy by hand. Then "Next customer".
 - **Cannot run.** A plain message when WebGL is missing or the data is invalid. No retry loop.
 
 ## Gestures

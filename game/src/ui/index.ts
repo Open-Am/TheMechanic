@@ -1,12 +1,15 @@
 // The interface: screens and widgets over the canvas. Listens to app events and proposes actions (ADR 0010).
 // It never imports render; it only knows which element the machine is drawn in, to tell where a chip is dropped.
 
-import type { Game } from "../app/round.ts";
-import { briefingScreen } from "./briefing.ts";
+import type { DailyStatus } from "../app/daily.ts";
+import type { Game, RoundRecord } from "../app/round.ts";
+import type { ScoreBreakdown } from "../core/index.ts";
+import { briefingScreen, setBriefingLoading } from "./briefing.ts";
 import { createCard } from "./card.ts";
 import { el } from "./dom.ts";
-import { formatTime, inDropZone, patienceMood } from "./format.ts";
-import { resultScreen } from "./result.ts";
+import { formatTime, inDropZone, patienceMood, progressShare, shareOffered, shareText } from "./format.ts";
+import { type ResultExtras, type ShareRoute, resultScreen } from "./result.ts";
+import { startScreen } from "./start.ts";
 import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "./strings.ts";
 import { type ChipCarry, createTray } from "./tray.ts";
 import "./styles.css";
@@ -15,12 +18,18 @@ import "./styles.css";
 const BANNER_MS = 3000;
 /** How long a customer's line shows, ms. */
 const SPEECH_MS = 4000;
+/** The longest the result screen waits for the round to be saved before showing without the best, ms. */
+const RECORD_WAIT_MS = 1500;
 
 export interface UiOptions {
   /** A picture of a part for its tray chip, or null. Supplied by main.ts. */
   partImage?: (partId: string) => string | null;
   /** The hand carries a part dragged from the tray (ADR 0020). Supplied by main.ts. */
   carry?: ChipCarry;
+  /** Today's fault and whether its scored attempt is used (ADR 0005). Without it only free play is offered. */
+  daily?: () => Promise<DailyStatus>;
+  /** Sends the share text (ADR 0005). `sheet` is true when the phone has a share sheet; `url` is the page's link. */
+  share?: { send(text: string): Promise<ShareRoute>; sheet: boolean; url: string };
 }
 
 export interface Ui {
@@ -33,6 +42,10 @@ export interface Ui {
    * changes, so the machine can be framed above them (release 0.9.3). 0 while the HUD is hidden.
    */
   onCover(fn: (px: number) => void): void;
+  /** Loading progress of the model, environment and hand: files settled out of files requested (plan 0014 step 6). */
+  setLoading(done: number, total: number): void;
+  /** The scene is mounted: the briefing's Start is enabled. */
+  ready(): void;
 }
 
 export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, options: UiOptions = {}): Ui {
@@ -70,6 +83,8 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   window.addEventListener("resize", tellCover);
 
   let symptomText = "";
+  /** Share loaded so far, or null once render is mounted. Start waits for it (plan 0014 reading 10). */
+  let loading: number | null = 0;
   let bannerTimer: ReturnType<typeof setTimeout> | null = null;
   let speechTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -92,14 +107,52 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     overlays.appendChild(screen);
   }
 
-  function newRound(): void {
+  /** The start screen: today's fault or free play (plan 0014 reading 1). */
+  async function showStart(): Promise<void> {
     card.close();
-    const b = game.newRound();
+    hud.hidden = true;
+    speech.hidden = true;
+    const status = await readDaily();
+    showScreen(startScreen(status, () => void playDaily(), () => newRound()));
+  }
+
+  async function readDaily(): Promise<DailyStatus | null> {
+    if (!options.daily) return null;
+    try {
+      return await options.daily();
+    } catch {
+      return null;
+    }
+  }
+
+  /** The day is fixed here, when the round is chosen (plan 0014 reading 3). */
+  async function playDaily(): Promise<void> {
+    const status = await readDaily();
+    if (!status) return newRound();
+    newRound({ day: status.day, faultId: status.faultId, scored: !status.attempted });
+  }
+
+  /** What the result screen shows besides the score: the best, and Share for a fixed scored daily. */
+  async function extrasFor(score: ScoreBreakdown): Promise<ResultExtras> {
+    const pending = game.recorded;
+    let record: RoundRecord | null = null;
+    if (pending) {
+      const late = new Promise<null>((r) => setTimeout(() => r(null), RECORD_WAIT_MS));
+      record = await Promise.race([pending, late]);
+    }
+    const share = options.share;
+    const offered = record !== null && record.day !== null && share !== undefined && shareOffered(record.mode, score.outcome);
+    return { record, share: offered ? { text: shareText(record!.day!, score, share!.url), send: share!.send, sheet: share!.sheet } : null };
+  }
+
+  function newRound(choice?: Parameters<Game["newRound"]>[0]): void {
+    card.close();
+    const b = game.newRound(choice);
     symptomText = SYMPTOM_TEXT[b.symptom];
     hud.hidden = true;
     meter.hidden = b.customer === null;
     speech.hidden = true;
-    showScreen(briefingScreen(b, () => game.begin()));
+    showScreen(briefingScreen(b, () => game.begin(), loading));
   }
 
   pull.addEventListener("click", () => game.propose({ type: "pull" }));
@@ -128,9 +181,12 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     banner.hidden = true;
     update();
     const name = game.customerName;
+    const extras = extrasFor(e.score);
     setTimeout(() => {
-      hud.hidden = true;
-      showScreen(resultScreen(e.score, newRound, name ? { name, line: e.line } : null));
+      void extras.then((x) => {
+        hud.hidden = true;
+        showScreen(resultScreen(e.score, () => void showStart(), name ? { name, line: e.line } : null, x));
+      });
     }, 900); // let the engine-start moment register first
   });
   game.events.on("left", (e) => {
@@ -139,9 +195,12 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     update();
     say(e.line);
     const name = game.customerName ?? "";
+    const extras = extrasFor(e.score);
     setTimeout(() => {
-      hud.hidden = true;
-      showScreen(resultScreen(e.score, newRound, { name, line: e.line }));
+      void extras.then((x) => {
+        hud.hidden = true;
+        showScreen(resultScreen(e.score, () => void showStart(), { name, line: e.line }, x));
+      });
     }, 1600); // long enough to read what they said as they leave
   });
 
@@ -156,7 +215,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   }
   requestAnimationFrame(tick);
 
-  newRound();
+  void showStart();
 
   return {
     overTray(_x, y) {
@@ -167,6 +226,15 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
       controls.classList.toggle("carrying", state !== "none");
       controls.classList.toggle("over", state === "over");
       dropHint.hidden = state === "none";
+    },
+    setLoading(done, total) {
+      if (loading === null) return;
+      loading = progressShare(done, total);
+      overlays.querySelectorAll<HTMLElement>(".briefing").forEach((s) => setBriefingLoading(s, loading));
+    },
+    ready() {
+      loading = null;
+      overlays.querySelectorAll<HTMLElement>(".briefing").forEach((s) => setBriefingLoading(s, null));
     },
     onCover(fn) {
       coverFn = fn;

@@ -4,12 +4,15 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { Emitter } from "../src/app/emitter.ts";
 import { pickFault } from "../src/app/faults.ts";
+import { dailyStatus } from "../src/app/daily.ts";
 import { createGame, type GameEvents } from "../src/app/round.ts";
+import { dailyCustomerId, dailyFaultId, dayNumber } from "../src/core/daily.ts";
 import { conditionText } from "../src/core/reducer.ts";
 import { removalOrder } from "../src/core/rules.ts";
 import { score } from "../src/core/score.ts";
 import type { CustomerFile } from "../src/core/types.ts";
-import type { SoundName } from "../src/platform/interfaces/index.ts";
+import type { ScoreStore, SoundName, StoredResult } from "../src/platform/interfaces/index.ts";
+import { createDailyProvider } from "../src/platform/local/daily.ts";
 import { loadFaults, loadMachine } from "./helpers.ts";
 
 const machine = loadMachine();
@@ -328,5 +331,236 @@ describe("the round's customer (ADR 0015)", () => {
     game.tick();
     expect(game.running).toBe(true);
     expect(game.patience()).toBe(1);
+  });
+});
+
+describe("today's fault and saved results (ADR 0005, ADR 0022, ADR 0024)", () => {
+  const customers = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "public", "customers.json"), "utf8")) as CustomerFile;
+
+  /** An in-memory store with ADR 0022's rules: lowest fixed total per fault, one record per day. */
+  function memoryStore() {
+    const best = new Map<string, StoredResult>();
+    const daily = new Map<number, StoredResult>();
+    const writes: StoredResult[] = [];
+    const store: ScoreStore = {
+      async best(id) {
+        return best.get(id) ?? null;
+      },
+      async bestDaily(day) {
+        return daily.get(day) ?? null;
+      },
+      async record(r) {
+        writes.push(r);
+        if (r.day !== null) daily.set(r.day, r);
+        const b = best.get(r.faultId);
+        if (!r.unfinished && r.score.outcome === "fixed" && (!b || r.score.total < b.score.total)) best.set(r.faultId, r);
+      },
+      async dailyAttempted(day) {
+        return daily.has(day);
+      },
+    };
+    return { store, writes, daily, best };
+  }
+
+  function dailyGame(iso: string, store: ScoreStore, file: CustomerFile = customers) {
+    let today = new Date(iso);
+    const timer = fakeClock();
+    const clock = { now: timer.now, today: () => today };
+    const provider = createDailyProvider(clock, dayNumber, (d) => dailyFaultId(faults.faults, d));
+    const game = createGame({ machine, faults, clock, audio: { play: () => {} }, random: () => 0.5, customers: file, scores: store });
+    return { game, provider, advance: timer.advance, setToday: (s: string) => (today = new Date(s)) };
+  }
+
+  /** Plays the round's fault to a running engine, a second per action. */
+  function fix(game: ReturnType<typeof createGame>, advance: (ms: number) => void) {
+    const fault = faults.faults.find((f) => f.id === game.faultId)!;
+    const order = removalOrder(machine, fault);
+    const steps: Array<["remove" | "fix" | "install", string]> = [
+      ...order.map((id) => ["remove", id] as ["remove", string]),
+      ["fix", fault.culprit],
+      ...[...order].reverse().map((id) => ["install", id] as ["install", string]),
+    ];
+    for (const [type, partId] of steps) {
+      advance(1000);
+      game.propose({ type, partId });
+    }
+    advance(1000);
+    game.propose({ type: "pull" });
+  }
+
+  it("gives the same fault and customer to two games on the same day, and a different fault the next day", async () => {
+    const a = dailyGame("2026-10-11T08:00:00Z", memoryStore().store);
+    const b = dailyGame("2026-10-11T21:00:00Z", memoryStore().store);
+    const sa = await dailyStatus(a.provider, undefined);
+    const sb = await dailyStatus(b.provider, undefined);
+    expect(sb).toEqual(sa);
+    const ba = a.game.newRound({ day: sa.day, faultId: sa.faultId, scored: true });
+    const bb = b.game.newRound({ day: sb.day, faultId: sb.faultId, scored: true });
+    expect(a.game.faultId).toBe(sa.faultId);
+    expect(b.game.faultId).toBe(sa.faultId);
+    expect(ba.customer!.name).toBe(bb.customer!.name);
+    expect(ba.customer!.name).toBe(customers.customers.find((c) => c.id === dailyCustomerId(customers.customers, sa.day))!.name);
+    expect(ba.daily).toEqual({ day: 10, scored: true });
+    const next = await dailyStatus(dailyGame("2026-10-12T08:00:00Z", memoryStore().store).provider, undefined);
+    expect(next.day).toBe(sa.day + 1);
+    expect(next.faultId).not.toBe(sa.faultId);
+  });
+
+  it("free play has no daily on its briefing", () => {
+    const { game } = dailyGame("2026-10-11T08:00:00Z", memoryStore().store);
+    expect(game.newRound().daily).toBeNull();
+  });
+
+  it("records a daily started on day N and ended after Lagos midnight for day N", async () => {
+    const { store, daily } = memoryStore();
+    const g = dailyGame("2026-10-11T22:59:00Z", store);
+    const s = await dailyStatus(g.provider, store);
+    g.game.newRound({ day: s.day, faultId: s.faultId, scored: true });
+    g.game.begin();
+    g.setToday("2026-10-11T23:05:00Z");
+    fix(g.game, g.advance);
+    await g.game.recorded;
+    expect([...daily.keys()]).toEqual([s.day]);
+    expect(daily.get(s.day)!.unfinished).toBeUndefined();
+    // The provider has moved on to the next day, whose daily is still open.
+    const next = await dailyStatus(g.provider, store);
+    expect(next.day).toBe(s.day + 1);
+    expect(next.attempted).toBe(false);
+  });
+
+  it("a fixed daily uses up the attempt", async () => {
+    const { store } = memoryStore();
+    const g = dailyGame("2026-10-11T08:00:00Z", store);
+    const s = await dailyStatus(g.provider, store);
+    expect(s.attempted).toBe(false);
+    g.game.newRound({ day: s.day, faultId: s.faultId, scored: true });
+    g.game.begin();
+    fix(g.game, g.advance);
+    const r = await g.game.recorded;
+    expect(r).toMatchObject({ mode: "daily", day: s.day, newBest: true });
+    const after = await dailyStatus(g.provider, store);
+    expect(after.attempted).toBe(true);
+    expect(after.result!.score.outcome).toBe("fixed");
+  });
+
+  it("a walked daily uses up the attempt and is never a best", async () => {
+    const { store, best } = memoryStore();
+    const quick = { schema: 1, customers: customers.customers.map((c) => ({ ...c, patience: 5 })) } satisfies CustomerFile;
+    const g = dailyGame("2026-10-11T08:00:00Z", store, quick);
+    const s = await dailyStatus(g.provider, store);
+    g.game.newRound({ day: s.day, faultId: s.faultId, scored: true });
+    g.game.begin();
+    g.advance(6000);
+    g.game.tick();
+    expect(g.game.outcome).toBe("walked");
+    expect(await g.game.recorded).toEqual({ mode: "daily", day: s.day, best: null, newBest: false });
+    const after = await dailyStatus(g.provider, store);
+    expect(after.attempted).toBe(true);
+    expect(after.result!.score.outcome).toBe("walked");
+    expect(after.result!.unfinished).toBeUndefined();
+    expect(best.size).toBe(0);
+  });
+
+  it("a daily whose timer started and never ends uses up the attempt, saved unfinished, never a best", async () => {
+    const { store, best, writes } = memoryStore();
+    const g = dailyGame("2026-10-11T08:00:00Z", store);
+    const s = await dailyStatus(g.provider, store);
+    g.game.newRound({ day: s.day, faultId: s.faultId, scored: true });
+    expect(writes).toEqual([]); // choosing the daily does not use it
+    g.game.begin();
+    g.advance(3000);
+    g.game.propose({ type: "remove", partId: "muffler" });
+    expect(g.game.recorded).toBeNull();
+    const after = await dailyStatus(g.provider, store);
+    expect(after.attempted).toBe(true);
+    expect(after.result).toMatchObject({ faultId: s.faultId, day: s.day, unfinished: true, log: [] });
+    expect(best.size).toBe(0);
+    // The page reloads: a new game on the same store sees the attempt as used.
+    const reloaded = dailyGame("2026-10-11T09:00:00Z", store);
+    expect((await dailyStatus(reloaded.provider, store)).attempted).toBe(true);
+  });
+
+  it("a practice round is not recorded and shows no best", async () => {
+    const { store, writes } = memoryStore();
+    const g = dailyGame("2026-10-11T08:00:00Z", store);
+    const s = await dailyStatus(g.provider, store);
+    const b = g.game.newRound({ day: s.day, faultId: s.faultId, scored: false });
+    expect(b.daily).toEqual({ day: s.day, scored: false });
+    g.game.begin();
+    fix(g.game, g.advance);
+    expect(await g.game.recorded).toEqual({ mode: "practice", day: s.day, best: null, newBest: false });
+    expect(writes).toEqual([]);
+  });
+
+  it("free play is recorded with day null", async () => {
+    const { store, writes } = memoryStore();
+    const g = dailyGame("2026-10-11T08:00:00Z", store);
+    const b = g.game.newRound();
+    g.game.begin();
+    fix(g.game, g.advance);
+    expect(await g.game.recorded).toMatchObject({ mode: "free", day: null, newBest: true });
+    expect(b.daily).toBeNull();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ day: null, faultId: g.game.faultId });
+    expect(writes[0]!.unfinished).toBeUndefined();
+  });
+
+  it("only a lower total is a new best; the best shown is the lowest", async () => {
+    const { store } = memoryStore();
+    // A game with one fault, so free play repeats it.
+    const one = { ...faults, faults: [faults.faults[0]!] };
+    const timer = fakeClock();
+    const game = createGame({ machine, faults: one, clock: { now: timer.now, today: () => new Date(0) }, audio: { play: () => {} }, random: () => 0.5, scores: store });
+    const round = async (waitMs: number) => {
+      game.newRound();
+      game.begin();
+      timer.advance(waitMs);
+      fix(game, timer.advance);
+      return (await game.recorded)!;
+    };
+    const first = await round(0);
+    expect(first.newBest).toBe(true);
+    const slower = await round(30_000);
+    expect(slower).toEqual({ mode: "free", day: null, best: first.best, newBest: false });
+    const same = await round(0);
+    expect(same.newBest).toBe(false);
+    expect(same.best).toBe(first.best);
+  });
+
+  it("the recorded score equals score() replayed from the recorded log", async () => {
+    const { store, writes } = memoryStore();
+    const g = dailyGame("2026-10-11T08:00:00Z", store);
+    const s = await dailyStatus(g.provider, store);
+    const b = g.game.newRound({ day: s.day, faultId: s.faultId, scored: true });
+    g.game.begin();
+    g.advance(2000);
+    g.game.propose({ type: "pull" });
+    fix(g.game, g.advance);
+    await g.game.recorded;
+    const saved = writes.at(-1)!;
+    const customer = customers.customers.find((c) => c.name === b.customer!.name)!;
+    expect(saved.score).toEqual(score(machine, faults.faults.find((f) => f.id === s.faultId)!, saved.log, customer));
+    expect(saved.score.failedPulls).toBe(1);
+  });
+
+  it("a store that fails never breaks the round", async () => {
+    const broken: ScoreStore = {
+      best: () => Promise.reject(new Error("x")),
+      bestDaily: () => Promise.reject(new Error("x")),
+      record: () => Promise.reject(new Error("x")),
+      dailyAttempted: () => Promise.reject(new Error("x")),
+    };
+    const g = dailyGame("2026-10-11T08:00:00Z", broken);
+    const s = await dailyStatus(g.provider, broken);
+    expect(s.attempted).toBe(false);
+    g.game.newRound({ day: s.day, faultId: s.faultId, scored: true });
+    g.game.begin();
+    fix(g.game, g.advance);
+    expect(await g.game.recorded).toEqual({ mode: "daily", day: s.day, best: null, newBest: false });
+  });
+
+  it("refuses a daily fault that does not exist", () => {
+    const { game } = dailyGame("2026-10-11T08:00:00Z", memoryStore().store);
+    expect(() => game.newRound({ day: 1, faultId: "ghost", scored: true })).toThrow();
   });
 });

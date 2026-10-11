@@ -405,8 +405,11 @@ for (const inp of INPUTS) {
   await send("Emulation.setTouchEmulationEnabled", { enabled: inp === "touch", maxTouchPoints: 5 });
   for (const place of DROPS) {
     await send("Page.navigate", { url });
+    await tapSelector(".start .free"); // the start screen (plan 0014): free play
     await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
     await sleep(300);
+    // Start stays disabled until the machine has loaded (plan 0014).
+    await waitFor("Start enabled", () => evaluate<boolean>("document.querySelector('.briefing .primary')?.disabled === false"), 30000);
     await tapSelector(".briefing .primary");
     await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
     // Collapse the diagnostic panel to its one-line frame rate so it covers nothing a player would touch.
@@ -462,5 +465,8 @@ console.log(`Machine under the controls: at the start of ${covered} removal${cov
 console.log(`Frame rate: ${fpsOk ? "held through every round" : "FELL as parts came off"}`);
 console.log(`Console errors: ${consoleErrors.length}`);
 for (const e of consoleErrors) console.log(`   ${e}`);
+// Close the browser over DevTools: on Windows the launched msedge.exe hands over to another process, so killing its pid
+// can leave a headless browser on the debug port, and the next run would reuse it with this run's saved scores.
+await Promise.race([send("Browser.close").catch(() => {}), sleep(1000)]);
 ws.close();
 process.exit(allOk && fpsOk && covered === 0 && consoleErrors.length === 0 ? 0 : 1);

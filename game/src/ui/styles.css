@@ -422,6 +422,74 @@ button.pull {
   font-size: 14px;
 }
 
+/* ---- Start, daily, best, share (plan 0014) ---- */
+
+.start .free,
+.share-block .share {
+  min-height: 52px;
+  font-size: 18px;
+}
+
+.start .free {
+  margin-top: 8px;
+}
+
+.today,
+.daily-label {
+  margin: 0;
+  font-size: 16px;
+  color: var(--accent);
+}
+
+.progress.loading {
+  margin-top: 16px;
+}
+
+.progress.loading .fill {
+  transition: width 200ms ease-out;
+}
+
+.breakdown .best {
+  color: var(--muted);
+  border-bottom: 0;
+}
+
+.new-best {
+  margin: 0;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.not-scored {
+  margin: 0;
+  color: var(--muted);
+}
+
+.share-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.share-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.share-text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  resize: none;
+}
+
 .cannot-run {
   justify-content: center;
   text-align: center;

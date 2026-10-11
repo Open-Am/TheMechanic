@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SYMPTOMS } from "../src/core/types.ts";
-import { DROP_REACH, formatTime, inDropZone, patienceMood, starText } from "../src/ui/format.ts";
-import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
+import type { ScoreBreakdown } from "../src/core/types.ts";
+import { DROP_REACH, dailyButtonText, formatTime, inDropZone, patienceMood, shareOffered, shareText, shareUrl, starText, todayResultText } from "../src/ui/format.ts";
+import { SHARE, STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
 import { loadFaults } from "./helpers.ts";
 
 describe("formatTime", () => {
@@ -67,5 +68,70 @@ describe("the tray drop zone (ADR 0020)", () => {
     expect(inDropZone(top - DROP_REACH - 1, top, bottom)).toBe(false);
     expect(inDropZone(bottom, top, bottom)).toBe(true);
     expect(inDropZone(bottom + 1, top, bottom)).toBe(false);
+  });
+});
+
+describe("share text (ADR 0005)", () => {
+  const fixed = (elapsedSeconds: number, wrongParts: number, stars: 1 | 2 | 3): ScoreBreakdown => ({
+    elapsedSeconds,
+    wrongParts,
+    failedPulls: 0,
+    total: elapsedSeconds + 10 * wrongParts,
+    stars,
+    complete: true,
+    outcome: "fixed",
+  });
+
+  it("matches ADR 0005's example exactly", () => {
+    expect(shareText(12, fixed(38, 1, 3), "https://example.org/")).toBe("Open Am · Day 12\nFixed in 38s · 1 wrong part · ★★★\nhttps://example.org/");
+  });
+
+  it("says 0 wrong parts and 2 wrong parts", () => {
+    expect(shareText(1, fixed(20, 0, 3), "u").split("\n")[1]).toBe("Fixed in 20s · 0 wrong parts · ★★★");
+    expect(shareText(1, fixed(20, 2, 3), "u").split("\n")[1]).toBe("Fixed in 20s · 2 wrong parts · ★★★");
+  });
+
+  it("always counts in seconds, and shows two stars as ★★☆", () => {
+    expect(shareText(3, fixed(95, 0, 2), "u")).toBe("Open Am · Day 3\nFixed in 95s · 0 wrong parts · ★★☆\nu");
+  });
+
+  it("never shows failed pulls", () => {
+    const s = { ...fixed(40, 0, 2), failedPulls: 2, total: 70 };
+    expect(shareText(3, s, "u")).not.toMatch(/pull/i);
+  });
+
+  it("links to the page's origin and base path, with no query", () => {
+    expect(shareUrl("https://openam.example/?diag&today=2026-10-12T08:00:00Z#x", "./")).toBe("https://openam.example/");
+    expect(shareUrl("https://host.example/game/index.html?diag", "./")).toBe("https://host.example/game/");
+    expect(shareUrl("http://192.168.1.5:5173/", "/")).toBe("http://192.168.1.5:5173/");
+  });
+});
+
+describe("start screen text (plan 0014 readings 1, 5; ADR 0024)", () => {
+  const sc = (total: number, outcome: "fixed" | "walked", stars: 0 | 1 | 2 | 3): ScoreBreakdown => ({ elapsedSeconds: total, wrongParts: 0, failedPulls: 0, total, stars, complete: outcome === "fixed", outcome });
+
+  it("offers today's day until the attempt is used, then practice", () => {
+    expect(dailyButtonText({ day: 10, attempted: false, result: null })).toBe("Today's fault · Day 10");
+    expect(dailyButtonText({ day: 10, attempted: true, result: null })).toBe("Today's fault · practice");
+  });
+
+  it("shows today's scored result, a walk-out, or Not finished", () => {
+    expect(todayResultText({ day: 10, attempted: false, result: null })).toBeNull();
+    expect(todayResultText({ day: 10, attempted: true, result: { score: sc(52, "fixed", 2) } })).toBe("Day 10: score 52 ★★☆");
+    expect(todayResultText({ day: 10, attempted: true, result: { score: sc(30, "walked", 0) } })).toBe("Day 10: the customer walked");
+    expect(todayResultText({ day: 10, attempted: true, result: { unfinished: true, score: sc(0, "fixed", 3) } })).toBe("Day 10: Not finished");
+  });
+
+  it("Share is offered only for a fixed scored daily", () => {
+    expect(shareOffered("daily", "fixed")).toBe(true);
+    expect(shareOffered("daily", "walked")).toBe(false);
+    expect(shareOffered("practice", "fixed")).toBe(false);
+    expect(shareOffered("free", "fixed")).toBe(false);
+    expect(shareOffered(null, "fixed")).toBe(false);
+  });
+
+  it("every share and daily template gives text", () => {
+    expect(TEMPLATES.dailyDay(0)).toBe("Today's fault · Day 0");
+    expect(SHARE.wrongParts(1)).toBe("1 wrong part");
   });
 });
