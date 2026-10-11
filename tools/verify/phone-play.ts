@@ -576,10 +576,9 @@ const toolRound: string[] = [];
   const EXPECT: Array<[string, string]> = [["fuel_tank", "screwdriver"], ["recoil_starter", "spanner"]];
   // Ten minutes of patience: with retry turns this round can outlast the shortest customer (80 s).
   await send("Page.navigate", { url: url.replace("?diag", "?diag&patience=600") });
-  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
-  await sleep(300);
-  await tapSelector(".briefing .primary");
-  await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+  await atStart();
+  await toBriefing();
+  await beginRound();
   const order: string[] = [];
   const add = (id: string) => {
     if (order.includes(id)) return;
@@ -620,8 +619,7 @@ const toolRound: string[] = [];
     await screenshot("fail-tools");
   }
   await send("Page.navigate", { url });
-  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
-  await sleep(300);
+  await atStart();
 }
 
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
