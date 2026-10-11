@@ -241,3 +241,26 @@ export function loosenPlan(type: MotionType, fastenerCount: number): LoosenPlan 
   const freeStart = n * FASTEN.outSeconds;
   return { fastenerStarts, freeStart, freeSeconds: FASTEN.freeSeconds, total: freeStart + FASTEN.freeSeconds };
 }
+
+// ---- Sound (plan 0013 reading 6, ADR 0018) ----
+
+/**
+ * How many whole turns a part or fastener with `turns` turns in all crosses as its progress goes from `from` to `to`
+ * (each 0 to 1). A turn counts when it completes, so two turns click at half way and at the end. Frames that split a
+ * step never count a turn twice, and the reverse (going in) counts the same.
+ */
+export function turnsCrossed(turns: number, from: number, to: number): number {
+  if (!(turns > 0)) return 0;
+  const at = (p: number) => Math.floor(turns * clamp01(p) + 1e-9);
+  return Math.abs(at(to) - at(from));
+}
+
+/** A per-step counter: call it with each new progress, and it calls `click` once for each whole turn crossed. */
+export function turnCounter(turns: number, click: () => void): (p: number) => void {
+  let last = 0;
+  return (p) => {
+    const n = turnsCrossed(turns, last, p);
+    last = p;
+    for (let i = 0; i < n; i++) click();
+  };
+}

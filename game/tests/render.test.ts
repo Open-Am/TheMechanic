@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
-import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion, spannerSwing } from "../src/render/motion.ts";
+import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion, spannerSwing, turnCounter, turnsCrossed } from "../src/render/motion.ts";
 import { clampOrbit, fitDistance, FRAME, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
@@ -756,5 +756,50 @@ describe("fasteners and tools (plan 0011, ADR 0020)", () => {
         expect(world.z).toBeCloseTo(spec.position[2]);
       }
     }
+  });
+});
+
+describe("clicks per turn (plan 0013 reading 6, ADR 0018)", () => {
+  /** Drives a fastener step through tweens frame by frame and counts the clicks. */
+  function clicksOver(turns: number, seconds: number, dt: number): number {
+    let clicks = 0;
+    const count = turnCounter(turns, () => clicks++);
+    const tweens = new Tweens();
+    tweens.play("f", { duration: seconds, update: count });
+    for (let t = 0; t < seconds + 1; t += dt) tweens.update(dt);
+    return clicks;
+  }
+
+  it("two turns give two clicks over a whole fastener step, at half way and at the end", () => {
+    expect(turnsCrossed(FASTEN.turns, 0, 1)).toBe(2);
+    expect(turnsCrossed(2, 0, 0.49)).toBe(0);
+    expect(turnsCrossed(2, 0.49, 0.5)).toBe(1);
+    expect(turnsCrossed(2, 0.5, 0.99)).toBe(0);
+    expect(turnsCrossed(2, 0.99, 1)).toBe(1);
+    expect(clicksOver(FASTEN.turns, FASTEN.outSeconds, 1 / 60)).toBe(2);
+  });
+
+  it("never counts a turn twice across frames, at any frame rate", () => {
+    for (const dt of [1 / 120, 1 / 60, 1 / 30, 1 / 7, 0.2, 1]) expect(clicksOver(2, FASTEN.outSeconds, dt), `dt ${dt}`).toBe(2);
+    expect(clicksOver(3, 0.8, 1 / 60)).toBe(3);
+  });
+
+  it("the reverse counts the same: done up again, a fastener clicks twice", () => {
+    expect(turnsCrossed(2, 1, 0)).toBe(2);
+    expect(turnsCrossed(2, 0.6, 0.4)).toBe(1);
+    expect(clicksOver(FASTEN.turns, FASTEN.upSeconds, 1 / 60)).toBe(2);
+  });
+
+  it("an unscrewed part clicks for the whole turns it makes while loosening", () => {
+    const plug = resolveMotion({ type: "unscrew", axis: "y", turns: 3 });
+    expect(turnsCrossed(plug.turns * LOOSEN.unscrewShare, 0, 1)).toBe(2); // 2.25 turns
+    const tap = resolveMotion({ type: "unscrew", axis: "y", turns: 1 });
+    expect(turnsCrossed(tap.turns * LOOSEN.unscrewShare, 0, 1)).toBe(0); // 0.75 of a turn: no whole turn
+    expect(turnsCrossed(tap.turns, 0, 1)).toBe(1); // going back in, its whole turn
+  });
+
+  it("no turns, no clicks", () => {
+    expect(turnsCrossed(0, 0, 1)).toBe(0);
+    expect(turnsCrossed(Number.NaN, 0, 1)).toBe(0);
   });
 });

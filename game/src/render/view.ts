@@ -19,10 +19,11 @@ import {
   Vector3,
   WebGLRenderer,
 } from "three";
+import { giveMoment, type Moment } from "../app/moments.ts";
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId } from "../core/index.ts";
 import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
-import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, poseAt, resolveMotion, spannerSwing, TIMING, type Pose } from "./motion.ts";
+import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, poseAt, resolveMotion, spannerSwing, TIMING, turnCounter, type Pose } from "./motion.ts";
 import { fitDistance, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
@@ -55,6 +56,12 @@ export interface RenderView {
   endChipCarry(partId: PartId): void;
   /** Told whenever carrying a part to the tray starts, comes over the tray, leaves it, or ends. Supplied by main.ts. */
   onCarry(fn: (state: "none" | "carrying" | "over") => void): void;
+  /**
+   * Told of each moment the finger makes, as the picture shows it: a fastener's or unscrewed part's whole turn, a part
+   * giving, a part seating home (ADR 0018, plan 0013 step 5). Supplied by main.ts, which plays them; render never
+   * imports platform (ADR 0010). A part that cannot come off makes none.
+   */
+  onMoment(fn: (moment: Moment) => void): void;
   dispose(): void;
 }
 
@@ -210,6 +217,16 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const loose = new Set<PartId>();
   const loosening = new Set<PartId>();
 
+  /** Where the finger's moments go (plan 0013 step 5). Set by main.ts; nothing is told until then. */
+  let momentFn: ((m: Moment) => void) | null = null;
+  function moment(m: Moment): void {
+    try {
+      momentFn?.(m);
+    } catch {
+      // A sound that fails never stops an animation.
+    }
+  }
+
   /**
    * Loosens a part: the hand undoes it and it sits loose. Does nothing at all if it cannot come off now (ADR 0007). The
    * hand takes hold at `at`, where the player touched the part, if given; otherwise at the last spot under the pointer
@@ -224,11 +241,23 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const m = resolveMotion(part.motion);
     loosening.add(id);
     const s = at ?? (lastSurface && lastSurface.part === id ? lastSurface : surfaceOfPart(pv));
+    // The part gives as its freeing step starts; an unscrewed part clicks once a whole turn instead (plan 0013).
+    const give = giveMoment(m.type);
+    let gave = false;
+    const turns = turnCounter(m.type === "unscrew" ? m.turns * LOOSEN.unscrewShare : 0, () => moment("turn"));
+    const free = (q: number): void => {
+      if (!gave) {
+        gave = true;
+        if (give) moment(give);
+      }
+      turns(q);
+      applyPose(pv, loosePose(m, part.explode, q));
+    };
     const freeing: TweenSpec[] = pv.fasteners.length
-      ? [...fastenerSteps(pv), { duration: FASTEN.freeSeconds, ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) }, ...toolReturn()]
+      ? [...fastenerSteps(pv), { duration: FASTEN.freeSeconds, ease: ease.inOutCubic, update: free }, ...toolReturn()]
       : [
           { duration: HAND.close, update: () => hand?.grab(s.point, s.normal, shapeOf(id)), done: () => hand?.attachTo(pv.group) },
-          { duration: LOOSEN.seconds[m.type], ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) },
+          { duration: LOOSEN.seconds[m.type], ease: ease.inOutCubic, update: free },
         ];
     tweens.play(
       `loosen:${id}`,
@@ -313,6 +342,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       });
     }
     pv.fasteners.forEach((f, i) => {
+      const click = turnCounter(FASTEN.turns, () => moment("turn"));
       steps.push({
         duration: FASTEN.outSeconds,
         update: (p) => {
@@ -322,6 +352,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
             if (hop === 0 || toolFrom.lengthSq() === 0) toolFrom = fastenerAt(pv.fasteners[i - 1]!);
           }
           applyFastener(f, q);
+          click(q);
           const tool = tools ? tools[toolFor(f.kind)] : null;
           if (tool) {
             if (toolInHand && toolInHand !== tool) toolInHand.object.visible = false; // a different fastener, a different tool
@@ -541,6 +572,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     }
     for (const f of pv.fasteners) applyFastener(f, 1); // they come back with the part, out of their holes
     chip = null;
+    const screwIn = turnCounter(m.type === "unscrew" ? m.turns : 0, () => moment("turn"));
     tweens.play(
       id,
       {
@@ -553,10 +585,23 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       },
       {
         duration: m.duration,
-        update: (p) => applyPose(pv, poseAt(m, part.explode, 1 - p)),
+        update: (p) => {
+          screwIn(p);
+          applyPose(pv, poseAt(m, part.explode, 1 - p));
+        },
+        done: () => moment("seat"), // home, before its fasteners go in (plan 0013 reading 2)
       },
-      // The part is home; its fasteners go back in, one after another (ADR 0020).
-      ...pv.fasteners.map((f) => ({ duration: FASTEN.upSeconds, update: (p: number) => applyFastener(f, 1 - p) })),
+      // The part is home; its fasteners go back in, one after another (ADR 0020), clicking as they turn.
+      ...pv.fasteners.map((f) => {
+        const click = turnCounter(FASTEN.turns, () => moment("turn"));
+        return {
+          duration: FASTEN.upSeconds,
+          update: (p: number) => {
+            click(p);
+            applyFastener(f, 1 - p);
+          },
+        };
+      }),
       {
         duration: 0,
         update: () => {},
@@ -1024,6 +1069,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     },
     onCarry(fn) {
       carryState = fn;
+    },
+    onMoment(fn) {
+      momentFn = fn;
     },
     carryChip,
     endChipCarry,
