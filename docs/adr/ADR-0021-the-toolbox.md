@@ -1,7 +1,7 @@
 ---
 id: 0021
 title: The toolbox, and the hand fetching and returning its tools
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: []
 superseded_by: null
@@ -45,3 +45,4 @@ Work this creates, for a plan: the toolbox model and its place in the scene, and
 ## History
 
 - 2026-10-11: proposed by Claude, from the owner's message quoted above.
+- 2026-10-11: accepted by the owner, who wrote "I approve ADR 21."
