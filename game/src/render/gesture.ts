@@ -63,6 +63,25 @@ export function doubleTapPart(prev: Tap | null, tap: Tap): string | null {
 }
 
 /**
+ * The spot a double tap on `part` takes hold of: where the second tap touched the part, or, when the second tap shows a
+ * neighbour (it still counts, see `doubleTapPart`), where the first did. Null if neither tap touched the part's surface.
+ * Without this the hand fell back to the part's origin, which for a muffler is inside the machine (release 0.9.4).
+ */
+export function doubleTapGrasp<S extends { part: string | null }>(part: string, first: S | null, second: S | null): S | null {
+  if (second?.part === part) return second;
+  if (first?.part === part) return first;
+  return null;
+}
+
+/**
+ * True while a second tap at `now` (an event or frame time stamp, ms) could still complete a double tap after `prev`.
+ * The machine holds still meanwhile, so a reframe cannot slide the part from under the finger between the taps (0.9.4).
+ */
+export function awaitingSecondTap(prev: Tap | null, now: number): boolean {
+  return !!prev?.part && now - prev.up <= DOUBLE_TAP.ms;
+}
+
+/**
  * What a drag does once it passes the tap slop: carries the part if the press was on a loose part, otherwise turns the
  * machine. Whether a part that is not loose could come off plays no part in it (ADR 0007).
  */

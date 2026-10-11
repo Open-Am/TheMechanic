@@ -46,8 +46,13 @@ const faultFile = JSON.parse(readFileSync(join(machineDir, "faults.json"), "utf8
 const PORT = Number(process.env.OPEN_AM_PORT) || 5199;
 const DEBUG_PORT = Number(process.env.OPEN_AM_DEBUG_PORT) || 9333;
 const VIEWPORT = { width: 390, height: 844 };
-/** A camera drag on empty background, clear of the diagnostic panel in the top-left corner. */
-const ROTATE = { x0: 290, y0: 300, x1: 370, y1: 320 };
+/**
+ * A camera drag on empty background, clear of the diagnostic panel in the top-left corner: the same 80 by 20 px drag as
+ * before, started higher. Since 0.9.3 frames the machine higher, the old start (290, 300) landed on the tank, so the
+ * retry drag took hold of the machine instead of turning the camera, and a part could stay out of view through every
+ * retry (0.9.4).
+ */
+const ROTATE = { x0: 290, y0: 150, x1: 370, y1: 170 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const children: ChildProcess[] = [];
 const failures: string[] = [];
