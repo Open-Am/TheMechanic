@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { classify, GESTURE, screenDirection } from "../src/render/gesture.ts";
-import { MOTION_DEFAULTS, poseAt, resolveMotion } from "../src/render/motion.ts";
-import { clampOrbit, fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
+import { DOUBLE_TAP, dragMode, isDoubleTap, screenDirection } from "../src/render/gesture.ts";
+import { CARRY, carryPose, carryProgress, LOOSEN, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion } from "../src/render/motion.ts";
+import { clampOrbit, fitDistance, position, projectPoint, rotate, TURN, turnToward, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
-import { approachDirection, basisToQuaternion, type Box, distanceToBox, edgeAt, entryPoint, gripDuringReach, gripPoint, gripShapeFor, handBasis, HAND, HOLD, holdApproach, holdBasis, holdFor, needsRegrip, originFor, preferredHoldAngle } from "../src/render/handpose.ts";
+import { armAnchor, basisToQuaternion, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -158,28 +158,6 @@ describe("gesture", () => {
     expect(d.y).toBe(-1);
   });
 
-  it("under the tap slop is still pending", () => {
-    expect(classify(5, 5, right).kind).toBe("pending");
-    expect(classify(GESTURE.tapSlop - 1, 0, null).kind).toBe("pending");
-  });
-
-  it("off a part, any drag rotates", () => {
-    expect(classify(30, 0, null).kind).toBe("rotate");
-  });
-
-  it("along the part's path is a pull once far enough, within 45 degrees", () => {
-    expect(classify(20, 0, right).kind).toBe("pulling");
-    expect(classify(GESTURE.pullDistance, 0, right).kind).toBe("pull");
-    expect(classify(40, 38, right).kind).toBe("pull");
-    expect(classify(40, 42, right).kind).toBe("rotate");
-    expect(classify(-40, 0, right).kind).toBe("rotate");
-  });
-
-  it("a head-on part accepts any direction", () => {
-    const headOn = screenDirection({ x: 0, y: 0, z: 1 });
-    expect(classify(0, 40, headOn).kind).toBe("pull");
-    expect(classify(-40, 0, headOn).kind).toBe("pull");
-  });
 });
 
 describe("orbit", () => {
@@ -412,17 +390,6 @@ describe("the hand's pose (plan 0008)", () => {
   const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
   const len = (a: number[]) => Math.hypot(a[0]!, a[1]!, a[2]!);
 
-  it("approaches from the entry point towards the part", () => {
-    const a = approachDirection([0, 0.2, 0], [0.4, -0.1, 0.6]);
-    expect(len(a)).toBeCloseTo(1);
-    expect(a[2]).toBeLessThan(0); // from the camera side towards the machine
-  });
-
-  it("grips a little in front of the part's centre, on the side the hand comes from", () => {
-    const g = gripPoint([0, 0.2, 0], [0, 0, -1], 0.1);
-    expect(g[2]).toBeCloseTo(0.1 * HAND.gripInset);
-  });
-
   it("points the fingers along the approach with the palm turned down, as an orthonormal basis", () => {
     for (const a of [[0, 0, -1], [-0.5, 0.3, -0.8], [0.7, -0.2, -0.6]] as Array<[number, number, number]>) {
       const n = len(a);
@@ -451,31 +418,9 @@ describe("the hand's pose (plan 0008)", () => {
     expect(v.z).toBeCloseTo(ap[2]);
   });
 
-  it("closes the grip over the last part of the reach", () => {
-    expect(gripDuringReach(0)).toBe(0);
-    expect(gripDuringReach(1 - HAND.gripShare)).toBe(0);
-    expect(gripDuringReach(1)).toBe(1);
-    expect(gripDuringReach(1 - HAND.gripShare / 2)).toBeCloseTo(0.5);
-  });
 });
 
-describe("where the hand comes from (plan 0008)", () => {
-  it("starts out along the side the part comes off, leaning towards the camera", () => {
-    // The muffler comes off the back (-z); the camera is in front (+z). The hand must start behind the part,
-    // not reach through the machine from the front.
-    const e = entryPoint([0, 0.1, -0.12], [0, 0, -0.12], [0.5, 0.6, 1.2]);
-    expect(e[2]).toBeLessThan(-0.12);
-    const d = Math.hypot(e[0], e[1] - 0.1, e[2] + 0.12);
-    expect(d).toBeCloseTo(HAND.reachFrom);
-  });
-
-  it("for a part that comes off the front, starts in front of it", () => {
-    const e = entryPoint([0, 0.1, 0.15], [0, 0, 0.12], [0.5, 0.6, 1.2]);
-    expect(e[2]).toBeGreaterThan(0.15);
-  });
-});
-
-describe("pinching small parts (plan 0009, ADR 0016)", () => {
+describe("pinching small parts (plan 0009, ADR 0020)", () => {
   it("the spark plug, plug cap, fuel tap and capacitor are pinched; bigger parts are gripped", () => {
     const shape = (id: string) => gripShapeFor(machine.parts.find((p) => p.id === id)!.placeholder.size);
     for (const id of ["spark_plug", "plug_cap", "fuel_tap", "capacitor"]) expect(shape(id), id).toBe("pinch");
@@ -492,63 +437,141 @@ describe("pinching small parts (plan 0009, ADR 0016)", () => {
   });
 });
 
-describe("holding the base while the view turns (ADR 0016)", () => {
-  const box = (p: { size: Vec3; position: Vec3 }): Box => ({
-    min: [p.position[0] - p.size[0] / 2, p.position[1] - p.size[1] / 2, p.position[2] - p.size[2] / 2],
-    max: [p.position[0] + p.size[0] / 2, p.position[1] + p.size[1] / 2, p.position[2] + p.size[2] / 2],
-  });
-  const plate = box(machine.base.find((b) => b.id === "base_frame")!.placeholder);
-  const parts = machine.parts.map((p) => box(p.placeholder));
-  const height = plate.min[1] + 0.03;
-  const azimuths = Array.from({ length: 36 }, (_, i) => (i / 36) * 2 * Math.PI - Math.PI);
+describe("deliberate removal: double tap, then carry (plan 0010, ADR 0020)", () => {
+  const tap = (part: string | null, t: number, x = 100, y = 100) => ({ part, t, x, y });
 
-  it("finds the edge of the plate in any direction, just inside it, facing out", () => {
-    const front = edgeAt(plate, height, 0);
-    expect(front.outward).toEqual([0, 0, 1]);
-    expect(close(front.point[2], plate.max[2] - HOLD.inset)).toBe(true);
-    const right = edgeAt(plate, height, Math.PI / 2);
-    expect(right.outward).toEqual([1, 0, 0]);
-    expect(close(right.point[0], plate.max[0] - HOLD.inset)).toBe(true);
+  it("two taps on the same part, close in time and place, are a double tap", () => {
+    expect(isDoubleTap(tap("spark_plug", 0), tap("spark_plug", DOUBLE_TAP.ms))).toBe(true);
+    expect(isDoubleTap(tap("spark_plug", 0), tap("spark_plug", DOUBLE_TAP.ms + 1))).toBe(false);
+    expect(isDoubleTap(tap("spark_plug", 0), tap("plug_cap", 100))).toBe(false);
+    expect(isDoubleTap(tap("spark_plug", 0), tap("spark_plug", 100, 100 + DOUBLE_TAP.px + 1))).toBe(false);
+    expect(isDoubleTap(tap(null, 0), tap(null, 100))).toBe(false);
+    expect(isDoubleTap(null, tap("spark_plug", 100))).toBe(false);
   });
 
-  it("never holds within reach of a removable part, from any side", () => {
-    for (const a of azimuths) {
-      const h = holdFor(plate, height, parts, a);
-      if (!h) continue;
-      for (const b of parts) expect(distanceToBox(h.point, b)).toBeGreaterThanOrEqual(HOLD.clearance);
+  it("only a loose part is carried; every other drag turns the machine, removable or not (ADR 0007)", () => {
+    const loose = new Set(["air_filter_cover"]);
+    expect(dragMode("air_filter_cover", (id) => loose.has(id))).toBe("carry");
+    expect(dragMode("fuel_hose", (id) => loose.has(id))).toBe("turn"); // could come off, not loose
+    expect(dragMode("fuel_tank", (id) => loose.has(id))).toBe("turn"); // blocked
+    expect(dragMode(null, (id) => loose.has(id))).toBe("turn");
+  });
+
+  it("loosening starts in place and ends a few millimetres proud, for every kind of part", () => {
+    for (const type of MOTION_TYPES) {
+      const m = resolveMotion({ type });
+      const explode: Vec3 = [0, 0.1, 0.05];
+      const a = loosePose(m, explode, 0);
+      expect(Math.hypot(...a.offset), type).toBeLessThan(1e-9);
+      expect(a.angle, type).toBeCloseTo(0);
+      const b = loosePose(m, explode, 1);
+      expect(Math.hypot(...b.offset), type).toBeCloseTo(LOOSEN.proud, 6);
+    }
+    const plug = resolveMotion(machine.parts.find((p) => p.id === "spark_plug")!.motion);
+    expect(loosePose(plug, [0, 0.1, 0], 1).angle).toBeCloseTo(plug.turns * LOOSEN.unscrewShare * 2 * Math.PI);
+  });
+
+  it("carrying runs from the loose pose to the end of the part's motion", () => {
+    for (const part of machine.parts) {
+      const m = resolveMotion(part.motion);
+      const start = carryPose(m, part.explode, 0);
+      const loosened = loosePose(m, part.explode, 1);
+      start.offset.forEach((v, i) => expect(v, part.id).toBeCloseTo(loosened.offset[i]!, 9));
+      const end = carryPose(m, part.explode, 1);
+      const out = poseAt(m, part.explode, 1);
+      end.offset.forEach((v, i) => expect(v, part.id).toBeCloseTo(out.offset[i]!, 9));
+      expect(end.angle).toBeCloseTo(out.angle);
     }
   });
 
-  it("finds a hold from most sides of the shipped machine, round to the right of the camera", () => {
-    const found = azimuths.map((a) => holdFor(plate, height, parts, a)).filter((h) => h !== null);
-    expect(found.length).toBeGreaterThanOrEqual(azimuths.length * 0.75);
-    const h = holdFor(plate, height, [], 0)!;
-    expect(h.point[0]).toBeGreaterThan(0); // camera at the front (+Z): the hold is on the right (+X) of the front edge
+  it("the carry's progress grows with the drag and stops at the end of the path", () => {
+    expect(carryProgress(0)).toBe(0);
+    expect(carryProgress(CARRY.outPx / 2)).toBeCloseTo(0.5);
+    expect(carryProgress(CARRY.outPx * 3)).toBe(1);
+    expect(carryProgress(-5)).toBe(0);
+  });
+});
+
+describe("turning with the hand (plan 0010, ADR 0020)", () => {
+  const limits: OrbitLimits = { minDistance: 0.5, maxDistance: 2, minPolar: 0.35, maxPolar: 1.55 };
+  const target: Vec3 = [0, 0.19, 0];
+  const fov = (40 * Math.PI) / 180;
+
+  it("the orbit target lands in the middle of the screen", () => {
+    const p = projectPoint({ azimuth: 0.4, polar: 1.1, distance: 1 }, target, target, fov, 0.46)!;
+    expect(p[0]).toBeCloseTo(0);
+    expect(p[1]).toBeCloseTo(0);
   });
 
-  it("the hold depends only on the view, the same whatever the finger started on (ADR 0007)", () => {
-    for (const a of azimuths) expect(holdFor(plate, height, parts, a)).toEqual(holdFor(plate, height, parts, a));
+  it("each step brings the held spot closer to the pointer, within the limits", () => {
+    let s = { azimuth: 0.55, polar: 1.12, distance: 1 };
+    const held: Vec3 = [0.15, 0.25, 0.12];
+    const pointer: [number, number] = [0.25, 0.05];
+    const gap = (st: typeof s) => {
+      const p = projectPoint(st, target, held, fov, 0.46)!;
+      return Math.hypot(p[0] - pointer[0], p[1] - pointer[1]);
+    };
+    let g = gap(s);
+    for (let i = 0; i < 4; i++) {
+      const next = turnToward(s, limits, target, held, pointer, fov, 0.46);
+      expect(Math.abs(next.azimuth - s.azimuth)).toBeLessThanOrEqual(TURN.maxStep + 1e-12);
+      expect(next.polar).toBeGreaterThanOrEqual(limits.minPolar);
+      expect(next.polar).toBeLessThanOrEqual(limits.maxPolar);
+      const ng = gap(next);
+      expect(ng).toBeLessThanOrEqual(g + 1e-9);
+      s = next;
+      g = ng;
+    }
+    expect(g).toBeLessThan(0.05);
+  });
+});
+
+describe("the hand as the pointer (plan 0010, ADR 0020)", () => {
+  const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+  const points = { tip: [0.01, -0.01, -0.1] as Vec3, pinch: [-0.04, -0.05, -0.03] as Vec3 };
+  const anchor = armAnchor([0.5, 0.6, 1], [0.9, 0, -0.4], [0, 1, 0], [-0.5, -0.3, -0.8]);
+
+  it("rests its fingertips just off the surface under the pointer, palm towards it", () => {
+    const point: Vec3 = [0.05, 0.2, 0.15];
+    const normal: Vec3 = [0, 0, 1];
+    const p = pointerPose(point, normal, anchor, "hover", points);
+    const q = new Quaternion(...p.quaternion);
+    const tip = new Vector3(...points.tip).applyQuaternion(q).add(new Vector3(...p.position));
+    expect(tip.x).toBeCloseTo(point[0]);
+    expect(tip.y).toBeCloseTo(point[1]);
+    expect(tip.z).toBeCloseTo(point[2] + HAND.hoverFloat);
+    const palm = new Vector3(0, -1, 0).applyQuaternion(q);
+    expect(dot([palm.x, palm.y, palm.z], normal)).toBeLessThan(0); // the palm faces into the surface
   });
 
-  it("changes hold hand over hand only after a long turn, even when parts push the hold far round", () => {
-    const crowded = holdFor(plate, height, parts, 0.3)!;
-    expect(needsRegrip(crowded, 0.3)).toBe(false);
-    expect(needsRegrip(crowded, 0.35)).toBe(false);
-    const h = holdFor(plate, height, [], 0.3)!;
-    expect(needsRegrip(h, 0.3)).toBe(false);
-    expect(needsRegrip(h, 0.3 + (60 * Math.PI) / 180)).toBe(false);
-    expect(needsRegrip(h, 0.3 + (100 * Math.PI) / 180)).toBe(true);
-    expect(needsRegrip(h, 0.3 - (100 * Math.PI) / 180)).toBe(true);
-    expect(close(preferredHoldAngle(0), Math.atan(HOLD.rightShare))).toBe(true);
+  it("grips with its grip point and pinches with its pinch point", () => {
+    const point: Vec3 = [0, 0.3, 0];
+    const normal: Vec3 = [0, 1, 0];
+    const g = pointerPose(point, normal, anchor, "grip", points);
+    expect(g.position[1]).toBeCloseTo(point[1] + HAND.gripFloat);
+    const p = pointerPose(point, normal, anchor, "pinch", points);
+    const pinch = new Vector3(...points.pinch).applyQuaternion(new Quaternion(...p.quaternion)).add(new Vector3(...p.position));
+    expect(pinch.y).toBeCloseTo(point[1] + HAND.pinchFloat);
   });
 
-  it("reaches in under the edge, palm up, with the forearm leaning out towards the camera", () => {
-    const out: Vec3 = [0, 0, 1];
-    const a = holdApproach(out, [0.2, 0.6, 0.77], [1, 0, 0]);
-    expect(a[2]).toBeLessThan(0); // into the machine
-    expect(a[1]).toBe(0); // level with the plate
-    expect(a[0]).toBeLessThan(0); // forearm out to the right of the screen
-    const b = holdBasis(a);
-    expect(b.y[1]).toBeLessThan(0); // the palm (-y) faces up
+  it("the open hand depends only on the spot, never on whether the part could come off (ADR 0007)", () => {
+    // The pose takes no part and no rule; the same spot gives the same hand.
+    const a = pointerPose([0.1, 0.2, 0.1], [0, 0, 1], anchor, "hover", points);
+    const b = pointerPose([0.1, 0.2, 0.1], [0, 0, 1], anchor, "hover", points);
+    expect(a).toEqual(b);
+  });
+
+  it("the forearm comes from the camera's lower right", () => {
+    const anc = armAnchor([0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, -1]);
+    expect(anc[0]).toBeGreaterThan(0);
+    expect(anc[1]).toBeLessThan(0);
+    expect(anc[2]).toBeLessThanOrEqual(1); // not in front of the camera, so the sleeve leaves the screen
+  });
+
+  it("follows smoothly: half the way in one half-life, all of it at once only with no half-life", () => {
+    expect(followShare(HAND.followHalfLife)).toBeCloseTo(0.5);
+    expect(followShare(0)).toBe(0);
+    expect(followShare(0.1, 0)).toBe(1);
+    expect(followShare(1)).toBeGreaterThan(0.99);
   });
 });

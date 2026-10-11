@@ -16,7 +16,7 @@ export const STRINGS = {
   symptomLabel: "When you pull the cord",
   start: "Start",
   pullCord: "Pull cord",
-  trayEmpty: "Pull a part off along its path",
+  trayEmpty: "Double tap a part to loosen it, then drag it to the tray",
   close: "Close",
   fixing: "Working on it…",
   conditionLabel: "Condition",

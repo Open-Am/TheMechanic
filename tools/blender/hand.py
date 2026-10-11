@@ -59,7 +59,7 @@ THUMB_TARGETS = {"open": ("finger2-1.R", 0.0, 0.045), "grip": ("finger2-2.R", 0.
 # ---- The cut and the sleeve, metres from the wrist towards the elbow ----
 CUT = 0.155
 SLEEVE_FROM = 0.075
-SLEEVE_TO = 0.55  # long enough to run off the screen, so its open end is never seen
+SLEEVE_TO = 1.2  # forearm and upper arm: long enough to always run off the screen, to a body just out of view
 ARM_GROUPS = ("lowerarm01.R", "lowerarm02.R", "wrist.R")
 
 
@@ -312,19 +312,32 @@ def circle_through(a, b, c):
 # The sleeve's profile from its open end up the arm: (metres along the arm, radius added to the arm's). The open end
 # is rolled back on itself, so the cloth shows a thick lip and a rolled cuff, then folds loosely up the arm.
 SLEEVE_PROFILE = [
-    (0.012, -0.004), (0.002, -0.001), (0.0, 0.004), (0.004, 0.008), (0.018, 0.009), (0.032, 0.008), (0.037, 0.004),
-    (0.045, 0.006), (0.075, 0.009), (0.11, 0.007), (0.15, 0.010), (0.2, 0.008), (0.28, 0.010), (0.37, 0.009), (SLEEVE_TO - SLEEVE_FROM, 0.010),
+    (0.003, -0.004), (-0.002, -0.001), (0.0, 0.004), (0.004, 0.008), (0.018, 0.009), (0.032, 0.008), (0.037, 0.004),
+    (0.045, 0.006), (0.075, 0.009), (0.11, 0.007), (0.15, 0.010), (0.2, 0.008), (0.33, 0.010), (0.55, 0.014), (0.8, 0.020), (SLEEVE_TO - SLEEVE_FROM, 0.026),
 ]
 SLEEVE_SEGMENTS = 16
+SLEEVE_LIP_GAP = 0.0015  # metres between the cuff's inner lip and the arm
 
 
 def build_sleeve(coords_open, wrist, M):
-    """A loose, rolled work-shirt sleeve over the cut, sized to the forearm, as one open tube with folds.
-    Coordinates are Blender's in the hand frame: the forearm runs along Blender -Y from the wrist."""
+    """A loose, rolled work-shirt sleeve over the cut, sized to the forearm, with folds. Closed, so the hand is never
+    seen hollow (the owner, 2026-10-11): the cuff's inner lip hugs the arm, so there is no gap to see into, and the far
+    end is capped. Coordinates are Blender's in the hand frame: the forearm runs along Blender -Y from the wrist."""
     band = [p for p in coords_open if SLEEVE_FROM - 0.01 < wrist.y - p.y < CUT]
     cx = sum(p.x for p in band) / len(band)
     cz = sum(p.z for p in band) / len(band)
     radius = max(math.hypot(p.x - cx, p.z - cz) for p in band)
+
+    def arm_radius(along, t):
+        """How far the arm reaches from the sleeve's axis in direction t, near `along` from the wrist."""
+        near = [p for p in coords_open if abs((wrist.y - p.y) - along) < 0.008]
+        best = 0.0
+        for p in near:
+            a = math.atan2(p.z - cz, p.x - cx)
+            if abs(math.atan2(math.sin(a - t), math.cos(a - t))) < math.pi / SLEEVE_SEGMENTS * 1.5:
+                best = max(best, math.hypot(p.x - cx, p.z - cz))
+        return best or radius
+
     bm = bmesh.new()
     rings = []
     for k, (along, dr) in enumerate(SLEEVE_PROFILE):
@@ -335,12 +348,20 @@ def build_sleeve(coords_open, wrist, M):
             # Cloth is never a perfect circle: a few soft folds that drift around the arm from ring to ring.
             wobble = 1 + 0.045 * math.sin(3 * t + 1.7 * k) + 0.025 * math.sin(5 * t + 0.9 * k)
             r = (radius + dr) * (wobble if k > 2 else 1.0)
+            if k == 0:  # the inner lip lies on the arm, closing the cuff
+                r = arm_radius(SLEEVE_FROM + along, t) + SLEEVE_LIP_GAP
+            elif k == 1:
+                r = (arm_radius(SLEEVE_FROM + SLEEVE_PROFILE[0][0], t) + SLEEVE_LIP_GAP + radius + dr) / 2
             ring.append(bm.verts.new((cx + r * math.cos(t), y, cz + r * math.sin(t))))
         rings.append(ring)
     for a, b in zip(rings, rings[1:]):
         for j in range(SLEEVE_SEGMENTS):
             jn = (j + 1) % SLEEVE_SEGMENTS
             bm.faces.new((a[j], a[jn], b[jn], b[j]))
+    end = rings[-1]
+    centre = bm.verts.new((sum(v.co.x for v in end) / len(end), end[0].co.y, sum(v.co.z for v in end) / len(end)))
+    for j in range(SLEEVE_SEGMENTS):
+        bm.faces.new((end[j], end[(j + 1) % SLEEVE_SEGMENTS], centre))
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     me = bpy.data.meshes.new("sleeve")
     bm.to_mesh(me)
@@ -440,6 +461,17 @@ def build(preview_dir=None):
         poly.material_index = 1 if is_nail else 0
         poly.use_smooth = True
     me.validate()
+    # Close the forearm's cut end, so the arm is solid even if it is seen inside the sleeve. Faces only: the vertices,
+    # and so the morph targets, are unchanged.
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    n_verts = len(bm.verts)
+    bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary], sides=0)
+    assert len(bm.verts) == n_verts
+    bm.to_mesh(me)
+    bm.free()
+    for poly in me.polygons:
+        poly.use_smooth = True
     body_obj = bpy.data.objects.new("hand_body", me)
     hand_col.objects.link(body_obj)
 
@@ -460,6 +492,7 @@ def build(preview_dir=None):
         key.value = 0.0
     check_body_first(obj, coords["open"])
     obj["pinch_point"] = [round(c, 5) for c in pinch_gl]
+    set_tip_point(obj)
     tris = common.triangle_count(obj)
     print(f"Hand: {tris} triangles (budget {BUDGET_TRIANGLES}); pinch point {obj['pinch_point']}")
     if tris > BUDGET_TRIANGLES and not preview_dir:
@@ -500,6 +533,13 @@ def preview(obj, out_dir):
     print(f"Previews in {out_dir}")
 
 
+def set_tip_point(obj):
+    """The open hand's fingertips, for the hovering hand (ADR 0020): its most forward vertex (fingers point -Z, glTF)."""
+    base = obj.data.shape_keys.key_blocks["Basis"].data if obj.data.shape_keys else obj.data.vertices
+    tip = max(base, key=lambda v: v.co.y)  # Blender +Y is glTF -Z
+    obj["tip_point"] = [round(tip.co.x, 5), round(tip.co.z, 5), round(-tip.co.y, 5)]
+
+
 def check_body_first(obj, open_coords):
     """join() must have kept the hand body's vertices first, in order, for the morph targets to line up."""
     for i in (0, len(open_coords) // 2, len(open_coords) - 1):
@@ -521,6 +561,7 @@ def export():
     tris = common.triangle_count(obj)
     if tris > BUDGET_TRIANGLES:
         errors.append(f"The hand has {tris} triangles, over its budget of {BUDGET_TRIANGLES}.")
+    set_tip_point(obj)
     if errors:
         for e in errors:
             print(f"error: {e}")

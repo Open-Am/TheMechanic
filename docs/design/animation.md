@@ -1,37 +1,40 @@
 # Animation
 
-Design note for Phase 2 (plan 0003). The motion vocabulary itself is ADR 0008.
+Design note, first written for Phase 2 (plan 0003). The motion vocabulary is in ADR 0020 (from ADRs 0008 and 0017).
 
-## Removal sequence
+## Removal sequence (plan 0010, ADR 0020)
 
-1. Press acknowledgement starts on touch (under 120 ms).
-2. The pull is recognised; the part's motion plays.
-3. The part drifts toward the bottom of the screen and fades out as its chip appears in the tray.
-4. The camera eases a little toward where the part was, then holds.
+1. Press acknowledgement on touch (under 120 ms), the same for every part; the hand closes on what is under it.
+2. A double tap, double click or G on a part that can come off: the hand loosens it (below) and the part sits loose.
+3. The player drags the loose part: it comes out along its path, then follows the hand.
+4. Dropped on the tray, it sinks into the tray, shrinking and fading, as its chip appears. Dropped elsewhere, it flies back to its loose point.
 
-Install is the same in reverse: the part fades in near the bottom of the screen, flies to its exploded position, then plays its motion backwards into place.
+Install: dragging a chip carries the part in the hand under the pointer; dropped over the machine, it flies to its exploded position, then plays its motion backwards into place, and the hand lets go.
 
-## The mechanic's hand (plans 0008 and 0009)
+## The mechanic's hand (plans 0008 to 0010)
 
-On an accepted removal the hand reaches in before the part moves, closes its grip, rides along with the part's motion, then opens and pulls back as the part drifts to the tray. On a put-back it brings the part in already gripping, pushes it home, then lets go and pulls back. It comes in from the side the part comes off (its explode direction), leaning towards the camera, so it reaches around the machine rather than through it. A blocked pull shows no hand (ADR 0007). The numbers live in `game/src/render/handpose.ts`.
+The hand is the player's pointer. It follows the pointer with a short smoothing, its arm aimed at a point level with the camera and well below it, so the arm runs off the bottom of the screen to a body just out of view. Resting, its fingertips float just off the surface under the pointer, palm towards it; gripping, its grip point sits off the surface by about the radius of what it closes on; pinching (parts no longer than 75 mm: the spark plug, plug cap, fuel tap, capacitor), its pinch point does. While it loosens or carries a part, it rides with the part. The numbers live in `game/src/render/handpose.ts` and `motion.ts`.
 
 | Hand | Target |
 | --- | --- |
-| Reach and grip, before the part moves | 0.18 s; the grip closes over the last 40 percent |
-| Release | 0.12 s |
-| Withdraw | 0.25 s, back the way it came |
-| Start of the reach | 0.32 m from the part |
+| Follow smoothing | 50 ms half-life |
+| Close or open | 0.12 s |
+| Come in, withdraw | 0.25 m along the arm; withdraw in 0.25 s |
+| Fingertips off the surface (resting) | 8 mm |
+| Grip point off the surface | 12 mm |
+| Pinch point off the surface | 4 mm |
+| Arm aimed at | 0.3 m right of and 0.6 m below the camera |
 
-**Pinch (plan 0009).** A part whose longest side is at most 75 mm (the spark plug, plug cap, fuel tap, capacitor) is pinched between thumb and index fingertips instead of gripped: the hand is placed so its pinch point lands on the part's centre. Bigger parts get the grip.
+**Loosening.** The hand frees the part by its motion type, ending 4 mm proud: `unscrew` turns three quarters of its turns (0.9 s); `unbolt` bites down, then jolts free with a 4 degree twist (0.8 s); `unclip` rocks 8 degrees and pops out (0.6 s); `pull` tugs twice (0.6 s); `lift` settles, then lifts (0.6 s); `slide` eases out (0.5 s). Fasteners join in the next plan.
 
-**Turning the machine (plan 0009, ADR 0016).** When a drag becomes a rotation of the view (after the 8 px tap slop), the hand reaches in and takes hold of the base plate from underneath: palm up, fingers slid under the plate's edge between the feet, at the point round to the right of the camera that keeps 20 mm from every removable part. The hold stays fixed on the plate while the camera turns, so the hand and machine turn together on screen; the forearm is re-aimed every frame to run out towards the camera and the right of the screen, level with the plate. After the view has turned 70 degrees since the hold was taken, the hand opens and takes a new hold (hand over hand). Lifting the finger releases and withdraws it; a second finger (zoom) does too; a tap never brings it in. The hold depends only on the view, never on the part the finger started on (ADR 0007).
-
-| Turning | Target |
+| Carrying | Target |
 | --- | --- |
-| Reach and grip | 0.18 s, as for a part |
-| Release and withdraw | 0.12 s and 0.25 s, as for a part |
-| Hand over hand | after 70 degrees of turn: 0.12 s open, then a 0.18 s reach |
-| Hold | 25 mm in under the plate's edge, 12 mm below its underside, at least 20 mm from any removable part |
+| Out along its path | over the first 60 px of drag |
+| Back to its loose point when dropped away from the tray | 0.25 s |
+| Into the tray | 0.2 s, shrinking to half and fading |
+| Loose parts pressed home before the cord is pulled | 0.2 s |
+
+**Turning.** Each pointer move nudges the camera's azimuth and tilt so the held spot moves towards the pointer: one Newton step, at most 0.15 radians on each. If the held spot lags the pointer by more than 60 px or faces away from the camera, the hand grabs again under the pointer.
 
 Input is not blocked during an animation. The reducer has already accepted the action; the animation only shows it.
 

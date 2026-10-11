@@ -1,7 +1,7 @@
 ---
 id: 0010
 title: The hand follows the pointer; loosen, then drag to the tray
-status: approved
+status: done
 date: 2026-10-11
 adrs: [0004, 0007, 0010, 0014, 0015, 0020]
 branch: plan/0010-pointer-hand
@@ -56,6 +56,17 @@ The ADRs were summarised by Haiku agents earlier on 2026-10-11 (for ADR 0016 and
 - `npm test`, `npm run typecheck`, `npm run docs:check`, `npm run build`, `npm run size` pass; `npm run assets` checks the hand with `tip_point`.
 - `npm run verify:phone` passes every check in step 6 with no console errors, at or above 30 fps at 4x CPU throttle in headless Edge.
 - The owner tries it with a mouse and on the phone preview and decides whether the hand feels like their own and whether loosening then carrying is deliberate enough.
+
+## What changed during the build
+
+- The owner asked, during the build, for the hand not to be hollow and for the arm to run out of the screen rather than end. The cuff's inner lip now hugs the wrist, the sleeve's far end and the forearm's cut are closed, and the arm runs 1.2 m (forearm and upper arm), aimed at a point level with the camera and 0.6 m below it, so it always leaves through the bottom of the screen. 3,980 triangles, 110.9 KB.
+- The 10 mm touch offset was left out: the fingertips sit exactly at the touch. It can come back if a finger hides too much on a real phone.
+- The old pull gesture (`classify`), the reach from the side a part comes off and the base-plate hold were removed with their tests; ADR 0020 retires them.
+- `tip_point` is computed at export from the open hand's most forward vertex, so it always matches the shipped mesh.
+
+## Results
+
+All checks in "Done when" pass: 232 tests, typecheck, docs check, build and size; `npm run assets` checks the hand with `tip_point`; `npm run verify:phone` removes every part by double tap and a drag to the tray (the hand seen carrying, and pinching a small part), solves all six faults, passes every check of step 6 and the forced walk-out, with no console errors, at 60 fps at 4x CPU throttle in headless Edge. The owner's own try with a mouse and on the phone is what remains.
 
 ## Release note line
 

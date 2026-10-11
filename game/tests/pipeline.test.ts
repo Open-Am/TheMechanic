@@ -188,7 +188,7 @@ describe("companion files", () => {
   });
 });
 
-describe("the mechanic's hand (ADRs 0015 and 0016)", () => {
+describe("the mechanic's hand (ADRs 0015 and 0020)", () => {
   const handJson = (name: string, tris: number, morph: boolean, targetNames = ["grip"], extras?: Record<string, unknown>) => ({
     scene: 0,
     scenes: [{ nodes: [0] }],
@@ -197,13 +197,16 @@ describe("the mechanic's hand (ADRs 0015 and 0016)", () => {
     accessors: [{ count: tris * 3 }, { count: tris * 3 }, { count: tris * 3 }],
   });
 
-  it("allows more morphs; a pinch morph needs a pinch point near the hand (ADR 0016)", () => {
+  it("allows more morphs; a pinch morph needs a pinch point near the hand (ADR 0020)", () => {
     const pinch = (extras?: Record<string, unknown>) => checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true, ["grip", "pinch"], extras))), budgets).errors;
     expect(pinch({ pinch_point: [0.01, -0.02, -0.05] })).toEqual([]);
     expect(pinch().join(" ")).toMatch(/no pinch_point/);
     expect(pinch({ pinch_point: [0, 0] }).join(" ")).toMatch(/no pinch_point/);
     expect(pinch({ pinch_point: [0, 0, 1] }).join(" ")).toMatch(/no pinch_point/);
     expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true, ["grip", "brace"]))), budgets).errors).toEqual([]);
+    // ADR 0020: an optional fingertip point for the hovering hand, checked when present.
+    expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true, ["grip"], { tip_point: [0.01, -0.01, -0.1] }))), budgets).errors).toEqual([]);
+    expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true, ["grip"], { tip_point: [0, 0, 2] }))), budgets).errors.join(" ")).toMatch(/tip_point/);
     expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true, ["pinch"], { pinch_point: [0, 0, 0] }))), budgets).errors.join(" ")).toMatch(/no "grip" morph/);
   });
 

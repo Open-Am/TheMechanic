@@ -74,8 +74,9 @@ async function start(): Promise<void> {
     showCannotRun(root, "webgl");
     return;
   }
-  // ui gets the part pictures as a function; it never imports render (ADR 0010).
-  mountUi(ui, stage, game, { partImage: view.partImage });
+  // ui gets the part pictures and the hand's carry as functions; it never imports render (ADR 0010).
+  const mounted = mountUi(ui, stage, game, { partImage: view.partImage, carry: { move: view.carryChip, end: view.endChipCarry } });
+  view.setTrayTest(mounted.overTray);
 
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("diag")) {
     const { mountDiagnostic } = await import("./diagnostic/overlay.ts");
