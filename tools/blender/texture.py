@@ -371,8 +371,13 @@ def final_material(group, base_img, orm_img, normal_img):
     return m
 
 
-def bake_groups(groups, tex_dir):
-    """Bakes each group {name: (size, [object names])} to its own texture set in tex_dir. Used by main() and hand.py."""
+def bake_groups(groups, tex_dir, author=None, layout=None):
+    """Bakes each group {name: (size, [object names])} to its own texture set in tex_dir. Used by main(), hand.py and
+    customer.py. `author(base_name, group, image)` and `layout(objects)` replace authoring() and layout_uvs() for models
+    with their own materials (the customers, plan 0015); they must keep authoring()'s contract: a Principled BSDF on
+    the output, reroutes named BASECOLOR and METALLIC, and an image node named BAKE_TARGET."""
+    author = author or authoring
+    layout = layout or layout_uvs
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
@@ -385,7 +390,7 @@ def bake_groups(groups, tex_dir):
             if any(s.material and s.material.name.startswith("baked_") for s in o.material_slots):
                 common.fail(f"'{o.name}' is already textured. Run model.py (or block.py) first to rebuild it.")
         print(f"[{group}] {len(objects)} objects, {size} px")
-        layout_uvs(objects)
+        layout(objects)
 
         target = new_image(f"{group}_target", size, False)
         made = {}
@@ -393,7 +398,7 @@ def bake_groups(groups, tex_dir):
             for slot in o.material_slots:
                 base_name = slot.material.name.split("@")[0]
                 if base_name not in made:
-                    made[base_name] = authoring(base_name, group, target)
+                    made[base_name] = author(base_name, group, target)
                 slot.material = made[base_name]
 
         base_img = new_image(f"{group}_basecolor", size, False)
