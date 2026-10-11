@@ -26,6 +26,12 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 - Front panel variants: the Tiger TG950 has a full-width panel (round socket, warning label, switch, choke); other clones have a narrower panel with a blue Schuko socket and a meter, and the alternator further forward. The model follows the Tiger.
 - Spark plug angle: the plug leans up and back out of the head (Lagos back-view photo). The data's `motion.axis` can only be x, y or z, so the unscrew turns about y, which is close but not exact.
 
+## Fasteners and sound (ADRs 0018 and 0019, proposed 2026-10-11)
+
+- Fasteners on each part of the real machine: how many, what heads (hex bolt, Phillips screw, nut on a stud), and what size spanner. Unknown for every part. Likely candidates: alternator cover, recoil starter (often three bolts), muffler (nuts on studs plus a bolt), carburettor (two nuts on studs), fuel tank (screws, per the Benco video), air filter door. Drafts go in machine.json marked unverified; the mechanic checks them.
+- Whether any fastener is captive (stays in the cover) rather than coming out loose.
+- Sounds: until the owner records the real machine, the cord pull, the failed start and the engine are stand-ins from CC0 recordings, not a TG950.
+
 ## Owner decisions pending
 
 - Git LFS quota: ADR 0012 puts `.blend` files and textures in Git LFS. The storage and bandwidth allowance on the GitHub plan for `Open-Am/TheMechanic` is not checked.

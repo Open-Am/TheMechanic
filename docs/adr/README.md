@@ -22,3 +22,6 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0014](ADR-0014-performance-budgets-and-realistic-lighting.md) | Performance budgets and realistic lighting | accepted |
 | [0015](ADR-0015-customer-patience-and-the-mechanics-hand.md) | The customer, their patience, and the mechanic's hand | accepted |
 | [0016](ADR-0016-makehuman-and-the-hand-on-rotation.md) | MakeHuman for characters, and the hand turns the machine | proposed |
+| [0017](ADR-0017-hands-on-removal.md) | Hands-on removal, a gesture for each kind of part | proposed |
+| [0018](ADR-0018-sound-and-vibration.md) | Sound and vibration | proposed |
+| [0019](ADR-0019-visible-fasteners.md) | Visible bolts and screws | proposed |

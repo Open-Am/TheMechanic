@@ -31,8 +31,8 @@ ADR 0015 also says when the hand acts: "On a pull it reaches the part ... On a p
 
 **The hand turns the machine.**
 
-- When the player drags to rotate the view, the mechanic's hand comes in, takes hold of the base frame, and stays on it while the drag lasts, so the machine looks turned by hand. When the drag ends the hand lets go and pulls back out of view.
-- The hand holds the frame only. It never touches, points at or rests on a removable part, so it says nothing about which parts will come off (ADR 0007). A rotation that starts with the finger on a part, blocked or not, shows exactly the same hand on the frame as one that starts on empty space.
+- When the player drags to rotate the view, the mechanic's hand comes in, takes hold of the edge of the base (`base_frame`: the die-cast base and body shell; the machine has no tube frame), and stays on it while the drag lasts, so the machine looks turned by hand. When the drag ends the hand lets go and pulls back out of view.
+- The hand holds the base only. It never touches, points at or rests on a removable part, so it says nothing about which parts will come off (ADR 0007). A rotation that starts with the finger on a part, blocked or not, shows exactly the same hand on the frame as one that starts on empty space.
 - If the frame turns so far that the hand's hold would be hidden or the arm would twist, the hand lets go and takes a new hold, hand over hand.
 - Zooming with two fingers does not bring the hand in.
 - A removal or put-back during or after a rotation takes the hand over: the new action wins, as it does now.
