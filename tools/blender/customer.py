@@ -89,14 +89,14 @@ LOOKS = {
         "skin": "#4b2e20",
         "top": {"kind": "kaftan", "sleeve": ("lowerarm", 0.9), "neck": 0.04, "thickness": 0.01, "loose": 0.012, "hem": "hip", "taper": -0.08, "sleeve_flare": 0.25},
         "bottom": {"kind": "trousers", "thickness": 0.008, "hem": 0.025, "hem_radius": 0.068},
-        "skirt": {"top": "hip", "bottom": "shin", "flare": 0.06, "margin": 0.03, "material": "top"},
+        "skirt": {"top": "waist", "bottom": "shin", "flare": 0.07, "margin": 0.014, "material": "top"},
         "head": "cap",
         "hair": {"front": 0.07, "grey": 0.35},
         "beard": True,
         "feet": "sandals",
         "materials": {
-            "top": {"kind": "fabric", "colour": "#6f8ea6", "roughness": 0.8},
-            "bottom": {"kind": "fabric", "colour": "#6a889f", "roughness": 0.8},
+            "top": {"kind": "fabric", "colour": "#46657f", "roughness": 0.8},
+            "bottom": {"kind": "fabric", "colour": "#425f78", "roughness": 0.8},
             "headwear": {"kind": "cap", "colour": "#e4d9c1", "pattern": "#7a2a24"},
             "strap": {"kind": "fabric", "colour": "#4a2c1a", "roughness": 0.55},
         },
@@ -399,7 +399,9 @@ def drape_limb(co, mask, a, b, s_ref, r_of, s_from, pct, inner_x=None):
         sel = mask & (np.abs(sv - s0) < 0.04)
         return co[sel].mean(axis=0) if sel.any() else a + ab * s0
 
-    c0, c1 = centre(s_ref), centre(0.85)
+    if not (mask & (np.abs(sv - s_ref) < 0.04)).any():
+        s_ref = 0.75  # the top of the limb is hidden under a skirt and removed: fit to what is left
+    c0, c1 = centre(s_ref), centre(0.85 if s_ref < 0.7 else 0.95)
     axis = (c1 - c0) / np.linalg.norm(c1 - c0)
     a2 = c0 - axis * (s_ref * np.linalg.norm(ab))
     b2 = a2 + axis * np.linalg.norm(ab)
@@ -537,7 +539,7 @@ def loft(rings, close_top=False, lip=None):
             bm.faces.new((a[j], a[jn], b[jn], b[j]))
     if close_top:
         top = vr[0]
-        c = bm.verts.new(sum((v.co for v in top), V()) / n + V((0, 0, 0.004)))
+        c = bm.verts.new(sum((v.co for v in top), V()) / n + V((0, 0, 0.012)))
         for j in range(n):
             bm.faces.new((top[(j + 1) % n], top[j], c))
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
@@ -619,7 +621,7 @@ def build_cap(body, lm):
     """A soft round cap (fila/kufi) on the crown: rings fitted to the head at the cap's line, a slight taper, a domed top."""
     co = np.array([v.co[:] for v in body.data.vertices])
     base = lm.eye_z + 0.032
-    height = 0.08
+    height = 0.068
     seg = 32
     c = lm.head_centre
     sel = co[(co[:, 2] > base - 0.005) & (co[:, 2] < base + 0.005)]
@@ -633,7 +635,7 @@ def build_cap(body, lm):
             d = V((math.cos(t), math.sin(t), 0))
             # The head's radius in this direction at the cap line, plus the cloth.
             r = max((V((p[0] - c.x, p[1] - c.y, 0)).dot(d) for p in sel), default=0.08) + 0.006
-            r *= 1 - 0.06 * s
+            r *= 1 - 0.3 * s ** 3  # a soft dome, as a cloth cap sits
             ring.append(V((c.x + d.x * r, c.y + d.y * r, z + 0.012 * math.sin(t) * (1 - s) * 0.0)))
         rings.append(ring)
     rings.reverse()  # top first, so the top is closed
