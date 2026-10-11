@@ -187,6 +187,14 @@ async function pullOff(id: string): Promise<void> {
       const dy = p.dir.headOn ? 1 : p.dir.y;
       await drag(p.x, p.y, p.x + dx * 70, p.y + dy * 70);
       // The hand (plan 0008) should be gripping within a moment of an accepted pull: catch it once on camera.
+      // Small parts are pinched with the fingertips (plan 0009): catch that once too.
+      if (pinchSeen === null && PINCHED.has(id) && (await evaluate<boolean>("window.__openAmDevRender.hasHand()"))) {
+        const seen = await waitFor("the hand pinching", () => evaluate<boolean>("window.__openAmDevRender.handGripping() && window.__openAmDevRender.handShape() === 'pinch'"), 1500).catch(() => false);
+        if (seen) {
+          pinchSeen = true;
+          await screenshot("9-hand-pinching");
+        }
+      }
       if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender.hasHand()"))) {
         const seen = await waitFor("the hand gripping", () => evaluate<boolean>("window.__openAmDevRender.handGripping()"), 1500).catch(() => false);
         if (seen) {
@@ -228,7 +236,10 @@ const shots = new Set<string>();
 
 // A blocked pull shows no hand (ADR 0007, ADR 0015): the fuel tank is in view but cannot come off while the tap is on.
 let handSeen: boolean | null = null;
+let pinchSeen: boolean | null = null;
+const PINCHED = new Set(["spark_plug", "plug_cap", "fuel_tap", "capacitor"]);
 let blockedShowedHand = false;
+const turning: string[] = [];
 {
   await tapSelector(".briefing .primary");
   await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
@@ -251,6 +262,49 @@ let blockedShowedHand = false;
     if (await trayHas("fuel_tank")) failures.push("blocked pull: the fuel tank came off while the tap was on");
   }
   if (blockedShowedHand) failures.push("blocked pull: the hand appeared for a part that cannot come off");
+
+  // The hand turns the machine (ADR 0016): it holds the base during a rotation, lets go when the finger lifts, never
+  // shows for a tap, and looks the same when the rotation starts on a part that cannot come off.
+  if (await evaluate<boolean>("window.__openAmDevRender.hasHand()")) {
+    const handNow = () => evaluate<{ on: boolean; grip: boolean }>("({ on: window.__openAmDevRender.handOnBase(), grip: window.__openAmDevRender.handGripping() })");
+    await idle();
+    await tapAt(VIEWPORT.width * 0.5, VIEWPORT.height * 0.32);
+    await sleep(300);
+    const afterTap = await handNow();
+    if (afterTap.on || afterTap.grip) failures.push("turning: a tap brought the hand in");
+    else turning.push("a tap shows no hand");
+
+    async function turnFrom(x: number, y: number, dx: number, dy: number, shot: string | null): Promise<boolean> {
+      await idle();
+      await mouse("mousePressed", x, y, true);
+      let held = false;
+      for (let i = 1; i <= 24; i++) {
+        await mouse("mouseMoved", x + (dx * i) / 24, y + (dy * i) / 24, true);
+        await sleep(30);
+        const h = await handNow();
+        if (h.on && h.grip) held = true;
+        if (held && shot && i === 18) {
+          await screenshot(shot);
+          if (process.env.HOLD_DEBUG) console.log(JSON.stringify(await evaluate("window.__openAmDevRender.handHold()")));
+        }
+      }
+      await mouse("mouseReleased", x + dx, y + dy, false);
+      await sleep(700);
+      const after = await handNow();
+      if (after.on || after.grip) failures.push("turning: the hand stayed after the finger lifted");
+      return held;
+    }
+    // From the empty floor below the machine, so the drag cannot start on a part.
+    if (await turnFrom(VIEWPORT.width * 0.5, VIEWPORT.height * 0.72, 90, 10, "8-hand-turning")) turning.push("the hand held the base during a rotation and let go after");
+    else failures.push("turning: the hand did not hold the base during a rotation");
+    const tank2 = await evaluate<{ x: number; y: number; dir: { x: number; y: number; headOn: boolean } } | null>("window.__openAmDevRender.probe('fuel_tank')");
+    if (tank2 && !tank2.dir.headOn) {
+      // Across the tank's path, so the drag is a rotation that starts on a part that cannot come off yet.
+      const ok = await turnFrom(tank2.x, tank2.y, -tank2.dir.y * 90, tank2.dir.x * 90, null);
+      if (ok) turning.push("a rotation started on a blocked part shows the same hand");
+      else failures.push("turning: a rotation started on a blocked part showed no hand");
+    }
+  }
   // Back to a fresh round for the faults.
   await send("Page.navigate", { url });
   await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
@@ -333,7 +387,8 @@ if (failures.length === 0) {
 
 console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
 console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
-console.log(`Hand: ${handSeen ? "seen gripping mid-pull" : "not seen"}; blocked pull ${blockedShowedHand ? "SHOWED the hand" : "showed no hand"}`);
+console.log(`Hand: ${handSeen ? "seen gripping mid-pull" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}; blocked pull ${blockedShowedHand ? "SHOWED the hand" : "showed no hand"}`);
+console.log(`Turning: ${turning.join("; ") || "not run"}`);
 if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen gripping during a pull");
 console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps`);
 console.log(`Console errors: ${consoleErrors.length}`);

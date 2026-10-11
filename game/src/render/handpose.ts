@@ -91,3 +91,143 @@ export function gripDuringReach(p: number): number {
   return p <= start ? 0 : Math.min(1, (p - start) / HAND.gripShare);
 }
 
+
+// ---- Pinching small parts (plan 0009) ----
+
+/** Parts whose longest side is at most this many metres are pinched with the fingertips instead of gripped. */
+export const PINCH_MAX_SIZE = 0.075;
+
+/** The hand's morph targets (ADR 0016): `grip` closes around a bar about 30 mm thick, `pinch` meets thumb and index tips. */
+export type GripShape = "grip" | "pinch";
+
+export function gripShapeFor(size: Vec3): GripShape {
+  return Math.max(size[0], size[1], size[2]) <= PINCH_MAX_SIZE ? "pinch" : "grip";
+}
+
+/** Where the hand's origin goes so that `handPoint`, a point in the hand's own frame, lands on `at`. */
+export function originFor(at: Vec3, handPoint: Vec3, b: { x: Vec3; y: Vec3; z: Vec3 }): Vec3 {
+  const [px, py, pz] = handPoint;
+  return [
+    at[0] - (b.x[0] * px + b.y[0] * py + b.z[0] * pz),
+    at[1] - (b.x[1] * px + b.y[1] * py + b.z[1] * pz),
+    at[2] - (b.x[2] * px + b.y[2] * py + b.z[2] * pz),
+  ];
+}
+
+// ---- Holding the base while the view turns (ADR 0016) ----
+
+export const HOLD = {
+  /** Degrees the view may turn after the hand takes hold before it lets go and takes a new hold. */
+  regripDegrees: 70,
+  /** How far round to the right of the camera the hold is taken: tan of the angle, so the forearm comes from the right. */
+  rightShare: 0.6,
+  /** Metres in under the plate's edge that the grip point sits: the fingers slide under the plate, between the feet. */
+  inset: 0.025,
+  /** Metres below the plate's underside that the grip point sits: the palm is under the plate, the fingers curl up. */
+  under: 0.012,
+  /** Metres a hold must keep from every removable part (ADR 0016: the hand touches the base only). The hand is under
+   *  the plate, and parts sit on or overhang its edge, so this keeps the knuckles and thumb off them. */
+  clearance: 0.02,
+  /** Points tried around the edge of the plate. */
+  samples: 72,
+  /** How the forearm leans out from the plate: towards the camera and the right of the screen, level with the plate
+   *  (the plate sits low, so a rising forearm would cross the machine on screen and a falling one the ground). */
+  towardCamera: 0.8,
+  towardRight: 0.35,
+} as const;
+
+/** An axis-aligned box, metres. */
+export interface Box {
+  min: Vec3;
+  max: Vec3;
+}
+
+export interface Hold {
+  /** Where the grip point goes. */
+  point: Vec3;
+  /** The plate edge's outward direction, horizontal. */
+  outward: Vec3;
+  /** Its direction from the plate's centre, as an orbit azimuth (0 is the front, +Z). */
+  angle: number;
+  /** The camera's azimuth when the hold was taken. */
+  takenAt: number;
+}
+
+const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** The point on the edge of a horizontal plate (seen from above, a rectangle) in the direction `angle` from its centre. */
+export function edgeAt(plate: Box, height: number, angle: number): Hold {
+  const cx = (plate.min[0] + plate.max[0]) / 2;
+  const cz = (plate.min[2] + plate.max[2]) / 2;
+  const hx = (plate.max[0] - plate.min[0]) / 2;
+  const hz = (plate.max[2] - plate.min[2]) / 2;
+  const dx = Math.sin(angle);
+  const dz = Math.cos(angle);
+  const tx = Math.abs(dx) > 1e-9 ? hx / Math.abs(dx) : Infinity;
+  const tz = Math.abs(dz) > 1e-9 ? hz / Math.abs(dz) : Infinity;
+  const onSide = tx < tz; // the ray leaves through a side face (x = ±hx) before the front or back
+  const t = Math.min(tx, tz);
+  const outward: Vec3 = onSide ? [Math.sign(dx), 0, 0] : [0, 0, Math.sign(dz)];
+  const edge: Vec3 = [cx + dx * t, height, cz + dz * t];
+  return { point: [edge[0] - outward[0] * HOLD.inset, height, edge[2] - outward[2] * HOLD.inset], outward, angle, takenAt: Number.NaN };
+}
+
+export function distanceToBox(p: Vec3, b: Box): number {
+  const d = [0, 1, 2].map((i) => Math.max(b.min[i]! - p[i]!, 0, p[i]! - b.max[i]!));
+  return Math.hypot(d[0]!, d[1]!, d[2]!);
+}
+
+/** The azimuth the hand would like to hold the plate at: round to the right of the camera. */
+export function preferredHoldAngle(cameraAzimuth: number): number {
+  return cameraAzimuth + Math.atan(HOLD.rightShare);
+}
+
+/**
+ * The hold for a camera at `cameraAzimuth`: the point on the plate's edge nearest the preferred angle that keeps clear
+ * of every removable part. Null if the whole edge is crowded (then no hand is shown).
+ */
+export function holdFor(plate: Box, height: number, parts: Box[], cameraAzimuth: number): Hold | null {
+  const want = preferredHoldAngle(cameraAzimuth);
+  let best: Hold | null = null;
+  let bestOff = Infinity;
+  for (let i = 0; i < HOLD.samples; i++) {
+    const h = edgeAt(plate, height, (2 * Math.PI * i) / HOLD.samples);
+    const edge: Vec3 = [h.point[0] + h.outward[0] * HOLD.inset, height, h.point[2] + h.outward[2] * HOLD.inset];
+    if (parts.some((b) => Math.min(distanceToBox(h.point, b), distanceToBox(edge, b)) < HOLD.clearance)) continue;
+    const off = Math.abs(wrap(h.angle - want));
+    if (off < bestOff) {
+      best = h;
+      bestOff = off;
+    }
+  }
+  return best ? { ...best, takenAt: cameraAzimuth } : null;
+}
+
+/**
+ * True once the view has turned so far since the hold was taken that the hand should let go and take a new one, hand
+ * over hand. Measured from the turn, not from the preferred hold: when parts crowd the preferred side, the hold taken
+ * is already far from it, and the hand must not keep starting over.
+ */
+export function needsRegrip(hold: Hold, cameraAzimuth: number): boolean {
+  return Math.abs(wrap(cameraAzimuth - hold.takenAt)) > (HOLD.regripDegrees * Math.PI) / 180;
+}
+
+/**
+ * Which way the fingers point while holding the plate: level, in under its edge, with the forearm leaning out towards
+ * the camera and the right of the screen, so it runs off the bottom right rather than across the machine.
+ */
+export function holdApproach(outward: Vec3, toCamera: Vec3, cameraRight: Vec3): Vec3 {
+  const flat = (v: Vec3): Vec3 => normalize([v[0], 0, v[2]]);
+  const c = flat(toCamera);
+  const r = flat(cameraRight);
+  return normalize([
+    -(outward[0] + c[0] * HOLD.towardCamera + r[0] * HOLD.towardRight),
+    0,
+    -(outward[2] + c[2] * HOLD.towardCamera + r[2] * HOLD.towardRight),
+  ]);
+}
+
+/** The hand's basis while holding the plate: palm up under it, so the curled fingers close on its underside. */
+export function holdBasis(approach: Vec3): { x: Vec3; y: Vec3; z: Vec3 } {
+  return handBasis(approach, [0, -1, 0]);
+}

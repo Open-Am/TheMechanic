@@ -25,7 +25,7 @@ export interface Budgets {
 interface GltfJson {
   scene?: number;
   scenes?: Array<{ nodes?: number[] }>;
-  nodes?: Array<{ name?: string; mesh?: number; children?: number[] }>;
+  nodes?: Array<{ name?: string; mesh?: number; children?: number[]; extras?: Record<string, unknown> }>;
   meshes?: Array<{ primitives: Array<{ mode?: number; indices?: number; attributes: Record<string, number>; targets?: unknown[] }>; extras?: { targetNames?: string[] } }>;
   accessors?: Array<{ count: number }>;
   images?: Array<{ bufferView?: number; mimeType?: string; uri?: string }>;
@@ -202,7 +202,13 @@ export function materialsUsingImages(json: GltfJson, images: ReadonlySet<number>
   return out;
 }
 
-/** The mechanic's hand (ADR 0015, plan 0008): one node named mechanic_hand with a "grip" morph, within its budget. */
+/** Metres from the grip point within which a pinch point must lie: the hand is about 0.2 m long. */
+const PINCH_REACH = 0.25;
+
+/**
+ * The mechanic's hand (ADRs 0015 and 0016): one node named mechanic_hand with a "grip" morph, within its budget. Other
+ * morphs are allowed; a "pinch" morph needs the node's pinch_point extra, a point near the hand in glTF axes.
+ */
 export function checkHand(glb: Glb, budgets: Budgets): CheckResult {
   const errors: string[] = [];
   const roots = rootNodes(glb.json);
@@ -215,7 +221,13 @@ export function checkHand(glb: Glb, budgets: Budgets): CheckResult {
   const node = roots[0] ? glb.json.nodes?.[roots[0].index] : undefined;
   const mesh = node?.mesh !== undefined ? glb.json.meshes?.[node.mesh] : undefined;
   const hasTargets = mesh?.primitives.every((p) => Array.isArray(p.targets) && p.targets.length > 0) ?? false;
-  if (!hasTargets || !(mesh?.extras?.targetNames ?? []).includes("grip")) errors.push(`The hand has no "grip" morph target.`);
+  const morphs = mesh?.extras?.targetNames ?? [];
+  if (!hasTargets || !morphs.includes("grip")) errors.push(`The hand has no "grip" morph target.`);
+  if (morphs.includes("pinch")) {
+    const p = node?.extras?.["pinch_point"];
+    const ok = Array.isArray(p) && p.length === 3 && p.every((v) => typeof v === "number" && Number.isFinite(v)) && Math.hypot(...(p as number[])) <= PINCH_REACH;
+    if (!ok) errors.push(`The hand has a "pinch" morph but no pinch_point of three numbers within ${PINCH_REACH} m of the grip point.`);
+  }
   for (const [i, img] of (glb.json.images ?? []).entries()) {
     const bv = img.bufferView !== undefined ? glb.json.bufferViews?.[img.bufferView] : undefined;
     if (!bv || !glb.bin) continue;

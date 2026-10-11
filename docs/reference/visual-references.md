@@ -128,3 +128,5 @@ Saved in `assets/hand/reference/` (git-ignored).
 - `hand-dorsal-anatomical-commons-ccbysa4.jpg`: turned out to be a line drawing; of little use.
 
 Proportions come from standard adult hand measurements. Photos of a Lagos mechanic's hands, open and gripping, would be the right reference.
+
+Since plan 0009 the hand's shape and proportions come from MakeHuman's CC0 base body (MPFB 2.0.18, ADR 0016), made as an adult Nigerian man with a working build; sources and licences are in `assets/hand/LICENCE.md`. The photos above are still used for the grease. Photos of a Lagos mechanic's hands, open, gripping and pinching, remain the best check.
