@@ -340,7 +340,12 @@ let worstHidden = { share: 0, where: "" };
 const HIDDEN_LIMIT = 0.1;
 async function noteHidden(where: string): Promise<void> {
   const share = await evaluate<number>("window.__openAmDevRender.handHidden()");
-  if (process.env.HIDDEN_DEBUG && share > 0.05) console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}`);
+  if (process.env.HIDDEN_DEBUG && share > 0.05) {
+    const need = await evaluate<number>("window.__openAmDevRender.handNeed()");
+    const o = await orbitNow();
+    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; azimuth ${o.azimuth.toFixed(2)} polar ${o.polar.toFixed(2)}`);
+    if (share > HIDDEN_LIMIT) await screenshot(`hidden-${where.replace(/[^a-z0-9]+/gi, "-")}`);
+  }
   if (share > worstHidden.share) worstHidden = { share, where };
 }
 {

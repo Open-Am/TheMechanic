@@ -979,6 +979,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         return pts.length ? hidden / pts.length : 0;
       },
       orbit: () => ({ ...orbit }),
+      /** How far (metres) the whole hand, every sample point, would have to come towards the camera to clear the machine. */
+      handNeed: () => (hand && hand.visible ? collide(hand.samplePoints()) : 0),
       marker: "open-am-dev-hook",
     };
   }
