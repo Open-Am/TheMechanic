@@ -1,7 +1,7 @@
 ---
 id: 0013
 title: Sound and vibration
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0002, 0004, 0007, 0010, 0012, 0014, 0018, 0020, 0021, 0022, 0023]
 branch: plan/0013-sound-and-vibration
@@ -12,6 +12,8 @@ branch: plan/0013-sound-and-vibration
 ## Goal
 
 The game makes the sounds ADR 0018 lists, and on phones that support it, vibrates with them. A fastener or an unscrewed part clicks once per turn. A part that gives makes the sound of its kind. A part dropped on the tray clunks. A part put back seats with a click. The cord pull, a failed start and the engine start each have a sound. The sounds are short mono Ogg Opus recordings, 250 KB at most in all. They load after the round starts, and the first tap ("Start") unlocks them. A mute button on the working screen turns off sound and vibration, and the phone remembers the choice. A blocked part stays silent and still. Until the owner records the real machine, the sounds are CC0 stand-ins. Every file's source and licence is listed. Nothing changes in the rules or the score.
+
+Approved by the owner on 2026-10-11, who wrote "1. All approved  2. B" (in answer to a request to accept ADRs 0023 and 0024 and approve plans 0013, 0014 and 0015).
 
 ## ADRs relied on
 

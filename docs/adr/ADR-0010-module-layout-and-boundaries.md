@@ -54,3 +54,4 @@ Rules exist in exactly one place. The interface can be rebuilt or restyled witho
 
 - 2026-10-10: proposed by Claude, from discussion with the owner.
 - 2026-10-10: accepted by the owner, who wrote "please accept both adr 2 and 10".
+- 2026-10-11: the paragraph "Nothing assumes being online after load" is replaced by ADR 0023 (downloads after the game has started). The rest of this ADR stands.

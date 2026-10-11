@@ -1,7 +1,7 @@
 ---
 id: 0014
 title: Phase 4, the daily fault, local best scores, share, loading and the frame-rate check
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0001, 0002, 0004, 0005, 0007, 0010, 0014, 0015, 0022, 0024]
 branch: plan/0014-phase-4
@@ -12,6 +12,8 @@ branch: plan/0014-phase-4
 ## Goal
 
 The player can choose today's fault or free play. Today's fault is the same for everyone, with the same customer. The first attempt each day is scored. Later attempts that day are practice and are not scored. The result screen shows the player's best score for that fault, kept in the browser. The game keeps working when browser storage is blocked or broken. A scored daily that ends with the engine running can be shared as the three-line text in ADR 0005, through the phone's share sheet or the clipboard. While the model, environment and hand download, the player sees the start and briefing screens with a progress bar, not a blank page. `npm run verify:phone` fails when the frame rate is under the 30 fps budget, instead of only printing it. This is the brief's Phase 4. Nothing changes in the rules or the score.
+
+Approved by the owner on 2026-10-11, who wrote "1. All approved  2. B" (in answer to a request to accept ADRs 0023 and 0024 and approve plans 0013, 0014 and 0015).
 
 ## ADRs relied on
 

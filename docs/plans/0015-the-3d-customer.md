@@ -1,7 +1,7 @@
 ---
 id: 0015
 title: The 3D customer
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0005, 0007, 0010, 0012, 0013, 0014, 0015, 0020, 0021, 0023]
 branch: plan/0015-the-3d-customer
@@ -15,7 +15,7 @@ The round's customer stands in the scene, behind the generator and to its right,
 
 Approved by the owner on 2026-10-11, who wrote "Plan 12, 15 and adr 22 is approved."
 
-Revised after approval on 2026-10-11, from the owner's answer on how customers download: "Progressive download. As the user is playing the first customer, the next download." Each customer is now its own file, and the next one downloads while the current round is played (readings 2, 9 and 10, steps 2, 4, 6, 8 and 9). The revised plan is back to `proposed`: it needs ADR 0023 accepted and the owner's approval of the revision.
+Revised after approval on 2026-10-11, from the owner's answer on how customers download: "Progressive download. As the user is playing the first customer, the next download." Each customer is now its own file, and the next one downloads while the current round is played (readings 2, 9 and 10, steps 2, 4, 6, 8 and 9). The revision was approved by the owner on 2026-10-11, who wrote "1. All approved  2. B".
 
 ## ADRs relied on
 

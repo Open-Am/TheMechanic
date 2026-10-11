@@ -1,7 +1,7 @@
 ---
 id: 0023
 title: Downloading after the game has started
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: []
 superseded_by: null
@@ -32,3 +32,4 @@ The first load stays small, and each round shows a customer with no wait on all 
 ## History
 
 - 2026-10-11: proposed by Claude, from the owner's answer quoted above.
+- 2026-10-11: accepted by the owner, who wrote "1. All approved  2. B".

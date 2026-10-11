@@ -1,7 +1,7 @@
 ---
 id: 0024
 title: The daily attempt is used up when its timer starts
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: []
 superseded_by: null
@@ -28,3 +28,4 @@ A shared daily result always means one honest try. The cost: a player whose phon
 ## History
 
 - 2026-10-11: proposed by Claude, from the owner's answer "1. B" to the question of when the daily attempt counts.
+- 2026-10-11: accepted by the owner, who wrote "1. All approved  2. B".
