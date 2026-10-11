@@ -1,7 +1,7 @@
 ---
 id: 0018
 title: Sound and vibration
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: []
 superseded_by: null
@@ -46,3 +46,4 @@ Removal gets the clicks and clunks that make a hand feel it did something, and t
 ## History
 
 - 2026-10-11: proposed by Claude, from the owner's choice quoted above.
+- 2026-10-11: accepted by the owner, who wrote "I approve the 3 new adr and plan".

@@ -13,7 +13,7 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0005](ADR-0005-daily-fault.md) | Daily fault | accepted |
 | [0006](ADR-0006-performance-budgets.md) | Performance budgets | superseded (superseded by 0014) |
 | [0007](ADR-0007-player-mode-and-diagnostic-mode.md) | Player mode and diagnostic mode | accepted |
-| [0008](ADR-0008-part-motion-for-removal-animation.md) | Part motion field for removal and install animation | accepted |
+| [0008](ADR-0008-part-motion-for-removal-animation.md) | Part motion field for removal and install animation | superseded (superseded by 0017) |
 | [0009](ADR-0009-decision-and-documentation-process.md) | Decision and documentation process | accepted |
 | [0010](ADR-0010-module-layout-and-boundaries.md) | Module layout and boundaries | accepted |
 | [0011](ADR-0011-inspecting-parts-in-place.md) | Inspecting parts in place | accepted |
@@ -22,6 +22,6 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0014](ADR-0014-performance-budgets-and-realistic-lighting.md) | Performance budgets and realistic lighting | accepted |
 | [0015](ADR-0015-customer-patience-and-the-mechanics-hand.md) | The customer, their patience, and the mechanic's hand | accepted |
 | [0016](ADR-0016-makehuman-and-the-hand-on-rotation.md) | MakeHuman for characters, and the hand turns the machine | proposed |
-| [0017](ADR-0017-hands-on-removal.md) | Hands-on removal, a gesture for each kind of part | proposed |
-| [0018](ADR-0018-sound-and-vibration.md) | Sound and vibration | proposed |
-| [0019](ADR-0019-visible-fasteners.md) | Visible bolts and screws | proposed |
+| [0017](ADR-0017-hands-on-removal.md) | Hands-on removal, a gesture for each kind of part | accepted |
+| [0018](ADR-0018-sound-and-vibration.md) | Sound and vibration | accepted |
+| [0019](ADR-0019-visible-fasteners.md) | Visible bolts and screws | accepted |

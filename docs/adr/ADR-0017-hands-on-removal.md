@@ -1,7 +1,7 @@
 ---
 id: 0017
 title: Hands-on removal, a gesture for each kind of part
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: [0008]
 superseded_by: null
@@ -55,3 +55,4 @@ The player does the work: they feel the tank's weight, the hose's stretch and th
 ## History
 
 - 2026-10-11: proposed by Claude, from the owner's message and choices quoted above.
+- 2026-10-11: accepted by the owner, who wrote "I approve the 3 new adr and plan".

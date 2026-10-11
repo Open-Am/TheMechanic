@@ -1,7 +1,7 @@
 ---
 id: 0019
 title: Visible bolts and screws
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: []
 superseded_by: null
@@ -50,3 +50,4 @@ Covers come off the way they do on the roadside: bolt by bolt, then the cover. T
 ## History
 
 - 2026-10-11: proposed by Claude, from the owner's choice quoted above.
+- 2026-10-11: accepted by the owner, who wrote "I approve the 3 new adr and plan".

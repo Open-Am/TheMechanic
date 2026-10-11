@@ -3,7 +3,7 @@ id: 0008
 title: The mechanic's hand
 status: done
 date: 2026-10-11
-adrs: [0007, 0008, 0010, 0012, 0013, 0014, 0015]
+adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0017]
 branch: plan/0008-mechanics-hand
 ---
 

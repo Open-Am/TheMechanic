@@ -1,10 +1,10 @@
 ---
 id: 0008
 title: Part motion field for removal and install animation
-status: accepted
+status: superseded
 date: 2026-10-10
 supersedes: []
-superseded_by: null
+superseded_by: 0017
 ---
 
 # 0008. Part motion field for removal and install animation
@@ -40,3 +40,4 @@ Artists tune feel in data. The GLB contract is unchanged. Every new motion type 
 
 - 2026-10-10: proposed by Claude, from discussion with the owner.
 - 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.
+- 2026-10-11: superseded by ADR 0017 (hands-on removal), which keeps this ADR's motion vocabulary and data and changes how a removal plays.

@@ -3,7 +3,7 @@ id: 0009
 title: A MakeHuman hand, and the hand turns the machine
 status: proposed
 date: 2026-10-11
-adrs: [0007, 0008, 0010, 0012, 0013, 0014, 0015, 0016]
+adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0016, 0017]
 branch: plan/0009-makehuman-hand
 ---
 
@@ -19,7 +19,7 @@ The mechanic's hand is remade from a MakeHuman body: a sculpted, properly propor
 - **0015** sets the hand's budget (4,000 triangles, 400 KB, one 1024 px texture set) and when it acts; 0016 adds rotation to that.
 - **0013** sets the realism target, the photo comparison, and that textures are made by us.
 - **0007**: the rotation hand holds only the frame and looks the same whatever part the drag started on; a blocked pull and a tap still show no hand.
-- **0008**: part motion is unchanged; the hand follows it.
+- **0017** (supersedes 0008): the motion vocabulary is unchanged and the hand follows it; hands-on removal itself is the next plan.
 - **0012**: Blender 4.5; MPFB runs inside it and is recorded like other tools.
 - **0014**: frame-rate budget holds with the hand on screen during rotation.
 - **0010**: everything new is in `render`; `core` and `app` do not change.
@@ -37,7 +37,7 @@ A Haiku agent read the ADRs and design notes: showing the hand during rotation g
 5. **Where the hand holds the frame.** The machine has no tube frame (`docs/open-questions.md`): `base_frame` is the die-cast base, rubber mounts and body shell. The hand holds the edge of the base, at the point nearest the camera, shifted towards the right of the screen where the forearm comes in from. The hold point is fixed in the world while the drag lasts, so the machine and the hand turn together on screen. The forearm is re-aimed each frame so it always runs off the bottom right of the screen.
 6. **Hand over hand.** When the hold point has turned more than 70 degrees away from the camera since it was taken, or goes behind the machine, the hand lets go and takes a new hold at the new nearest point: release 0.12 s, reach 0.18 s, the same timings as a pull.
 7. **When it comes and goes.** The hand comes in once the drag has become a rotation (after 8 px, the tap slop), so a tap never shows it. Two fingers (zoom) hide it. Lifting the finger releases and withdraws it. A pull or put-back takes the hand over.
-8. **Hands-on removal comes next.** ADR 0017 (proposed) would have the part follow the finger, so the hand would take hold when the drag starts rather than reaching in first. If it is accepted, the next plan reworks the hand's timing for pulls; the model, the pinch and the rotation hold built here stay.
+8. **Hands-on removal comes next.** ADR 0017 (accepted) has the part follow the finger, so the hand takes hold when the drag starts rather than reaching in first. The next plan reworks the hand's timing for pulls; the model, the pinch and the rotation hold built here stay.
 9. **Fallback.** If `hand.glb` is missing, rotation works as now with no hand.
 
 ## Steps
