@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
-import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion, spannerSwing } from "../src/render/motion.ts";
+import { alongPath, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, legSeconds, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, overPath, pathLength, poseAt, resolveMotion, segmentHitsBox, spannerSwing, TRIP, tripPlan, type Bounds } from "../src/render/motion.ts";
 import { clampOrbit, fitDistance, FRAME, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
@@ -756,5 +756,113 @@ describe("fasteners and tools (plan 0011, ADR 0020)", () => {
         expect(world.z).toBeCloseTo(spec.position[2]);
       }
     }
+  });
+});
+
+describe("the toolbox trip (plan 0012, ADR 0021)", () => {
+  const near = { pointer: TRIP.refMetres, machine: TRIP.refMetres };
+  const kinds = (steps: ReturnType<typeof tripPlan>["steps"]) => steps.map((s) => s.kind);
+
+  it("four bolts with one tool make one trip: fetch, use, free, return", () => {
+    const plan = tripPlan(["bolt", "bolt", "bolt", "bolt"], "undo", near);
+    expect(kinds(plan.steps)).toEqual(["toToolbox", "pick", "toFastener", "fasten", "fasten", "fasten", "fasten", "free", "toSlot", "putBack", "home"]);
+    expect(plan.steps.filter((s) => "tool" in s).every((s) => "tool" in s && s.tool === "spanner")).toBe(true);
+    expect(plan.order).toEqual([0, 1, 2, 3]);
+  });
+
+  it("mixed bolts and screws change tool once, at the toolbox", () => {
+    const plan = tripPlan(["screw", "bolt", "screw", "nut"], "undo", near);
+    expect(plan.steps.filter((s) => s.kind === "pick").map((s) => ("tool" in s ? s.tool : ""))).toEqual(["screwdriver", "spanner"]);
+    expect(plan.steps.filter((s) => s.kind === "putBack").length).toBe(2);
+    // Grouped by tool: both screws, then the bolt and the nut.
+    expect(plan.order).toEqual([0, 2, 1, 3]);
+    expect(plan.steps.filter((s) => s.kind === "fasten").map((s) => ("index" in s ? s.index : -1))).toEqual([0, 2, 1, 3]);
+    // The change happens between the two groups: put the screwdriver back, take the spanner.
+    const k = kinds(plan.steps);
+    expect(k.slice(k.indexOf("toSlot"), k.indexOf("toSlot") + 4)).toEqual(["toSlot", "putBack", "toToolbox", "pick"]);
+    // The part comes free only once, after the last fastener.
+    expect(k.filter((x) => x === "free").length).toBe(1);
+    expect(k.indexOf("free")).toBeGreaterThan(k.lastIndexOf("fasten"));
+  });
+
+  it("travel time is 0.35 s at the default view and stays within 0.35 to 0.6 s", () => {
+    expect(legSeconds(TRIP.refMetres)).toBeCloseTo(0.35);
+    for (const m of [0, 0.01, 0.3, 0.6, 0.8, 1, 2, 50, Number.NaN, -1]) {
+      expect(legSeconds(m)).toBeGreaterThanOrEqual(0.35);
+      expect(legSeconds(m)).toBeLessThanOrEqual(0.6);
+    }
+    expect(legSeconds(0.8)).toBeGreaterThan(legSeconds(0.6));
+    const far = tripPlan(["bolt"], "undo", { pointer: 3, machine: 3 });
+    for (const s of far.steps) if (["toToolbox", "toFastener", "toSlot", "home"].includes(s.kind)) expect(s.seconds).toBe(0.6);
+  });
+
+  it("a part without fasteners makes no trip", () => {
+    expect(tripPlan([], "undo", near)).toEqual({ steps: [], order: [], total: 0 });
+    expect(tripPlan([], "do-up", near)).toEqual({ steps: [], order: [], total: 0 });
+  });
+
+  it("doing a part up after a put-back runs the same trip, with no freeing", () => {
+    const plan = tripPlan(["nut", "nut", "bolt", "bolt"], "do-up", near);
+    expect(kinds(plan.steps)).toEqual(["toToolbox", "pick", "toFastener", "fasten", "fasten", "fasten", "fasten", "toSlot", "putBack", "home"]);
+    expect(plan.steps.find((s) => s.kind === "fasten")!.seconds).toBe(FASTEN.doUpSeconds);
+  });
+
+  it("four bolts take about 1.5 to 3 seconds at the default view (ADR 0021), and the same input gives the same trip", () => {
+    const plan = tripPlan(["bolt", "bolt", "bolt", "bolt"], "undo", near);
+    expect(plan.total).toBeGreaterThanOrEqual(1.5);
+    expect(plan.total).toBeLessThanOrEqual(3);
+    expect(tripPlan(["bolt", "bolt", "bolt", "bolt"], "undo", near)).toEqual(plan);
+  });
+
+  // The machine's bounds, roughly the generator's.
+  const box: Bounds = { min: [-0.18, 0, -0.16], max: [0.18, 0.375, 0.16] };
+  const inside = (p: Vec3, margin = 1e-6) => p.every((v, i) => v > box.min[i]! + margin && v < box.max[i]! - margin);
+
+  it("a segment through the machine's bounds is found; one beside or above it is not", () => {
+    expect(segmentHitsBox([-1, 0.2, 0], [1, 0.2, 0], box)).toBe(true);
+    expect(segmentHitsBox([-1, 0.5, 0], [1, 0.5, 0], box)).toBe(false);
+    expect(segmentHitsBox([0.3, 0.1, 0.5], [0.6, 0.1, 0.2], box)).toBe(false);
+    expect(segmentHitsBox([0, 0.2, 0.5], [0, 0.2, 0.3], box)).toBe(false);
+  });
+
+  it("the hand's path from a toolbox behind the machine to a front fastener goes over the machine, never through it", () => {
+    const slot: Vec3 = [0.1, 0.14, -0.6];
+    const fastener: Vec3 = [-0.05, 0.12, 0.16];
+    const path = overPath(slot, null, fastener, [0, 0, 1], box);
+    expect(path[0]).toEqual(slot);
+    expect(path[path.length - 1]).toEqual(fastener);
+    expect(Math.max(...path.map((p) => p[1]))).toBeCloseTo(box.max[1] + TRIP.clearance);
+    for (let t = 0; t <= 1; t += 0.005) expect(inside(alongPath(path, t))).toBe(false);
+    // And back again, from the fastener to the slot.
+    const back = overPath(fastener, [0, 0, 1], slot, null, box);
+    for (let t = 0; t <= 1; t += 0.005) expect(inside(alongPath(back, t))).toBe(false);
+  });
+
+  it("from every side of the machine to a toolbox anywhere around it, the path stays out of the machine", () => {
+    const sides: Array<[Vec3, Vec3]> = [
+      [[0.18, 0.15, 0], [1, 0, 0]],
+      [[-0.18, 0.2, 0.05], [-1, 0, 0]],
+      [[0, 0.2, 0.16], [0, 0, 1]],
+      [[0.05, 0.1, -0.16], [0, 0, -1]],
+      [[0, 0.375, 0], [0, 1, 0]],
+    ];
+    for (let a = 0; a < 2 * Math.PI; a += Math.PI / 6) {
+      const slot: Vec3 = [0.6 * Math.sin(a), 0.14, 0.6 * Math.cos(a)];
+      for (const [at, out] of sides) {
+        const path = overPath(slot, null, at, out, box);
+        for (let t = 0.001; t < 0.999; t += 0.01) expect(inside(alongPath(path, t))).toBe(false);
+      }
+    }
+  });
+
+  it("a clear line goes straight, and the path's length and points are measured along it", () => {
+    const path = overPath([0.4, 0.14, 0.5], null, [0.18, 0.15, 0.1], [1, 0, 0], box);
+    expect(path.length).toBe(3); // the slot, the stand-off, the fastener: no climb
+    const line: Vec3[] = [[0, 0, 0], [1, 0, 0], [1, 1, 0]];
+    expect(pathLength(line)).toBeCloseTo(2);
+    expect(alongPath(line, 0.25)).toEqual([0.5, 0, 0]);
+    expect(alongPath(line, 0.75)).toEqual([1, 0.5, 0]);
+    expect(alongPath(line, 2)).toEqual([1, 1, 0]);
+    expect(alongPath(line, -1)).toEqual([0, 0, 0]);
   });
 });
