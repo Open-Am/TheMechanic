@@ -465,5 +465,8 @@ console.log(`Machine under the controls: at the start of ${covered} removal${cov
 console.log(`Frame rate: ${fpsOk ? "held through every round" : "FELL as parts came off"}`);
 console.log(`Console errors: ${consoleErrors.length}`);
 for (const e of consoleErrors) console.log(`   ${e}`);
+// Close the browser over DevTools: on Windows the launched msedge.exe hands over to another process, so killing its pid
+// can leave a headless browser on the debug port, and the next run would reuse it with this run's saved scores.
+await Promise.race([send("Browser.close").catch(() => {}), sleep(1000)]);
 ws.close();
 process.exit(allOk && fpsOk && covered === 0 && consoleErrors.length === 0 ? 0 : 1);

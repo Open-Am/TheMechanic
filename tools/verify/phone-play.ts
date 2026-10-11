@@ -304,6 +304,8 @@ await send("Runtime.enable");
 await send("Log.enable");
 await send("Page.enable");
 await send("Network.enable");
+// Start from empty saved scores, even if an earlier browser on this debug port is reused (plan 0014).
+await send("Storage.clearDataForOrigin", { origin: `http://localhost:${PORT}`, storageTypes: "local_storage" });
 await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
 // The headless browser has no share sheet: make sure of it, so Share goes to the clipboard, and note what is copied.
 await send("Page.addScriptToEvaluateOnNewDocument", {
@@ -661,6 +663,9 @@ console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps, 
 console.log(`Console errors: ${consoleErrors.length}`);
 for (const e of consoleErrors) console.log(`   ${e}`);
 for (const f of failures) console.log(`FAIL ${f}`);
+// Close the browser over DevTools: on Windows the launched msedge.exe hands over to another process, so killing its pid
+// can leave a headless browser on the debug port, and the next run would reuse it with this run's saved scores.
+await Promise.race([send("Browser.close").catch(() => {}), sleep(1000)]);
 ws.close();
 cleanup();
 process.exit(failures.length || consoleErrors.length ? 1 : 0);
