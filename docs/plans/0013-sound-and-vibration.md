@@ -3,7 +3,7 @@ id: 0013
 title: Sound and vibration
 status: proposed
 date: 2026-10-11
-adrs: [0002, 0004, 0007, 0010, 0012, 0014, 0018, 0020, 0021]
+adrs: [0002, 0004, 0007, 0010, 0012, 0014, 0018, 0020, 0021, 0022, 0023]
 branch: plan/0013-sound-and-vibration
 ---
 
@@ -21,7 +21,9 @@ The game makes the sounds ADR 0018 lists, and on phones that support it, vibrate
 - **0002**: no new package. Limit 6 says audio needs a first tap and storage can be wiped. Web Audio and `navigator.vibrate` are built into the browser.
 - **0004**: no new action. Sound and vibration cost nothing and are not logged.
 - **0007**: sound and vibration never add information the picture does not show. The press on any part stays silent, and the same for every part.
-- **0010**: `Audio` stays in `platform`. `render` never imports `platform`. `main.ts` wires them. One exception to "no request after the machine folder": ADR 0018 decides that the sounds load after the round starts. See "Unclear in ADR 0018" below.
+- **0010**: `Audio` stays in `platform`. `render` never imports `platform`. `main.ts` wires them. ADR 0023 (proposed) replaces its "no request after load" paragraph and allows the sounds to download after Start, never holding up play.
+- **0023** (proposed): the sounds may download after Start; a missing or late sound plays nothing.
+- **0022**: the mute setting is not a score; ADR 0018 itself decides it is remembered, under its own key `openam.muted`.
 - **0012**: Blender 4.5 is the approved tool. Its sound mixdown encodes the sounds, so no new tool is needed.
 - **0014**: ADR 0018 adds a 250 KB sound budget to ADR 0014's table. The frame rate must still hold.
 
@@ -78,7 +80,7 @@ Risks:
     - Muted means no sound and no `navigator.vibrate` call at all.
     - The choice is stored under `openam.muted` through `platform/local/storage.ts`. That is a new helper: `localStorage` in try/catch, falling back to memory for the session. ADR 0018 says "the same storage fallbacks as the best scores", but the best scores are not built yet. This helper is written so `ScoreStore` can reuse it later.
     - The hand withdraws over the button, as over any button (ADR 0020).
-11. **CC0 only.** ADR 0018 allows the owner's or the mechanic's own recordings, or CC0. A later sentence would also tolerate a licence that only asks for credit. This plan uses CC0 only, as the earlier sentence says.
+11. **CC0 only.** ADR 0018 allows the owner's or the mechanic's own recordings, or CC0. A later sentence would also tolerate a licence that only asks for credit. The owner chose CC0 only on 2026-10-11 ("4. A"), recorded in ADR 0018's history.
     - Stand-ins come from Freesound (freesound.org), filtered to "Creative Commons 0", one sound per moment.
     - Each file is credited anyway in `game/public/audio/LICENCE.md`: moment, Freesound page URL, author, licence `CC0 1.0`, date fetched, trim used.
     - No sound with any other third-party licence is used, and none is made up in code.
@@ -122,7 +124,7 @@ Risks:
    Existing tests that expect `remove` change to `land`.
 3. **Sounds.** Check first that `tools/blender/audio.py` can write a mono Ogg Opus file with Blender 4.5 in background mode. If it cannot, stop and ask the owner before adding any other tool, such as ffmpeg (ADR 0012).
    - Search Freesound with the CC0 filter. Write two or three candidates per moment, with their URLs, in `assets/audio/STATUS.md`.
-   - The owner listens, picks one per moment and downloads the originals into `assets/audio/source/`. Freesound needs the owner's sign-in.
+   - Claude gives the owner a shortlist of CC0 Freesound links, two or three per moment. The owner listens, picks one per moment and downloads the originals into `assets/audio/source/`, since Freesound needs a sign-in. The owner chose this on 2026-10-11 ("3. A").
    - Fill `assets/audio/sounds.json`, encode with `npm run audio` (new script in `package.json`, `tools/pipeline/audio.mjs`), and commit the ten `.ogg` files with `game/public/audio/LICENCE.md`.
    - Add `assets/audio/source/` to `.gitignore`.
    - Aim for well under the budget: about 60 KB in all, with the engine start the longest at about 2.5 s.
@@ -182,9 +184,7 @@ Plan 0011 merged into `main`. The turn and give moments hook into its fastener s
 
 ## Unclear in ADR 0018 (for the owner)
 
-- **The licence rule.** ADR 0018 says files are either the owner's or the mechanic's own, or CC0. It also says no licence "that asks for more than credit" is used, which would allow CC-BY. This plan uses CC0 only.
-- **Who downloads the sounds.** Freesound needs a sign-in, so the owner downloads the chosen originals.
-- **ADR 0010 and loading after Start.** ADR 0010 says no layer makes a network request after the machine folder is fetched. ADR 0018 loads the sounds after the round starts. This plan follows ADR 0018. A history line on ADR 0010 noting the exception would close the gap.
+- Settled on 2026-10-11: CC0 only ("4. A"); the owner downloads from Claude's shortlist ("3. A"); loading after Start is covered by ADR 0023 (proposed).
 - **The storage fallbacks.** ADR 0018 says "the same storage fallbacks as the best scores", but the best scores are not built yet. This plan writes the helper they will share.
 - **Readings that would each be a one-line answer from the owner:**
   - the walk-out is now silent, where today it plays `fail`;
