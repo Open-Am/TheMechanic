@@ -33,6 +33,8 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 - Whether any fastener is captive (stays in the cover) rather than coming out loose.
 - Plan 0011 drafted these fasteners in machine.json, all unverified: fuel tank 4 screws on the side flanges; recoil starter 4 bolts, one per ear; muffler 2 nuts on the exhaust studs and 2 bolts through the heat shield; carburettor 2 nuts on the flange studs; alternator cover 4 bolts; air filter cover 2 bolts (it also rocks off a clip). Counts, heads, sizes and positions all need the mechanic. The capacitor's mounting (a strap screw?) is unknown, so it has none.
 - Air filter cover: the model shows two bolts on the lower door, but its motion is `unclip`. Bolted, clipped, or both?
+- Alternator cover: the product photo shows no bolt heads on the round face, only ears with holes on the square rim. Are the cover's bolts through the rim (as the photo suggests) rather than the face (as drafted)? (Plan 0011 match images, 2026-10-11.)
+- Fuel tank: the listing photo shows a side flange along each side with a hole near each end. Are the four screws there, and is one really off-centre as drafted (`fuel_tank.screw_3`)?
 - Sounds: until the owner records the real machine, the cord pull, the failed start and the engine are stand-ins from CC0 recordings, not a TG950.
 
 ## Owner decisions pending
