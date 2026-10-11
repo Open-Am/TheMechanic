@@ -3,7 +3,7 @@
 //
 //   node tools/verify/phone-play.ts [--out <dir>] [--browser <path>] [--lighting fallback]
 //
-// Starts the Vite dev server, opens the game with ?diag, pulls each part along its path, fixes the culprit, drags the
+// Starts the Vite dev server, opens the game with ?diag, takes each part off (double tap, then drag to the tray), fixes the culprit, drags the
 // chips back, pulls the cord, and repeats with "Next customer" until all six faults are solved. Saves screenshots,
 // reports console errors and a frame-rate sample at 4x CPU throttle. Exits 1 on any failure.
 
@@ -178,36 +178,69 @@ const chipPictureFill = (id: string) =>
   );
 const trayHas = (id: string) => evaluate<boolean>(`!!document.querySelector('.tray [data-part="${id}"]')`);
 
+type Probe = { x: number; y: number; dir: { x: number; y: number; headOn: boolean } };
+type HandState = { visible: boolean; closed: number; action: string; holding: string | null } | null;
+const probe = (id: string) => evaluate<Probe | null>(`window.__openAmDevRender.probe(${JSON.stringify(id)})`);
+const looseNow = () => evaluate<string[]>("window.__openAmDevRender.loose()");
+const handNow = () => evaluate<HandState>("window.__openAmDevRender.hand()");
+const orbitNow = () => evaluate<{ azimuth: number; polar: number }>("window.__openAmDevRender.orbit()");
+const trayAt = () =>
+  evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('.tray-host').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+async function doubleTap(x: number, y: number): Promise<void> {
+  await tapAt(x, y);
+  await sleep(70);
+  await tapAt(x, y);
+}
+async function pressKey(key: string): Promise<void> {
+  const code = `Key${key.toUpperCase()}`;
+  const vk = key.toUpperCase().charCodeAt(0);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key, code, text: key, windowsVirtualKeyCode: vk });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk });
+}
+
+/** Carries a loose part from (x, y) to (tx, ty) with the button held, watching the hand on the way. */
+async function carryTo(id: string, x: number, y: number, tx: number, ty: number): Promise<void> {
+  await mouse("mousePressed", x, y, true);
+  const steps = 24;
+  for (let i = 1; i <= steps; i++) {
+    await mouse("mouseMoved", x + ((tx - x) * i) / steps, y + ((ty - y) * i) / steps, true);
+    await sleep(16);
+    if (i === 14) {
+      const h = await handNow();
+      if (h && h.holding === id && h.closed > 0.5) {
+        if (handSeen === null) {
+          handSeen = true;
+          await screenshot("7-hand-carrying");
+        }
+        if (pinchSeen === null && PINCHED.has(id) && h.action === "pinch") {
+          pinchSeen = true;
+          await screenshot("10-hand-pinching");
+        }
+      }
+    }
+  }
+  await mouse("mouseReleased", tx, ty, false);
+}
+
+/** Removes a part as a player does (ADR 0020): double tap to loosen it, then drag it to the tray. */
 async function pullOff(id: string): Promise<void> {
   for (let attempt = 0; attempt < 8; attempt++) {
     await idle();
-    const p = await evaluate<{ x: number; y: number; dir: { x: number; y: number; headOn: boolean } } | null>(`window.__openAmDevRender.probe(${JSON.stringify(id)})`);
+    const p = await probe(id);
     if (p) {
-      const dx = p.dir.headOn ? 0 : p.dir.x;
-      const dy = p.dir.headOn ? 1 : p.dir.y;
-      await drag(p.x, p.y, p.x + dx * 70, p.y + dy * 70);
-      // The hand (plan 0008) should be gripping within a moment of an accepted pull: catch it once on camera.
-      // Small parts are pinched with the fingertips (plan 0009): catch that once too.
-      if (pinchSeen === null && PINCHED.has(id) && (await evaluate<boolean>("window.__openAmDevRender.hasHand()"))) {
-        const seen = await waitFor("the hand pinching", () => evaluate<boolean>("window.__openAmDevRender.handGripping() && window.__openAmDevRender.handShape() === 'pinch'"), 1500).catch(() => false);
-        if (seen) {
-          pinchSeen = true;
-          await screenshot("9-hand-pinching");
-        }
+      await doubleTap(p.x, p.y);
+      if (await waitFor(`${id} loose`, async () => (await looseNow()).includes(id), 3000).catch(() => false)) {
+        await idle();
+        const q = (await probe(id)) ?? p; // a loose part sits a few millimetres proud
+        const tray = await trayAt();
+        await carryTo(id, q.x, q.y, tray.x, tray.y);
+        if (await waitFor(`${id} in the tray`, () => trayHas(id), 3000).catch(() => false)) return;
       }
-      if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender.hasHand()"))) {
-        const seen = await waitFor("the hand gripping", () => evaluate<boolean>("window.__openAmDevRender.handGripping()"), 1500).catch(() => false);
-        if (seen) {
-          handSeen = true;
-          await screenshot("7-hand-gripping");
-        }
-      }
-      if (await waitFor(`${id} in the tray`, () => trayHas(id), 3000).catch(() => false)) return;
     }
-    // Hidden from this angle, or the pull missed: turn the machine and try again, as a player would.
+    // Hidden from this angle, or missed: turn the machine and try again, as a player would.
     await drag(ROTATE.x0, ROTATE.y0, ROTATE.x1, ROTATE.y1);
   }
-  throw new Error(`could not pull ${id} off`);
+  throw new Error(`could not take ${id} off`);
 }
 
 async function putBack(id: string): Promise<void> {
@@ -234,76 +267,93 @@ await screenshot("1-briefing");
 const solved = new Map<string, string>();
 const shots = new Set<string>();
 
-// A blocked pull shows no hand (ADR 0007, ADR 0015): the fuel tank is in view but cannot come off while the tap is on.
+// The hand and deliberate removal (ADR 0020), on a fresh round where the fuel tank is blocked by the tap:
+// the open hand is the same over a removable and a blocked part; a double tap on a blocked part does nothing; a drag on
+// a part that is not loose turns the machine and removes nothing, blocked or not; turning from the floor holds on and
+// lets go; G loosens the part under the mouse; a loose part dropped away from the tray goes back, still loose.
 let handSeen: boolean | null = null;
 let pinchSeen: boolean | null = null;
 const PINCHED = new Set(["spark_plug", "plug_cap", "fuel_tap", "capacitor"]);
-let blockedShowedHand = false;
-const turning: string[] = [];
+const checks: string[] = [];
 {
   await tapSelector(".briefing .primary");
   await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
   await idle();
-  const tank = await evaluate<{ x: number; y: number; dir: { x: number; y: number; headOn: boolean } } | null>("window.__openAmDevRender.probe('fuel_tank')");
-  if (tank) {
-    const dx = tank.dir.headOn ? 0 : tank.dir.x;
-    const dy = tank.dir.headOn ? -1 : tank.dir.y;
-    await mouse("mousePressed", tank.x, tank.y, true);
-    for (let i = 1; i <= 10; i++) {
-      await mouse("mouseMoved", tank.x + (dx * 70 * i) / 10, tank.y + (dy * 70 * i) / 10, true);
-      if (await evaluate<boolean>("window.__openAmDevRender.handGripping()")) blockedShowedHand = true;
-      await sleep(16);
-    }
-    await mouse("mouseReleased", tank.x + dx * 70, tank.y + dy * 70, false);
-    for (let i = 0; i < 10; i++) {
-      if (await evaluate<boolean>("window.__openAmDevRender.handGripping()")) blockedShowedHand = true;
-      await sleep(50);
-    }
-    if (await trayHas("fuel_tank")) failures.push("blocked pull: the fuel tank came off while the tap was on");
-  }
-  if (blockedShowedHand) failures.push("blocked pull: the hand appeared for a part that cannot come off");
-
-  // The hand turns the machine (ADR 0016): it holds the base during a rotation, lets go when the finger lifts, never
-  // shows for a tap, and looks the same when the rotation starts on a part that cannot come off.
   if (await evaluate<boolean>("window.__openAmDevRender.hasHand()")) {
-    const handNow = () => evaluate<{ on: boolean; grip: boolean }>("({ on: window.__openAmDevRender.handOnBase(), grip: window.__openAmDevRender.handGripping() })");
-    await idle();
-    await tapAt(VIEWPORT.width * 0.5, VIEWPORT.height * 0.32);
-    await sleep(300);
-    const afterTap = await handNow();
-    if (afterTap.on || afterTap.grip) failures.push("turning: a tap brought the hand in");
-    else turning.push("a tap shows no hand");
+    const hose = await probe("fuel_hose");
+    const tank = await probe("fuel_tank");
+    if (hose && tank) {
+      // Hovering: the same open hand over a part that can come off and one that cannot.
+      await mouse("mouseMoved", hose.x, hose.y, false);
+      await sleep(400);
+      const overHose = await handNow();
+      await mouse("mouseMoved", tank.x, tank.y, false);
+      await sleep(400);
+      const overTank = await handNow();
+      await screenshot("8-hand-hover");
+      if (!overHose?.visible || !overTank?.visible) failures.push("hover: the hand did not follow the mouse");
+      else if (overHose.action !== overTank.action || Math.abs(overHose.closed - overTank.closed) > 0.01) failures.push("hover: the hand looked different over a blocked part");
+      else checks.push("the open hand follows the mouse and looks the same over a removable and a blocked part");
 
-    async function turnFrom(x: number, y: number, dx: number, dy: number, shot: string | null): Promise<boolean> {
+      // A double tap on the blocked tank does nothing.
+      await doubleTap(tank.x, tank.y);
+      await sleep(900);
+      if ((await looseNow()).includes("fuel_tank") || (await trayHas("fuel_tank"))) failures.push("double tap: the blocked fuel tank loosened");
+      else checks.push("a double tap on a blocked part does nothing");
+
+      // A drag on the blocked tank, and on the hose that could come off but is not loose, turns the machine.
+      for (const [id, p] of [["fuel_tank", tank], ["fuel_hose", await probe("fuel_hose")]] as const) {
+        if (!p) continue;
+        const before = await orbitNow();
+        const dx = p.dir.headOn ? 0 : p.dir.x;
+        const dy = p.dir.headOn ? 1 : p.dir.y;
+        await drag(p.x, p.y, p.x + dx * 70, p.y + dy * 70);
+        await sleep(300);
+        const after = await orbitNow();
+        const turned = Math.abs(after.azimuth - before.azimuth) + Math.abs(after.polar - before.polar) > 0.01;
+        if (!turned || (await trayHas(id)) || (await looseNow()).includes(id)) failures.push(`drag: pulling ${id} without loosening it did not just turn the machine`);
+        else checks.push(`a drag on ${id} (${id === "fuel_tank" ? "blocked" : "not loose"}) turns the machine`);
+      }
+
+      // Turning from the empty floor: the hand holds on during the drag and opens after.
+      const fx = VIEWPORT.width * 0.5;
+      const fy = VIEWPORT.height * 0.72;
       await idle();
-      await mouse("mousePressed", x, y, true);
+      await mouse("mousePressed", fx, fy, true);
       let held = false;
       for (let i = 1; i <= 24; i++) {
-        await mouse("mouseMoved", x + (dx * i) / 24, y + (dy * i) / 24, true);
+        await mouse("mouseMoved", fx + (90 * i) / 24, fy + (10 * i) / 24, true);
         await sleep(30);
         const h = await handNow();
-        if (h.on && h.grip) held = true;
-        if (held && shot && i === 18) {
-          await screenshot(shot);
-          if (process.env.HOLD_DEBUG) console.log(JSON.stringify(await evaluate("window.__openAmDevRender.handHold()")));
-        }
+        if (h?.visible && h.closed > 0.5) held = true;
+        if (held && i === 18) await screenshot("9-hand-turning");
       }
-      await mouse("mouseReleased", x + dx, y + dy, false);
-      await sleep(700);
-      const after = await handNow();
-      if (after.on || after.grip) failures.push("turning: the hand stayed after the finger lifted");
-      return held;
-    }
-    // From the empty floor below the machine, so the drag cannot start on a part.
-    if (await turnFrom(VIEWPORT.width * 0.5, VIEWPORT.height * 0.72, 90, 10, "8-hand-turning")) turning.push("the hand held the base during a rotation and let go after");
-    else failures.push("turning: the hand did not hold the base during a rotation");
-    const tank2 = await evaluate<{ x: number; y: number; dir: { x: number; y: number; headOn: boolean } } | null>("window.__openAmDevRender.probe('fuel_tank')");
-    if (tank2 && !tank2.dir.headOn) {
-      // Across the tank's path, so the drag is a rotation that starts on a part that cannot come off yet.
-      const ok = await turnFrom(tank2.x, tank2.y, -tank2.dir.y * 90, tank2.dir.x * 90, null);
-      if (ok) turning.push("a rotation started on a blocked part shows the same hand");
-      else failures.push("turning: a rotation started on a blocked part showed no hand");
-    }
+      await mouse("mouseReleased", fx + 90, fy + 10, false);
+      await sleep(500);
+      const afterTurn = await handNow();
+      if (!held) failures.push("turning: the hand did not hold on during a turn");
+      else if (afterTurn && afterTurn.closed > 0.2) failures.push("turning: the hand stayed closed after the button was released");
+      else checks.push("turning from the floor, the hand holds on and opens after");
+
+      // G loosens the part under the mouse.
+      await idle();
+      const hose2 = await probe("fuel_hose");
+      if (hose2) {
+        await mouse("mouseMoved", hose2.x, hose2.y, false);
+        await sleep(150);
+        await pressKey("g");
+        if (await waitFor("the hose loose after G", async () => (await looseNow()).includes("fuel_hose"), 3000).catch(() => false)) checks.push("G loosens the part under the mouse");
+        else failures.push("G: the part under the mouse did not loosen");
+
+        // Dropped away from the tray, a loose part goes back, still loose, and nothing is logged.
+        await idle();
+        const hose3 = (await probe("fuel_hose")) ?? hose2;
+        await carryTo("fuel_hose", hose3.x, hose3.y, hose3.x + 30, Math.max(40, hose3.y - 150));
+        await sleep(600);
+        if ((await trayHas("fuel_hose")) || !(await looseNow()).includes("fuel_hose")) failures.push("drop: a part dropped away from the tray did not go back loose");
+        else checks.push("a loose part dropped away from the tray goes back, still loose");
+      }
+    } else failures.push("checks: the fuel hose or tank was not in view");
   }
   // Back to a fresh round for the faults.
   await send("Page.navigate", { url });
@@ -387,9 +437,9 @@ if (failures.length === 0) {
 
 console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
 console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
-console.log(`Hand: ${handSeen ? "seen gripping mid-pull" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}; blocked pull ${blockedShowedHand ? "SHOWED the hand" : "showed no hand"}`);
-console.log(`Turning: ${turning.join("; ") || "not run"}`);
-if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen gripping during a pull");
+console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}`);
+console.log(`Checks: ${checks.join("; ") || "not run"}`);
+if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen carrying a part");
 console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps`);
 console.log(`Console errors: ${consoleErrors.length}`);
 for (const e of consoleErrors) console.log(`   ${e}`);

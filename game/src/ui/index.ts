@@ -8,7 +8,7 @@ import { el } from "./dom.ts";
 import { formatTime, patienceMood } from "./format.ts";
 import { resultScreen } from "./result.ts";
 import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "./strings.ts";
-import { createTray } from "./tray.ts";
+import { type ChipCarry, createTray } from "./tray.ts";
 import "./styles.css";
 
 /** How long the failed-pull banner shows, ms (docs/design/animation.md). */
@@ -19,9 +19,19 @@ const SPEECH_MS = 4000;
 export interface UiOptions {
   /** A picture of a part for its tray chip, or null. Supplied by main.ts. */
   partImage?: (partId: string) => string | null;
+  /** The hand carries a part dragged from the tray (ADR 0020). Supplied by main.ts. */
+  carry?: ChipCarry;
 }
 
-export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, options: UiOptions = {}): void {
+export interface Ui {
+  /** True if a screen point (CSS px) is over the tray, where a carried part is dropped to remove it (ADR 0020). */
+  overTray(x: number, y: number): boolean;
+}
+
+/** Slack around the tray for dropping a part on it, CSS px. */
+const TRAY_SLACK = 24;
+
+export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, options: UiOptions = {}): Ui {
   const timer = el("div", { class: "timer", "aria-live": "off", text: "0:00" });
   const meterFill = el("div", { class: "fill" });
   const meter = el("div", { class: "patience", role: "meter", "aria-label": STRINGS.patience, "aria-valuemin": "0", "aria-valuemax": "100" }, meterFill);
@@ -39,7 +49,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     const hit = document.elementFromPoint(x, y);
     return hit !== null && stage.contains(hit);
   };
-  const tray = createTray(trayHost, game, card, overMachine, options.partImage ?? (() => null));
+  const tray = createTray(trayHost, game, card, overMachine, options.partImage ?? (() => null), options.carry ?? null);
 
   let symptomText = "";
   let bannerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -129,6 +139,14 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   requestAnimationFrame(tick);
 
   newRound();
+
+  return {
+    overTray(x, y) {
+      if (hud.hidden) return false;
+      const r = trayHost.getBoundingClientRect();
+      return x >= r.left - TRAY_SLACK && x <= r.right + TRAY_SLACK && y >= r.top - TRAY_SLACK && y <= r.bottom + TRAY_SLACK;
+    },
+  };
 }
 
 export function showCannotRun(root: HTMLElement, reason: "webgl" | "data"): void {

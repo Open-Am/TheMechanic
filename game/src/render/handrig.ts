@@ -1,217 +1,197 @@
-// The mechanic's hand in the scene (plans 0008 and 0009, ADRs 0015 and 0016). It acts only on accepted removals and
-// put-backs, never on a blocked pull (ADR 0007), and holds the base while the player turns the view. One hand, reused:
-// a new action finishes whatever the hand was doing first.
+// The mechanic's hand in the scene (plans 0008 to 0010, ADRs 0015 and 0020). It is the player's pointer: it rests open
+// on whatever the pointer points at, closes on it on a press, rides along with a part it holds, and withdraws when
+// the pointer leaves. It looks and moves the same over every part, removable or not (ADR 0007).
 
-import { type Camera, type Mesh, type Object3D, type Scene, Vector3 } from "three";
+import { type Camera, type Mesh, type Object3D, Quaternion, type Scene, Vector3 } from "three";
 import type { Vec3 } from "../core/index.ts";
-import {
-  approachDirection,
-  basisToQuaternion,
-  entryPoint,
-  gripDuringReach,
-  gripPoint,
-  type GripShape,
-  handBasis,
-  HAND,
-  type Hold,
-  holdApproach,
-  holdBasis,
-  originFor,
-} from "./handpose.ts";
-import { ease, type Tweens, type TweenSpec } from "./tween.ts";
+import { armAnchor, followShare, type GripShape, HAND, type HandAction, pointerPose } from "./handpose.ts";
 
 export interface HandRig {
-  /** A tween that reaches in from the side the part comes off (`explode`) and closes the grip, then holds the part. */
-  reach(target: Object3D, centre: Vector3, radius: number, explode: Vector3, shape?: GripShape): TweenSpec;
-  /** Places the hand holding the part at once (a put-back starts this way). */
-  holdAt(target: Object3D, centre: Vector3, radius: number, explode: Vector3, shape?: GripShape): void;
-  /** Lets go, opens the hand and pulls it back out of view. */
-  release(): void;
-  /** Reaches in and takes hold of the base's plate at `hold` (ADR 0016). If already holding, lets go first: hand over hand. */
-  holdBase(hold: Hold): void;
-  /** While holding the base: re-aims the forearm at the camera's lower right, the hold point staying where it is. */
-  followCamera(): void;
+  /** Rests the open hand on `at` (the spot under the pointer; `normal` faces out of the surface). Comes in if hidden. */
+  point(at: Vector3, normal: Vector3): void;
+  /** Closes the hand on `at`: a grip, or a fingertip pinch. Comes in if hidden. */
+  grab(at: Vector3, normal: Vector3, shape: GripShape): void;
+  /** Holds on to an object and moves with it, keeping the pose it has now (a part being loosened or carried). */
+  attachTo(object: Object3D): void;
+  /** Lets go of the object it rides with; it follows the pointer again from where it is. */
+  detach(): void;
+  /** Opens the hand where it is. */
+  open(): void;
+  /** Pulls the hand back out of view. */
+  withdraw(): void;
   hide(): void;
-  /** The hold the hand is on, or null. */
-  readonly baseHold: Hold | null;
-  /** For the browser check: true while the hand is visible and mostly closed. */
-  readonly gripping: boolean;
-  /** For the browser check: the morph the hand is using. */
-  readonly shape: GripShape;
+  /** Call once a frame, after the camera has moved. */
+  update(dt: number): void;
+  readonly visible: boolean;
+  /** How closed the hand is, 0 (open) to 1. */
+  readonly closed: number;
+  /** What the hand is doing. */
+  readonly action: HandAction;
+  /** The name of the object the hand rides with, or null. */
+  readonly holding: string | null;
 }
 
 const v3 = (v: Vector3): Vec3 => [v.x, v.y, v.z];
+const isPoint = (p: unknown): p is Vec3 => Array.isArray(p) && p.length === 3 && p.every((v) => typeof v === "number");
 
-export function createHandRig(scene: Scene, camera: Camera, model: Object3D, tweens: Tweens): HandRig {
+export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onState?: () => void): HandRig {
   const root = model;
   root.name = "mechanic_hand";
   root.visible = false;
   scene.add(root);
   let pinchPoint: Vec3 | null = null;
+  let tipPoint: Vec3 | null = null;
+  const meshes: Mesh[] = [];
   root.traverse((o) => {
     const m = o as Mesh;
-    if (m.isMesh) m.frustumCulled = false; // the morphs move vertices outside the rest-pose bounds
-    const p = o.userData?.["pinch_point"] as unknown;
-    if (Array.isArray(p) && p.length === 3 && p.every((v) => typeof v === "number")) pinchPoint = p as Vec3;
+    if (m.isMesh) {
+      m.frustumCulled = false; // the morphs move vertices outside the rest-pose bounds
+      meshes.push(m);
+    }
+    const ud = o.userData ?? {};
+    if (isPoint(ud["pinch_point"])) pinchPoint = ud["pinch_point"];
+    if (isPoint(ud["tip_point"])) tipPoint = ud["tip_point"];
   });
+
+  let action: HandAction = "hover";
   let closed = 0;
-  let shape: GripShape = "grip";
-  let baseHold: Hold | null = null;
+  let wantClosed = 0;
+  let target: { at: Vector3; normal: Vector3 } | null = null;
+  let attached: Object3D | null = null;
+  let withdrawing: { to: Vector3; left: number } | null = null;
+  const goalPos = new Vector3();
+  const goalQ = new Quaternion();
 
-  function setMorph(s: GripShape, v: number): void {
-    shape = s;
-    closed = v;
-    root.traverse((o) => {
-      const m = o as Mesh;
-      if (!m.isMesh || !m.morphTargetDictionary || !m.morphTargetInfluences) return;
-      for (const [name, i] of Object.entries(m.morphTargetDictionary)) m.morphTargetInfluences[i] = name === s ? v : 0;
-    });
+  function setMorphs(): void {
+    for (const m of meshes) {
+      if (!m.morphTargetDictionary || !m.morphTargetInfluences) continue;
+      for (const [name, i] of Object.entries(m.morphTargetDictionary)) m.morphTargetInfluences[i] = action !== "hover" && name === action ? closed : 0;
+    }
   }
 
-  /** A shape the model has: without a pinch point, a pinch falls back to the grip. */
-  const usable = (s: GripShape): GripShape => (s === "pinch" && pinchPoint ? "pinch" : "grip");
-
-  let withdrawTo = new Vector3();
-
-  function partPose(centre: Vector3, radius: number, explode: Vector3, s: GripShape) {
-    const c = v3(centre);
-    const entry = new Vector3(...entryPoint(c, v3(explode), v3(camera.position)));
-    const a = approachDirection(c, v3(entry));
-    const basis = handBasis(a);
-    // A pinch puts the fingertips on the part's centre; a grip closes around it, a little in front.
-    const at = s === "pinch" && pinchPoint ? originFor(c, pinchPoint, basis) : gripPoint(c, a, radius);
-    const shift = new Vector3(...at).sub(centre);
-    return { entry: entry.add(shift), at: new Vector3(...at), q: basisToQuaternion(basis) };
+  function anchor(): Vec3 {
+    const e = camera.matrixWorld.elements;
+    const right: Vec3 = [e[0]!, e[1]!, e[2]!];
+    const up: Vec3 = [e[4]!, e[5]!, e[6]!];
+    const forward: Vec3 = [-e[8]!, -e[9]!, -e[10]!];
+    return armAnchor(v3(camera.position), right, up, forward);
   }
 
-  function basePose(hold: Hold) {
-    const toCamera = new Vector3().subVectors(camera.position, new Vector3(...hold.point)).normalize();
-    const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-    const a = holdApproach(hold.outward, v3(toCamera), v3(right));
-    const at = new Vector3(...hold.point);
-    return { at, entry: at.clone().addScaledVector(new Vector3(...a), -HAND.reachFrom), q: basisToQuaternion(holdBasis(a)) };
+  function goal(): boolean {
+    if (!target) return false;
+    const usable = action === "pinch" && !pinchPoint ? "grip" : action;
+    const p = pointerPose(v3(target.at), v3(target.normal), anchor(), usable, { tip: tipPoint, pinch: pinchPoint });
+    goalPos.set(...p.position);
+    goalQ.set(...p.quaternion);
+    return true;
+  }
+
+  /** Comes in from along the forearm, so the first frame is not a pop into place. */
+  function comeIn(): void {
+    if (root.visible && !withdrawing) return;
+    withdrawing = null;
+    if (!goal()) return;
+    const back = new Vector3(0, 0, 1).applyQuaternion(goalQ).multiplyScalar(HAND.reachFrom);
+    root.position.copy(goalPos).add(back);
+    root.quaternion.copy(goalQ);
+    root.visible = true;
   }
 
   function letGo(): void {
-    tweens.finish("hand");
-    if (root.parent !== scene) scene.attach(root);
-  }
-
-  function withdraw(): TweenSpec[] {
-    let from: Vector3 | null = null;
-    let to: Vector3 | null = null;
-    const s = shape;
-    const c0 = closed;
-    return [
-      { duration: HAND.release, update: (p) => setMorph(s, c0 * (1 - p)) },
-      {
-        duration: HAND.withdraw,
-        ease: ease.inOutCubic,
-        update: (p) => {
-          from ??= root.position.clone();
-          to ??= from.clone().add(withdrawTo.clone().sub(from).normalize().multiplyScalar(HAND.reachFrom));
-          root.position.lerpVectors(from, to, p);
-        },
-        done: () => {
-          root.visible = false;
-        },
-      },
-    ];
+    if (attached) {
+      scene.attach(root);
+      attached = null;
+    }
   }
 
   const rig: HandRig = {
-    reach(target, centre, radius, explode, wanted = "grip") {
+    point(at, normal) {
+      target = { at: at.clone(), normal: normal.clone() };
+      if (!attached) action = closed > 0.05 && wantClosed > 0 ? action : "hover";
+      wantClosed = 0;
+      comeIn();
+    },
+
+    grab(at, normal, shape) {
+      target = { at: at.clone(), normal: normal.clone() };
+      if (action !== shape) closed = action === "hover" ? closed : 0;
+      action = shape;
+      wantClosed = 1;
+      comeIn();
+      onState?.();
+    },
+
+    attachTo(object) {
+      if (attached === object) return;
       letGo();
-      baseHold = null;
-      const s = usable(wanted);
-      const p0 = partPose(centre, radius, explode, s);
-      withdrawTo = p0.entry.clone();
-      return {
-        duration: HAND.reach,
-        ease: ease.outCubic,
-        update: (p) => {
-          root.visible = true;
-          root.position.lerpVectors(p0.entry, p0.at, p);
-          root.quaternion.set(...p0.q);
-          setMorph(s, gripDuringReach(p));
-        },
-        done: () => target.attach(root),
-      };
+      object.attach(root);
+      attached = object;
+      onState?.();
     },
 
-    holdAt(target, centre, radius, explode, wanted = "grip") {
+    detach() {
       letGo();
-      baseHold = null;
-      const s = usable(wanted);
-      const p0 = partPose(centre, radius, explode, s);
-      withdrawTo = p0.entry.clone();
-      root.position.copy(p0.at);
-      root.quaternion.set(...p0.q);
-      root.visible = true;
-      setMorph(s, 1);
-      target.attach(root);
+      onState?.();
     },
 
-    release() {
-      baseHold = null;
-      if (root.parent !== scene) scene.attach(root);
-      if (!root.visible) return;
-      tweens.play("hand", ...withdraw());
+    open() {
+      wantClosed = 0;
     },
 
-    holdBase(hold) {
-      const wasHolding = baseHold !== null && root.visible;
+    withdraw() {
       letGo();
-      baseHold = hold;
-      const p0 = basePose(hold);
-      const reach: TweenSpec = {
-        duration: HAND.reach,
-        ease: ease.outCubic,
-        update: (p) => {
-          if (baseHold !== hold) return;
-          const now = basePose(hold); // the view may be turning while the hand reaches
-          root.visible = true;
-          root.position.lerpVectors(p0.entry, now.at, p);
-          root.quaternion.set(...now.q);
-          setMorph("grip", gripDuringReach(p));
-        },
-      };
-      if (wasHolding) {
-        // Hand over hand: open and lift off the old hold, then reach for the new one.
-        const s = shape;
-        tweens.play("hand", { duration: HAND.release, update: (p) => setMorph(s, 1 - p) }, reach);
-      } else {
-        tweens.play("hand", reach);
-      }
-      withdrawTo = p0.entry.clone();
-    },
-
-    followCamera() {
-      if (!baseHold || !root.visible || tweens.busy("hand")) return;
-      const p = basePose(baseHold);
-      root.position.copy(p.at);
-      root.quaternion.set(...p.q);
-      withdrawTo = p.entry.clone();
+      target = null;
+      wantClosed = 0;
+      if (!root.visible || withdrawing) return;
+      const back = new Vector3(0, 0, 1).applyQuaternion(root.quaternion).multiplyScalar(HAND.reachFrom);
+      withdrawing = { to: root.position.clone().add(back), left: HAND.withdraw };
+      onState?.();
     },
 
     hide() {
-      tweens.cancel("hand");
-      baseHold = null;
-      if (root.parent !== scene) scene.attach(root);
+      letGo();
+      target = null;
+      withdrawing = null;
       root.visible = false;
-      setMorph("grip", 0);
+      closed = wantClosed = 0;
+      action = "hover";
+      setMorphs();
     },
 
-    get baseHold() {
-      return baseHold;
+    update(dt) {
+      // Open and close at a steady rate.
+      const step = dt / HAND.close;
+      closed = wantClosed > closed ? Math.min(wantClosed, closed + step) : Math.max(wantClosed, closed - step);
+      if (closed === 0 && wantClosed === 0) action = "hover";
+      setMorphs();
+      if (!root.visible) return;
+      if (withdrawing) {
+        withdrawing.left -= dt;
+        root.position.lerp(withdrawing.to, followShare(dt, HAND.withdraw / 4));
+        if (withdrawing.left <= 0) {
+          withdrawing = null;
+          root.visible = false;
+        }
+        return;
+      }
+      if (attached) return; // riding with the part
+      if (!goal()) return;
+      const k = followShare(dt);
+      root.position.lerp(goalPos, k);
+      root.quaternion.slerp(goalQ, k);
     },
 
-    get gripping() {
-      return root.visible && closed > 0.5;
+    get visible() {
+      return root.visible && !withdrawing;
     },
-
-    get shape() {
-      return shape;
+    get closed() {
+      return closed;
+    },
+    get action() {
+      return action;
+    },
+    get holding() {
+      return attached ? attached.name : null;
     },
   };
   return rig;

@@ -14,6 +14,12 @@ export interface Tray {
   refresh(): void;
 }
 
+/** Lets the hand carry a part from the tray (ADR 0020): told where a chip is being dragged, and when the drag ends. */
+export interface ChipCarry {
+  move(partId: PartId, x: number, y: number): void;
+  end(partId: PartId): void;
+}
+
 /** `overMachine(x, y)` says whether a release point is over the machine rather than the controls. */
 /** `partImage` returns a picture of a part for its chip, or null to show the name alone. */
 export function createTray(
@@ -22,6 +28,7 @@ export function createTray(
   card: Card,
   overMachine: (x: number, y: number) => boolean,
   partImage: (partId: PartId) => string | null,
+  carry: ChipCarry | null = null,
 ): Tray {
   const list = el("ul", { class: "tray", "aria-label": "Tray" });
   const empty = el("p", { class: "tray-empty", text: STRINGS.trayEmpty });
@@ -45,10 +52,15 @@ export function createTray(
       if (!start || e.pointerId !== start.id) return;
       if (!ghost && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= TAP_SLOP) {
         ghost = el("div", { class: "chip ghost" }, picture(), el("span", { text: name }));
+        // With the hand carrying the part itself, the ghost chip stays out of sight; it still marks the drag.
+        if (carry) ghost.hidden = true;
         document.body.appendChild(ghost);
         li.classList.add("lifted");
       }
-      if (ghost) ghost.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%, -50%)`;
+      if (ghost) {
+        ghost.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%, -50%)`;
+        carry?.move(partId, e.clientX, e.clientY);
+      }
     });
     const end = (e: PointerEvent, cancelled: boolean) => {
       if (!start || e.pointerId !== start.id) return;
@@ -58,6 +70,7 @@ export function createTray(
         ghost = null;
         li.classList.remove("lifted");
         if (!cancelled && overMachine(e.clientX, e.clientY)) game.propose({ type: "install", partId });
+        carry?.end(partId);
       } else if (!cancelled) {
         card.open(partId);
       }

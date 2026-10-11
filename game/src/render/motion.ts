@@ -104,3 +104,85 @@ export function poseAt(m: ResolvedMotion, explode: Vec3, progress: number): Pose
     }
   }
 }
+
+// ---- Loosening and carrying (plan 0010, ADR 0020) ----
+
+/** How a part is loosened by the hand, and how it is carried out along its path. Tuning lives here. */
+export const LOOSEN = {
+  /** Metres a loose part sits proud of its place, along its path. */
+  proud: 0.004,
+  /** Seconds the hand takes to loosen each kind of part. */
+  seconds: { slide: 0.5, lift: 0.6, pull: 0.6, unscrew: 0.9, unbolt: 0.8, unclip: 0.6 } satisfies Record<MotionType, number>,
+  /** Share of an unscrewed part's turns done while loosening; the rest as it is carried out. */
+  unscrewShare: 0.75,
+  /** Degrees a bolted part twists as it cracks loose. */
+  unboltDegrees: 4,
+} as const;
+
+export const CARRY = {
+  /** CSS px of drag that take a loose part from its loose point to the end of its path. */
+  outPx: 60,
+  /** Seconds a carried part takes to fly back to its loose point when dropped away from the tray. */
+  backSeconds: 0.25,
+  /** Seconds a part takes to sink into the tray once it is dropped there. */
+  intoTraySeconds: 0.2,
+  /** Seconds the hand takes to press loose parts home before the cord is pulled. */
+  homeSeconds: 0.2,
+} as const;
+
+function unit(v: Vec3): Vec3 {
+  const l = Math.hypot(v[0], v[1], v[2]);
+  return l > 1e-9 ? scale(v, 1 / l) : [0, 0, 0];
+}
+
+/**
+ * The pose while the hand loosens a part, q from 0 (in place) to 1 (loose). Each kind frees itself its own way: turns
+ * out of its thread, cracks loose, rocks off its clip, tugs off its spigot, or lifts free; all end a few millimetres proud.
+ */
+export function loosePose(m: ResolvedMotion, explode: Vec3, q: number): Pose {
+  const t = clamp01(q);
+  const out = (k: number): Vec3 => scale(unit(explode), LOOSEN.proud * k);
+  switch (m.type) {
+    case "unscrew":
+      return { offset: out(t), angle: m.turns * LOOSEN.unscrewShare * 2 * Math.PI * t, axis: m.axis };
+    case "unbolt": {
+      // A short bite down, then a jolt free with a small twist.
+      const bite = t < 0.35 ? -TIMING.settleDrop * Math.sin((Math.PI * t) / 0.35) : 0;
+      const e = t < 0.35 ? 0 : ease.outCubic((t - 0.35) / 0.65);
+      const o = out(e);
+      return { offset: [o[0], o[1] + bite, o[2]], angle: LOOSEN.unboltDegrees * DEG * e, axis: m.axis };
+    }
+    case "unclip": {
+      const rock = t < 0.6 ? TIMING.unclipRockDegrees * DEG * Math.sin((Math.PI * t) / 0.6) : 0;
+      return { offset: out(t < 0.6 ? 0 : ease.outCubic((t - 0.6) / 0.4)), angle: rock, axis: m.axis };
+    }
+    case "pull": {
+      // Two tugs: the first stretches it and lets it back, the second frees it.
+      const k = t < 0.4 ? 0.6 * Math.sin((Math.PI * t) / 0.4) : ease.outCubic((t - 0.4) / 0.6);
+      return { offset: out(k), angle: 0, axis: m.axis };
+    }
+    case "lift": {
+      const settle = t < 0.3 ? -TIMING.settleDrop * Math.sin((Math.PI * t) / 0.3) : 0;
+      const o = out(t < 0.3 ? 0 : ease.outCubic((t - 0.3) / 0.7));
+      return { offset: [o[0], o[1] + settle, o[2]], angle: 0, axis: m.axis };
+    }
+    case "slide":
+      return { offset: out(ease.outCubic(t)), angle: 0, axis: m.axis };
+  }
+}
+
+/** The pose while a loose part is carried out along its path: c from 0 (loose) to 1 (the end of its motion). */
+export function carryPose(m: ResolvedMotion, explode: Vec3, c: number): Pose {
+  const k = clamp01(c);
+  const from = loosePose(m, explode, 1);
+  const to = poseAt(m, explode, k);
+  const mix = (a: number, b: number) => a + (b - a) * k;
+  // Never back past the loose point: a part that is out does not sink back in as the carry starts.
+  const travel = (i: number) => (Math.abs(to.offset[i]!) >= Math.abs(from.offset[i]!) ? mix(from.offset[i]!, to.offset[i]!) : from.offset[i]!);
+  return { offset: [travel(0), travel(1), travel(2)], angle: mix(from.angle, to.angle), axis: m.axis };
+}
+
+/** How far out along its path a carried part is, from the drag's length on screen. */
+export function carryProgress(dragPx: number): number {
+  return clamp01(dragPx / CARRY.outPx);
+}

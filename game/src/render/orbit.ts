@@ -63,3 +63,61 @@ export function fitDistance(radius: number, fovY: number, aspect: number, margin
 export function worldPerPixel(distance: number, fovY: number, viewportHeightPx: number): number {
   return (2 * distance * Math.tan(fovY / 2)) / viewportHeightPx;
 }
+
+// ---- Turning by the hand (plan 0010, ADR 0020) ----
+
+export const TURN = {
+  /** Most the camera may move in one step, radians on each of azimuth and tilt. */
+  maxStep: 0.15,
+  /** Radians used to estimate how the held point moves on screen. */
+  eps: 1e-3,
+  /** CSS px the held point may lag the pointer before the hand lets go and grabs again under the pointer. */
+  regripPx: 60,
+} as const;
+
+const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot3 = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit3 = (a: Vec3): Vec3 => {
+  const l = Math.hypot(a[0], a[1], a[2]);
+  return l > 1e-12 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0];
+};
+
+/**
+ * Where `point` lands on screen, in normalised device coordinates (-1 to 1, y up), for a camera orbiting `target`
+ * with the world's up as up, as the scene's camera does. Null if the point is behind the camera.
+ */
+export function projectPoint(s: OrbitState, target: Vec3, point: Vec3, fovY: number, aspect: number): [number, number] | null {
+  const eye = position(s, target);
+  const f = unit3(sub3(target, eye));
+  const r = unit3(cross3(f, [0, 1, 0]));
+  const u = cross3(r, f);
+  const d = sub3(point, eye);
+  const z = dot3(d, f);
+  if (z <= 1e-6) return null;
+  const t = Math.tan(fovY / 2);
+  return [dot3(d, r) / (z * t * aspect), dot3(d, u) / (z * t)];
+}
+
+/**
+ * One step of turning the camera so that `point` (the spot the hand holds) moves towards the pointer at `ndc`: a
+ * Newton step on azimuth and tilt, its screen motion estimated numerically, each change capped at TURN.maxStep.
+ */
+export function turnToward(s: OrbitState, l: OrbitLimits, target: Vec3, point: Vec3, ndc: [number, number], fovY: number, aspect: number): OrbitState {
+  const p0 = projectPoint(s, target, point, fovY, aspect);
+  const pa = projectPoint({ ...s, azimuth: s.azimuth + TURN.eps }, target, point, fovY, aspect);
+  const pp = projectPoint({ ...s, polar: s.polar + TURN.eps }, target, point, fovY, aspect);
+  if (!p0 || !pa || !pp) return s;
+  const j00 = (pa[0] - p0[0]) / TURN.eps;
+  const j01 = (pp[0] - p0[0]) / TURN.eps;
+  const j10 = (pa[1] - p0[1]) / TURN.eps;
+  const j11 = (pp[1] - p0[1]) / TURN.eps;
+  const det = j00 * j11 - j01 * j10;
+  if (Math.abs(det) < 1e-9) return s;
+  const ex = ndc[0] - p0[0];
+  const ey = ndc[1] - p0[1];
+  const cap = (v: number) => Math.max(-TURN.maxStep, Math.min(TURN.maxStep, v));
+  const da = cap((j11 * ex - j01 * ey) / det);
+  const dp = cap((-j10 * ex + j00 * ey) / det);
+  return clampOrbit({ ...s, azimuth: s.azimuth + da, polar: s.polar + dp }, l);
+}

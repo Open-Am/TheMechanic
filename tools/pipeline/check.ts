@@ -202,7 +202,7 @@ export function materialsUsingImages(json: GltfJson, images: ReadonlySet<number>
   return out;
 }
 
-/** Metres from the grip point within which a pinch point must lie: the hand is about 0.2 m long. */
+/** Metres from the grip point within which a pinch or tip point must lie: the hand is about 0.2 m long. */
 const PINCH_REACH = 0.25;
 
 /**
@@ -223,11 +223,13 @@ export function checkHand(glb: Glb, budgets: Budgets): CheckResult {
   const hasTargets = mesh?.primitives.every((p) => Array.isArray(p.targets) && p.targets.length > 0) ?? false;
   const morphs = mesh?.extras?.targetNames ?? [];
   if (!hasTargets || !morphs.includes("grip")) errors.push(`The hand has no "grip" morph target.`);
-  if (morphs.includes("pinch")) {
-    const p = node?.extras?.["pinch_point"];
-    const ok = Array.isArray(p) && p.length === 3 && p.every((v) => typeof v === "number" && Number.isFinite(v)) && Math.hypot(...(p as number[])) <= PINCH_REACH;
-    if (!ok) errors.push(`The hand has a "pinch" morph but no pinch_point of three numbers within ${PINCH_REACH} m of the grip point.`);
+  const nearPoint = (p: unknown) => Array.isArray(p) && p.length === 3 && p.every((v) => typeof v === "number" && Number.isFinite(v)) && Math.hypot(...(p as number[])) <= PINCH_REACH;
+  if (morphs.includes("pinch") && !nearPoint(node?.extras?.["pinch_point"])) {
+    errors.push(`The hand has a "pinch" morph but no pinch_point of three numbers within ${PINCH_REACH} m of the grip point.`);
   }
+  // The fingertips, for the hovering hand (ADR 0020): optional, but if present it must be a point on the hand.
+  const tip = node?.extras?.["tip_point"];
+  if (tip !== undefined && !nearPoint(tip)) errors.push(`The hand's tip_point must be three numbers within ${PINCH_REACH} m of the grip point.`);
   for (const [i, img] of (glb.json.images ?? []).entries()) {
     const bv = img.bufferView !== undefined ? glb.json.bufferViews?.[img.bufferView] : undefined;
     if (!bv || !glb.bin) continue;
