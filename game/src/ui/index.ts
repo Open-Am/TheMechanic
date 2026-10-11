@@ -4,10 +4,10 @@
 import type { DailyStatus } from "../app/daily.ts";
 import type { Game, RoundRecord } from "../app/round.ts";
 import type { ScoreBreakdown } from "../core/index.ts";
-import { briefingScreen } from "./briefing.ts";
+import { briefingScreen, setBriefingLoading } from "./briefing.ts";
 import { createCard } from "./card.ts";
 import { el } from "./dom.ts";
-import { formatTime, inDropZone, patienceMood, shareOffered, shareText } from "./format.ts";
+import { formatTime, inDropZone, patienceMood, progressShare, shareOffered, shareText } from "./format.ts";
 import { type ResultExtras, type ShareRoute, resultScreen } from "./result.ts";
 import { startScreen } from "./start.ts";
 import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "./strings.ts";
@@ -42,6 +42,10 @@ export interface Ui {
    * changes, so the machine can be framed above them (release 0.9.3). 0 while the HUD is hidden.
    */
   onCover(fn: (px: number) => void): void;
+  /** Loading progress of the model, environment and hand: files settled out of files requested (plan 0014 step 6). */
+  setLoading(done: number, total: number): void;
+  /** The scene is mounted: the briefing's Start is enabled. */
+  ready(): void;
 }
 
 export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, options: UiOptions = {}): Ui {
@@ -79,6 +83,8 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   window.addEventListener("resize", tellCover);
 
   let symptomText = "";
+  /** Share loaded so far, or null once render is mounted. Start waits for it (plan 0014 reading 10). */
+  let loading: number | null = 0;
   let bannerTimer: ReturnType<typeof setTimeout> | null = null;
   let speechTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -146,7 +152,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     hud.hidden = true;
     meter.hidden = b.customer === null;
     speech.hidden = true;
-    showScreen(briefingScreen(b, () => game.begin()));
+    showScreen(briefingScreen(b, () => game.begin(), loading));
   }
 
   pull.addEventListener("click", () => game.propose({ type: "pull" }));
@@ -220,6 +226,15 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
       controls.classList.toggle("carrying", state !== "none");
       controls.classList.toggle("over", state === "over");
       dropHint.hidden = state === "none";
+    },
+    setLoading(done, total) {
+      if (loading === null) return;
+      loading = progressShare(done, total);
+      overlays.querySelectorAll<HTMLElement>(".briefing").forEach((s) => setBriefingLoading(s, loading));
+    },
+    ready() {
+      loading = null;
+      overlays.querySelectorAll<HTMLElement>(".briefing").forEach((s) => setBriefingLoading(s, null));
     },
     onCover(fn) {
       coverFn = fn;

@@ -43,6 +43,13 @@ export function shareOffered(mode: "free" | "daily" | "practice" | null, outcome
   return mode === "daily" && outcome === "fixed";
 }
 
+/** The loading bar's share from files settled out of files requested, 0 to 1. Nothing to load counts as done. */
+export function progressShare(done: number, total: number): number {
+  if (!(total > 0)) return 1;
+  if (!(done > 0)) return 0;
+  return Math.min(1, done / total);
+}
+
 /** Milliseconds as m:ss. Negative or invalid input shows 0:00. */
 export function formatTime(ms: number): string {
   const total = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;

@@ -1,5 +1,6 @@
-// Entry point: the only file that imports every layer (ADR 0010). Loads the machine folder, builds platform and app,
-// mounts render and ui, and loads diagnostic mode only in development builds with ?diag (ADR 0007).
+// Entry point: the only file that imports every layer (ADR 0010). Loads the machine data, builds platform and app,
+// mounts ui (start and briefing screens), then loads the model, environment and hand behind them with progress and
+// mounts render (plan 0014 step 6). Diagnostic mode loads only in development builds with ?diag (ADR 0007).
 
 import { dailyStatus } from "./app/daily.ts";
 import { createGame } from "./app/round.ts";
@@ -10,7 +11,7 @@ import { createDailyProvider } from "./platform/local/daily.ts";
 import { createScoreStore, safeStorage } from "./platform/local/scores.ts";
 import { createShare, hasShareSheet } from "./platform/local/share.ts";
 import { loadRenderAssets } from "./render/model.ts";
-import { mountRender } from "./render/view.ts";
+import { mountRender, type RenderView } from "./render/view.ts";
 import { shareUrl } from "./ui/format.ts";
 import { mountUi, showCannotRun } from "./ui/index.ts";
 
@@ -67,7 +68,9 @@ async function start(): Promise<void> {
   }
 
   const customers = await loadCustomers();
-  const clock = createClock();
+  // Development only: ?today=2026-10-12T08:00:00Z sets the date, to see a day change in the browser.
+  const forcedToday = import.meta.env.DEV ? new URLSearchParams(location.search).get("today") : null;
+  const clock = forcedToday && !Number.isNaN(Date.parse(forcedToday)) ? createClock(() => performance.now(), () => new Date(forcedToday)) : createClock();
   // Scores live in the browser under one key, with a memory fallback when storage is blocked (ADR 0005, ADR 0022).
   const scores = createScoreStore(safeStorage());
   // The day and fault functions come from core and are injected, so platform imports none (ADR 0010).
@@ -76,9 +79,19 @@ async function start(): Promise<void> {
   const share = createShare(navigator);
   const game = createGame({ ...data, clock, audio: createAudio(), random: Math.random, scores, ...(customers ? { customers } : {}) });
 
-  // The model, its ground shadow and the environment come with the machine folder; nothing is fetched later (ADR 0010).
-  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`);
-  let view;
+  // ui shows at once, before the model arrives. It gets the part pictures and the hand's carry as functions that wait
+  // for render; it never imports render (ADR 0010). A round cannot start until render is mounted.
+  let view: RenderView | null = null;
+  const mounted = mountUi(ui, stage, game, {
+    partImage: (id) => view?.partImage(id) ?? null,
+    carry: { move: (id, x, y) => view?.carryChip(id, x, y), end: (id) => view?.endChipCarry(id) },
+    daily: () => dailyStatus(daily, scores),
+    share: { send: (text) => share.share(text), sheet: hasShareSheet(navigator), url: shareUrl(location.href, import.meta.env.BASE_URL) },
+  });
+  document.getElementById("boot")?.remove();
+
+  // The model, its ground shadow, the environment and the hand load behind the start and briefing screens (ADR 0014).
+  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`, mounted.setLoading);
   try {
     view = mountRender(stage, game, assets);
   } catch (e) {
@@ -86,13 +99,7 @@ async function start(): Promise<void> {
     showCannotRun(root, "webgl");
     return;
   }
-  // ui gets the part pictures and the hand's carry as functions; it never imports render (ADR 0010).
-  const mounted = mountUi(ui, stage, game, {
-    partImage: view.partImage,
-    carry: { move: view.carryChip, end: view.endChipCarry },
-    daily: () => dailyStatus(daily, scores),
-    share: { send: (text) => share.share(text), sheet: hasShareSheet(navigator), url: shareUrl(location.href, import.meta.env.BASE_URL) },
-  });
+  mounted.ready();
   view.setTrayTest(mounted.overTray);
   view.onCarry(mounted.setDropState);
   mounted.onCover(view.setBottomCover);

@@ -441,6 +441,14 @@ button.pull {
   color: var(--accent);
 }
 
+.progress.loading {
+  margin-top: 16px;
+}
+
+.progress.loading .fill {
+  transition: width 200ms ease-out;
+}
+
 .breakdown .best {
   color: var(--muted);
   border-bottom: 0;

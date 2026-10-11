@@ -6,9 +6,16 @@
     <meta name="theme-color" content="#1b1c1e" />
     <link rel="icon" href="data:," />
     <title>Open Am</title>
+    <style>
+      /* Shown before any script runs, replaced when the start screen mounts (plan 0014). No words: all player text is in strings.ts. */
+      html, body { margin: 0; height: 100%; background: #1b1c1e; }
+      #boot { position: fixed; left: 50%; top: 50%; width: 120px; height: 4px; margin: -2px 0 0 -60px; border-radius: 2px; background: rgb(255 255 255 / 0.12); overflow: hidden; }
+      #boot::after { content: ""; position: absolute; inset: 0; width: 40%; background: #e0a526; animation: boot 1.2s ease-in-out infinite alternate; }
+      @keyframes boot { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app"><div id="boot" aria-hidden="true"></div></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

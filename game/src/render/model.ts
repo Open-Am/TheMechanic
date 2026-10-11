@@ -6,6 +6,7 @@ import { DataTexture, EquirectangularReflectionMapping, LinearFilter, type Objec
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import { type LoadProgress, progressCounter } from "./progress.ts";
 
 export interface RenderAssets {
   /** The GLB scene, or null to use placeholders. */
@@ -71,12 +72,13 @@ async function loadImage(url: string): Promise<ImageBitmap | null> {
 }
 
 /** `machineBase`, `envUrl` and `handUrl` are URLs relative to the page. Never throws. */
-export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null): Promise<RenderAssets> {
+export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null, onProgress?: LoadProgress): Promise<RenderAssets> {
+  const counted = progressCounter(handUrl ? 4 : 3, onProgress);
   const [model, environment, ground, hand] = await Promise.all([
-    loadModel(`${machineBase}model.glb`),
-    loadEnvironment(envUrl),
-    loadImage(`${machineBase}ground.png`),
-    handUrl ? loadModel(handUrl) : Promise.resolve(null),
+    counted(loadModel(`${machineBase}model.glb`)),
+    counted(loadEnvironment(envUrl)),
+    counted(loadImage(`${machineBase}ground.png`)),
+    handUrl ? counted(loadModel(handUrl)) : Promise.resolve(null),
   ]);
   return { model, environment, ground, hand };
 }
