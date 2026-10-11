@@ -525,6 +525,22 @@ const toolRound: string[] = [];
     for (const [id, want] of EXPECT) {
       if (fastenedBackIn.has(id) && !failures.some((f) => f.includes(id))) toolRound.push(`${id} with the ${want}`);
     }
+    // The cord pulled while the starter's bolts are coming out: the tool goes away and the bolts are done up again.
+    await idle();
+    const st = await waitFor("the recoil starter in view", () => probe("recoil_starter"), 3000).catch(() => null);
+    if (st) {
+      await doubleTap(st.x, st.y);
+      const midway = await waitFor("the spanner out", () => evaluate<string | null>("window.__openAmDevRender.tool()"), 2000).catch(() => null);
+      await tapSelector(".pull");
+      await sleep(800);
+      const toolAfter = await evaluate<string | null>("window.__openAmDevRender.tool()");
+      const toolShown = await evaluate<boolean>("window.__openAmDevRender.toolVisible()");
+      const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners("recoil_starter")`);
+      if (!midway) failures.push("tools: the spanner was not out to test pulling the cord mid-loosening");
+      else if (toolAfter || toolShown) failures.push(`tools: the ${toolAfter ?? "tool"} stayed out after the cord was pulled mid-loosening`);
+      else if (outs.some((d) => d > 0.0005)) failures.push(`tools: the starter's bolts stayed out after the cord was pulled mid-loosening (${outs.map((d) => (d * 1000).toFixed(1)).join(", ")} mm)`);
+      else toolRound.push("the cord pulled mid-loosening puts the spanner away and the bolts back in");
+    } else failures.push("tools: the recoil starter was not in view to test pulling the cord mid-loosening");
   } catch (e) {
     failures.push(`tools: ${(e as Error).message}`);
     await screenshot("fail-tools");
@@ -566,7 +582,7 @@ console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done
 if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
 for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
 console.log(`Tools round: ${toolRound.length ? `undone, to the tray and done up again: ${toolRound.join("; ")}` : "not passed"}`);
-if (toolRound.length !== 2 && !failures.some((x) => x.startsWith("tools:"))) failures.push("tools: the fuel tank and recoil starter round did not pass");
+if (toolRound.length !== 3 && !failures.some((x) => x.startsWith("tools:"))) failures.push("tools: the fuel tank and recoil starter round did not pass");
 console.log(`Hand inside the machine: at most ${(worstHidden.share * 100).toFixed(0)}% of its points hidden${worstHidden.where ? ` (${worstHidden.where})` : ""}, limit ${HIDDEN_LIMIT * 100}%`);
 if (worstHidden.share > HIDDEN_LIMIT) failures.push(`hand: ${(worstHidden.share * 100).toFixed(0)}% of it went inside the machine, ${worstHidden.where}`);
 if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen carrying a part");

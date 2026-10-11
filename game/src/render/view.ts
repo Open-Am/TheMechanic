@@ -342,6 +342,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     return steps;
   }
 
+  /** The tool is back where it came from and the hand is free of it. */
+  function putToolAway(): void {
+    if (toolInHand) toolInHand.object.visible = false;
+    toolInHand = null;
+    toolFrom.set(0, 0, 0);
+  }
+
   /** Takes the tool back where it came from, then the hand is free. */
   function toolReturn(): TweenSpec[] {
     let from: Vector3 | null = null;
@@ -357,29 +364,37 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           axis ??= new Vector3(0, 0, 1).applyQuaternion(tool.object.quaternion);
           holdTool(tool, from.clone().lerp(toolSource(), p), axis, 0);
         },
-        done: () => {
-          if (toolInHand) toolInHand.object.visible = false;
-          toolInHand = null;
-          toolFrom.set(0, 0, 0);
-        },
+        done: putToolAway,
       },
     ];
   }
 
   /** Before the cord is pulled, the hand presses every loose part home. No rule changes (ADR 0020). */
   function pressHome(): void {
+    // A part stopped half undone leaves no tool behind in the hand (plan 0011).
+    if (loosening.size > 0 && toolInHand) {
+      putToolAway();
+      hand?.detach();
+      hand?.open();
+    }
     for (const id of [...loose, ...loosening]) {
       const pv = view.parts.get(id);
       if (!pv) continue;
       tweens.cancel(`loosen:${id}`);
       const from = pv.group.position.clone();
       const q0 = pv.group.quaternion.clone();
+      // Its fasteners go back in with it, quickly (ADR 0020).
+      const fastFrom = pv.fasteners.map((f) => ({ f, at: f.pivot.position.clone(), q: f.pivot.quaternion.clone() }));
       tweens.play(id, {
         duration: CARRY.homeSeconds,
         ease: ease.inOutCubic,
         update: (p) => {
           pv.group.position.lerpVectors(from, new Vector3(...pv.home), p);
           pv.group.quaternion.slerpQuaternions(q0, new Quaternion(), p);
+          for (const { f, at, q } of fastFrom) {
+            f.pivot.position.lerpVectors(at, f.rest, p);
+            f.pivot.quaternion.slerpQuaternions(q, new Quaternion(), p);
+          }
         },
         done: () => reset(pv),
       });
@@ -944,6 +959,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       loose: () => [...loose],
       // Plan 0011: the tool in the hand, and how far each fastener of a part stands out of its hole (metres).
       tool: () => (toolInHand ? (toolInHand === tools?.spanner ? "spanner" : "screwdriver") : null),
+      toolVisible: () => !!(tools && (tools.spanner.object.visible || tools.screwdriver.object.visible)),
       fasteners: (id: PartId) => (view.parts.get(id)?.fasteners ?? []).map((f) => f.pivot.position.distanceTo(f.rest)),
       // Share of the hand's sample points hidden behind the machine's surface from the camera: a hand that sinks into
       // the machine shows here (plan 0010 fix).
