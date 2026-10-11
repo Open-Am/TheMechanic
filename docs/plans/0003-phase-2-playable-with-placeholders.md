@@ -3,7 +3,7 @@ id: 0003
 title: Phase 2, playable with placeholders
 status: done
 date: 2026-10-10
-adrs: [0001, 0002, 0003, 0004, 0007, 0010, 0011, 0014, 0017]
+adrs: [0001, 0002, 0003, 0004, 0007, 0010, 0011, 0014, 0020]
 branch: plan/0003-phase-2-playable
 ---
 

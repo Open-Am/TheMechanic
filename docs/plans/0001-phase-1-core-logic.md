@@ -3,7 +3,7 @@ id: 0001
 title: Phase 1, core logic with no graphics
 status: done
 date: 2026-10-10
-adrs: [0001, 0002, 0003, 0004, 0005, 0007, 0010, 0017]
+adrs: [0001, 0002, 0003, 0004, 0005, 0007, 0010, 0020]
 branch: plan/0001-core-logic
 ---
 

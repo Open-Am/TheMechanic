@@ -1,7 +1,7 @@
 ---
 id: 0020
 title: The hand follows the pointer; loosen a part, then drag it to the tray
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: [0016, 0017, 0019]
 superseded_by: null
@@ -89,3 +89,4 @@ Work this creates, for plans: the pointer hand, turning, loosening by motion typ
 
 - 2026-10-11: proposed by Claude, from the owner's message quoted above.
 - 2026-10-11: revised before acceptance, from the owner's second message quoted above: removal is two deliberate steps (loosen with a double tap, double click or G; then drag to the tray), loosening plays the unfastening animation, and ADR 0019 is superseded too.
+- 2026-10-11: accepted by the owner, who wrote "I accept ADR 20 and approve plan 0010".

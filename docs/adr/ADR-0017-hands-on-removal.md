@@ -1,10 +1,10 @@
 ---
 id: 0017
 title: Hands-on removal, a gesture for each kind of part
-status: accepted
+status: superseded
 date: 2026-10-11
 supersedes: [0008]
-superseded_by: null
+superseded_by: 0020
 ---
 
 # 0017. Hands-on removal, a gesture for each kind of part
@@ -56,3 +56,4 @@ The player does the work: they feel the tank's weight, the hose's stretch and th
 
 - 2026-10-11: proposed by Claude, from the owner's message and choices quoted above.
 - 2026-10-11: accepted by the owner, who wrote "I approve the 3 new adr and plan".
+- 2026-10-11: superseded by ADR 0020 (the hand follows the pointer; loosen, then drag to the tray), which restates what of this ADR still stands.

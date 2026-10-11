@@ -1,10 +1,10 @@
 ---
 id: 0019
 title: Visible bolts and screws
-status: accepted
+status: superseded
 date: 2026-10-11
 supersedes: []
-superseded_by: null
+superseded_by: 0020
 ---
 
 # 0019. Visible bolts and screws
@@ -51,3 +51,4 @@ Covers come off the way they do on the roadside: bolt by bolt, then the cover. T
 
 - 2026-10-11: proposed by Claude, from the owner's choice quoted above.
 - 2026-10-11: accepted by the owner, who wrote "I approve the 3 new adr and plan".
+- 2026-10-11: superseded by ADR 0020 (the hand follows the pointer; loosen, then drag to the tray), which restates what of this ADR still stands.

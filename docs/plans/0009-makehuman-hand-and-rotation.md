@@ -3,7 +3,7 @@ id: 0009
 title: A MakeHuman hand, and the hand turns the machine
 status: done
 date: 2026-10-11
-adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0016, 0017]
+adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0020]
 branch: plan/0009-makehuman-hand
 ---
 

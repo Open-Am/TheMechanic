@@ -1,7 +1,7 @@
 ---
 id: 0010
 title: The hand follows the pointer; loosen, then drag to the tray
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0004, 0007, 0010, 0014, 0015, 0020]
 branch: plan/0010-pointer-hand
@@ -12,6 +12,8 @@ branch: plan/0010-pointer-hand
 ## Goal
 
 The mechanic's hand is the player's hand. With a mouse it rests on whatever the cursor points at; on a phone it comes in under the finger. Pressing closes it on what is under it, and dragging turns the machine with the hand holding on. A double tap, a double click or the G key loosens the part under the pointer: the hand plays the part's unfastening animation and the part sits loose in place. The player then presses on the loose part and drags it: it comes out along its path, follows the hand down the screen, and dropping it on the tray removes it. Dropped anywhere else it goes back, still loose. Putting a part back carries it in the hand from the tray. Fasteners and the spanner and screwdriver come in the next plan; here a part is freed by its motion type alone.
+
+Approved by the owner on 2026-10-11, who wrote "I accept ADR 20 and approve plan 0010".
 
 ## ADRs relied on
 
