@@ -130,3 +130,25 @@ Saved in `assets/hand/reference/` (git-ignored).
 Proportions come from standard adult hand measurements. Photos of a Lagos mechanic's hands, open and gripping, would be the right reference.
 
 Since plan 0009 the hand's shape and proportions come from MakeHuman's CC0 base body (MPFB 2.0.18, ADR 0016), made as an adult Nigerian man with a working build; sources and licences are in `assets/hand/LICENCE.md`. The photos above are still used for the grease. Photos of a Lagos mechanic's hands, open, gripping and pinching, remain the best check.
+
+## The customers (plan 0015)
+
+Local copies in `assets/customers/reference/` (git-ignored, reference only). Every one shows identifiable people: used for clothing, colour and build only, never for a face, never as a texture (ADR 0013, ADR 0015). Gathered 2026-10-11 from Wikimedia Commons; file pages are `https://commons.wikimedia.org/wiki/File:<name>`. Seven downloads were cut short by network timeouts and are missing the bottom of the image, marked "partial".
+
+| Local file | Commons file | Shows | Author | Licence |
+| --- | --- | --- | --- | --- |
+| `woman_market-1.jpg` (partial) | `Market_women_at_Ipata_market.jpg` | Ipata market, Ilorin. Seated women in matching green Ankara top, wrapper and head tie; a multicolour wax-print wrapper. Sturdy builds. | Ee nn yy | CC BY-SA 4.0 |
+| `woman_market-2.jpg` (partial) | `A_fairly-used_clothes_seller_in_Lagos_Nigeria.jpg` | Lagos clothes seller, full body: a woman of about 50 in a matching blue-and-white print blouse, long wrapper and head tie. The closest to `woman_market`. | Oreoluwa Adetimehin | CC BY-SA 4.0 |
+| `woman_market-3.jpg` (partial) | `A_snacks_seller_in_Lagos,_Nigeria.jpg` | Lagos snack stall: print blouse, long print skirt, sandals; a scarf head tie and slippers. | Oreoluwa Adetimehin | CC BY-SA 4.0 |
+| `woman_market-4.jpg` | `Women_selling_in_the_market.jpg` | Market under umbrellas: a red print blouse; a standing woman in a dark head tie and apron. | Eboysmart61 | CC BY-SA 4.0 |
+| `man_kaftan-1.jpg` | `OLD_MAN_PRAYING_IN_EID.jpg` | An older bearded man seated, plain white long kaftan over trousers, patterned fila cap. | Oluwalogbon2002 | CC BY 4.0 |
+| `man_kaftan-2.jpg` | `A_Yoruba_and_Hausa_Man_in_traditional_attire.jpg` | Two young men standing: a plain brown long jalabia; a print top and trousers with a matching cap. | Pablowhite44 | CC BY-SA 4.0 |
+| `man_kaftan-3.jpg` (partial) | `Hausa-_man.jpg` | Northern market: older men in blue-purple and brown kaftans with embroidered kufi caps. | AgnesAbah | CC0 |
+| `man_young-1.jpg` | `Commercial_bike_rider_in_lagos_Nigeria.jpg` | Two young men on an okada: dark T-shirt, short-sleeved shirt, jeans, slim builds. | Olasunkanmiariyo | CC BY-SA 4.0 |
+| `man_young-2.jpg` | `Kaduna_State_Football_02.jpg` | Young men in stadium stands (Kaduna): football jerseys, plain T-shirts, slim builds. | Anasskoko | CC BY-SA 4.0 |
+| `man_young-3.jpg` (partial) | `An_okada_rider_with_two_passengers_in_lagos,_nigeria.jpg` | Okada with three young men in Lagos: striped jersey, print shirt, black T-shirt, jeans, slides. | Oreoluwa Adetimehin | CC BY-SA 4.0 |
+| `street-1.jpg` (partial) | `A_fruits_seller_in_Lagos_Nigeria.jpg` | Lagos roadside fruit stall: people standing, a print dress, work clothes. | Oreoluwa Adetimehin | CC BY-SA 4.0 |
+| `street-2.jpg` (partial) | `Bus_stop_in_Lagos.jpg` | Lagos bus stop with a danfo: men standing in white kaftans and caps, full body, small in frame. | Oritsetsemaye Jemide | CC BY-SA 4.0 |
+| `street-3.jpg` | `A_food_seller,_seller_food_to_people_in_Lagos_Nigeria.jpg` | Food stall on a dirt road: casual T-shirts, jerseys, wrappers. | Oreoluwa Adetimehin | CC BY-SA 4.0 |
+
+Gaps: no clean standing full-body photo of a woman of about 50 in an everyday wrapper, blouse and head tie; of a man of about 55 in a plain kaftan and cap; or of a young man in a T-shirt, jeans and slides. Photos the owner takes, or ones he chooses, would be the best check. The people's shape and proportions come from MakeHuman's CC0 base body; sources and licences are in `assets/customers/LICENCE.md`.
