@@ -131,6 +131,21 @@ describe("the model contract and budgets (ADR 0014)", () => {
     expect(r.errors.join(" ")).toMatch(/2 materials use images larger than 1024 px \(exterior, second\)/);
     expect(r.errors.join(" ")).toMatch(/external file \(outside.png\)/);
   });
+
+  it("textures: a material without a baked base colour texture is an error (an unbaked model)", () => {
+    // Plan 0011 found an export from an unbaked .blend (model.py rerun, texture.py not) passing with 0 errors.
+    const json = {
+      ...modelJson(all),
+      images: [{ bufferView: 0, mimeType: "image/png" }],
+      bufferViews: [{ byteOffset: 0, byteLength: 32 }],
+      textures: [{ source: 0 }],
+      materials: [{ name: "baked_exterior", pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }, { name: "tank_paint", pbrMetallicRoughness: { baseColorFactor: [0.1, 0.3, 0.7, 1] } }],
+    };
+    const r = checkModel(readGlb(makeGlb(json, new Uint8Array(32))), ids, budgets);
+    expect(r.errors.join(" ")).toMatch(/"tank_paint" has no base colour texture/);
+    const baked = { ...json, materials: [json.materials[0]] };
+    expect(checkModel(readGlb(makeGlb(baked, new Uint8Array(32))), ids, budgets).errors).toEqual([]);
+  });
 });
 
 describe("atlas counting", () => {

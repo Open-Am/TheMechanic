@@ -203,6 +203,12 @@ export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckRe
     if (side > budgets.atlasPx) errors.push(`Image ${i} is ${size.width} x ${size.height}, over ${budgets.atlasPx} px.`);
     else if (side > budgets.texturePx) large.add(i);
   }
+  // Every material is baked (modelling brief, plan 0006): one with only flat colours means texture.py was not run
+  // after model.py, and the shipped model would lose its atlases and wear.
+  for (const [i, mat] of (glb.json.materials ?? []).entries()) {
+    const pbr = mat.pbrMetallicRoughness as { baseColorTexture?: unknown } | undefined;
+    if (pbr?.baseColorTexture === undefined) errors.push(`Material "${String(mat.name ?? i)}" has no base colour texture: bake the model with texture.py before exporting.`);
+  }
   const atlases = materialsUsingImages(glb.json, large);
   if (atlases.length > budgets.atlasCount) {
     errors.push(`${atlases.length} materials use images larger than ${budgets.texturePx} px (${atlases.join(", ")}); at most ${budgets.atlasCount} atlas is allowed.`);
