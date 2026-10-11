@@ -2,6 +2,7 @@
 // (plan 0005 step 7, brief section 9, ADR 0014). Fails on the first run with any error.
 //
 //   node tools/pipeline/check.ts [model.glb] [--no-copy]
+//   node tools/pipeline/check.ts --hand | --tools | --toolbox [file.glb] [--no-copy]
 //
 // The checks are pure functions, exported for game/tests/pipeline.test.ts.
 
@@ -21,6 +22,7 @@ export interface Budgets {
   allocation: Record<string, number>;
   hand: { triangles: number; bytes: number; texturePx: number };
   tools: { triangles: number; bytes: number; texturePx: number };
+  toolbox: { triangles: number; bytes: number; texturePx: number };
 }
 
 interface GltfJson {
@@ -309,6 +311,45 @@ export function checkTools(glb: Glb, budgets: Budgets): CheckResult {
   return { errors, warnings: [], triangles };
 }
 
+/** The empty nodes in toolbox.glb where each tool rests (ADR 0021, plan 0012). */
+export const TOOLBOX_SLOTS = ["slot_spanner", "slot_screwdriver"] as const;
+
+/**
+ * The toolbox (ADR 0021, plan 0012): one root node named toolbox, with the two slot nodes somewhere under it so they
+ * move with it, within its budget of triangles, bytes and texture size.
+ */
+export function checkToolbox(glb: Glb, budgets: Budgets): CheckResult {
+  const errors: string[] = [];
+  const roots = rootNodes(glb.json);
+  if (roots.length !== 1 || roots[0]!.name !== "toolbox") {
+    errors.push(`The toolbox must be one root node named "toolbox"; found ${roots.map((r) => r.name || "(unnamed)").join(", ") || "none"}.`);
+  }
+  const nodes = glb.json.nodes ?? [];
+  const box = roots.find((r) => r.name === "toolbox");
+  const below = new Set<number>();
+  const stack = box ? [...(nodes[box.index]?.children ?? [])] : [];
+  while (stack.length) {
+    const i = stack.pop()!;
+    below.add(i);
+    stack.push(...(nodes[i]?.children ?? []));
+  }
+  for (const slot of TOOLBOX_SLOTS) {
+    const index = nodes.findIndex((n) => n.name === slot);
+    if (index < 0) errors.push(`No node named "${slot}".`);
+    else if (!below.has(index)) errors.push(`"${slot}" must be a node under "toolbox", so it moves with it.`);
+  }
+  const triangles = roots.reduce((n, r) => n + nodeTriangles(glb.json, r.index), 0);
+  if (triangles > budgets.toolbox.triangles) errors.push(`The toolbox has ${triangles} triangles, over its budget of ${budgets.toolbox.triangles}.`);
+  if (glb.byteLength > budgets.toolbox.bytes) errors.push(`The toolbox is ${(glb.byteLength / 1000).toFixed(1)} KB, over its ${budgets.toolbox.bytes / 1000} KB budget.`);
+  for (const [i, img] of (glb.json.images ?? []).entries()) {
+    const bv = img.bufferView !== undefined ? glb.json.bufferViews?.[img.bufferView] : undefined;
+    if (!bv || !glb.bin) continue;
+    const size = imageSize(glb.bin.subarray(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength));
+    if (size && Math.max(size.width, size.height) > budgets.toolbox.texturePx) errors.push(`Toolbox image ${i} is ${size.width} x ${size.height}, over ${budgets.toolbox.texturePx} px.`);
+  }
+  return { errors, warnings: [], triangles };
+}
+
 /** A companion file (environment, ground shadow) against its byte budget. */
 export function checkFileSize(label: string, bytes: number | null, budget: number, required: boolean): string[] {
   if (bytes === null) return required ? [`${label} is missing.`] : [];
@@ -316,6 +357,26 @@ export function checkFileSize(label: string, bytes: number | null, budget: numbe
 }
 
 // ---- Command line ----
+
+function mainToolbox(root: string, argv: string[]): void {
+  const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "toolbox", "export", "toolbox.optimised.glb"));
+  const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
+  if (!existsSync(input)) {
+    console.error(`No toolbox at ${input}.`);
+    process.exit(1);
+  }
+  const glb = readGlb(new Uint8Array(readFileSync(input)));
+  const result = checkToolbox(glb, budgets);
+  for (const e of result.errors) console.log(`error: ${e}`);
+  console.log(`Checked ${input}: ${(glb.byteLength / 1000).toFixed(1)} KB of ${budgets.toolbox.bytes / 1000} KB, ${result.triangles} of ${budgets.toolbox.triangles} triangles, ${result.errors.length} error(s).`);
+  if (result.errors.length) process.exit(1);
+  if (!argv.includes("--no-copy")) {
+    const out = join(root, "game", "public", "hand");
+    mkdirSync(out, { recursive: true });
+    copyFileSync(input, join(out, "toolbox.glb"));
+    console.log(`Copied toolbox.glb to ${out}`);
+  }
+}
 
 function mainTools(root: string, argv: string[]): void {
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "tools", "export", "tools.optimised.glb"));
@@ -362,6 +423,7 @@ function main(): void {
   const argv = process.argv.slice(2);
   if (argv.includes("--hand")) return mainHand(root, argv.filter((a) => a !== "--hand"));
   if (argv.includes("--tools")) return mainTools(root, argv.filter((a) => a !== "--tools"));
+  if (argv.includes("--toolbox")) return mainToolbox(root, argv.filter((a) => a !== "--toolbox"));
   const copy = !argv.includes("--no-copy");
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "gen950", "export", "model.optimised.glb"));
   const groundIn = join(root, "assets", "gen950", "export", "ground.png");

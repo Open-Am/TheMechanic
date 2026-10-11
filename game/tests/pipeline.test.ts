@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { checkFileSize, checkHand, checkModel, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -299,5 +299,38 @@ describe("the tools (ADR 0020, plan 0011)", () => {
     expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver", "hammer"]))), budgets).errors.join(" ")).toMatch(/"hammer" is not a tool/);
     expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], false))), budgets).errors.join(" ")).toMatch(/no grip_point/);
     expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], true, 1001))), budgets).errors.join(" ")).toMatch(/over their budget of 2000/);
+  });
+});
+
+describe("the toolbox (ADR 0021, plan 0012)", () => {
+  /** A toolbox JSON: one root node with `slots` as its children (or as roots, if `slotsAsRoots`), drawing `tris`. */
+  const toolboxJson = (name = "toolbox", slots = ["slot_spanner", "slot_screwdriver"], tris = 100, slotsAsRoots = false) => ({
+    scene: 0,
+    scenes: [{ nodes: slotsAsRoots ? [0, ...slots.map((_, i) => i + 1)] : [0] }],
+    nodes: [{ name, mesh: 0, ...(slotsAsRoots ? {} : { children: slots.map((_, i) => i + 1) }) }, ...slots.map((n) => ({ name: n }))],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+    accessors: [{ count: tris * 3 }, { count: tris * 3 }],
+  });
+
+  it("has its own budget: 3,000 triangles, 200 KB, one 1024 px texture set", () => {
+    expect(budgets.toolbox).toEqual({ _source: expect.any(String), triangles: 3000, bytes: 200000, texturePx: 1024 });
+  });
+
+  it("passes one toolbox node with both slots under it, within budget", () => {
+    const r = checkToolbox(readGlb(makeGlb(toolboxJson())), budgets);
+    expect(r.errors).toEqual([]);
+    expect(r.triangles).toBe(100);
+  });
+
+  it("rejects a wrong root name, a missing slot, a slot outside the toolbox, and too many triangles", () => {
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("crate"))), budgets).errors.join(" ")).toMatch(/one root node named "toolbox"; found crate/);
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("toolbox", ["slot_spanner"]))), budgets).errors.join(" ")).toMatch(/No node named "slot_screwdriver"/);
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("toolbox", ["slot_spanner", "slot_screwdriver"], 100, true))), budgets).errors.join(" ")).toMatch(/"slot_spanner" must be a node under "toolbox"/);
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("toolbox", undefined, 3001))), budgets).errors.join(" ")).toMatch(/3001 triangles, over its budget of 3000/);
+  });
+
+  it("rejects a file over 200 KB", () => {
+    const big = readGlb(makeGlb(toolboxJson(), new Uint8Array(200_001)));
+    expect(checkToolbox(big, budgets).errors.join(" ")).toMatch(/over its 200 KB budget/);
   });
 });
