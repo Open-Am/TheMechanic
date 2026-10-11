@@ -171,7 +171,7 @@ Risks:
 - `game/public/audio/LICENCE.md` lists every shipped file with its Freesound URL, author and `CC0 1.0`, and has no other licence in it. `assets/audio/STATUS.md` marks every sound as a stand-in until the owner records the real machine.
 - No new entry in `package.json` dependencies or devDependencies.
 - The owner plays a round on an Android phone with sound on and checks:
-  - he hears and feels each moment;
+  - they hear and feel each moment;
   - a blocked part is silent;
   - mute holds after a reload;
   - nothing plays before Start.
