@@ -7,6 +7,7 @@
 // machine, the held spot following the pointer. Whether a part could come off only ever shows in whether it loosens.
 
 import {
+  Box3,
   Color,
   type Object3D,
   PerspectiveCamera,
@@ -20,9 +21,9 @@ import {
 } from "three";
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId } from "../core/index.ts";
-import { dragMode, GESTURE, isDoubleTap, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
+import { doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
 import { CARRY, carryPose, carryProgress, LOOSEN, loosePose, poseAt, resolveMotion, TIMING, type Pose } from "./motion.ts";
-import { fitDistance, position, projectPoint, rotate, TURN, turnToward, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
+import { fitDistance, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
 import { gripShapeFor, type GripShape, HAND } from "./handpose.ts";
@@ -38,12 +39,16 @@ const FINGER_PX = 44;
 const FOV_DEG = 40;
 const DEFAULT_ORBIT = { azimuth: 0.55, polar: 1.12 };
 const BACKGROUND = "#1b1c1e";
+/** Seconds for the machine to settle halfway into its new place when the controls grow or shrink (release 0.9.3). */
+const REFRAME_HALF_LIFE = 0.08;
 
 export interface RenderView {
   /** A picture of one part as a data URL, for the tray. Null if it cannot be drawn. */
   partImage(partId: PartId): string | null;
   /** Tells the view where the tray is: true if a screen point (CSS px) is over it. Supplied by main.ts from ui. */
   setTrayTest(overTray: (x: number, y: number) => boolean): void;
+  /** Tells the view how many CSS px at the bottom of the screen the controls cover; the machine is framed above them. */
+  setBottomCover(px: number): void;
   /** A tray chip is being dragged at (x, y): the hand carries that part under the pointer (ADR 0020). */
   carryChip(partId: PartId, x: number, y: number): void;
   /** The chip drag ended; if the part did not go back on, it returns to the tray. */
@@ -95,6 +100,23 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   let orbit: OrbitState = { ...DEFAULT_ORBIT, distance: 1 };
   let limits: OrbitLimits = { minDistance: 0.5, maxDistance: 2, minPolar: 0.35, maxPolar: 1.55 };
   let fitted = false;
+  let fit = 1;
+  // The machine is framed in the part of the screen the controls leave free (release 0.9.3): the picture moves up by a
+  // view offset, and the camera stands back if the free part is too short for the machine. `cover` eases towards
+  // `coverWanted`, the CSS px the controls cover, so the machine glides rather than jumps when a tray row comes or goes.
+  let coverWanted = 0;
+  let cover = 0;
+  let framing = { shiftPx: 0, distanceScale: 1 };
+
+  function applyFraming(): void {
+    const w = Math.max(1, container.clientWidth);
+    const h = Math.max(1, container.clientHeight);
+    framing = frameAbove(fovY, w, h, cover);
+    if (framing.shiftPx > 0.25) camera.setViewOffset(w, h, 0, framing.shiftPx, w, h);
+    else camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+    sizeHitVolumes(view, FINGER_PX * worldPerPixel(fit * framing.distanceScale, fovY, h));
+  }
 
   function resize(): void {
     const w = Math.max(1, container.clientWidth);
@@ -103,19 +125,24 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     renderer.domElement.style.width = `${w}px`;
     renderer.domElement.style.height = `${h}px`;
     camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-    const fit = fitDistance(view.radius, fovY, camera.aspect);
+    fit = fitDistance(view.radius, fovY, camera.aspect);
     limits = { ...limits, minDistance: fit * 0.6, maxDistance: fit * 1.6 };
     orbit = fitted ? zoom(orbit, 1, limits) : { ...orbit, distance: fit };
     fitted = true;
-    sizeHitVolumes(view, FINGER_PX * worldPerPixel(fit, fovY, h));
+    applyFraming();
   }
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
 
+  /** The orbit as the camera stands: farther back when the free part of the screen is too short for the machine. */
+  const cameraOrbit = (): OrbitState => ({ ...orbit, distance: orbit.distance * framing.distanceScale });
+
+  /** A pointer's normalised device coordinates in the unmoved frustum the orbit maths works in. */
+  const orbitNdc = (ndc: Vector2): [number, number] => [ndc.x, unshiftNdcY(ndc.y, framing.shiftPx, Math.max(1, container.clientHeight))];
+
   function placeCamera(): void {
-    camera.position.set(...position(orbit, [target.x, target.y, target.z]));
+    camera.position.set(...position(cameraOrbit(), [target.x, target.y, target.z]));
     camera.lookAt(target);
     camera.updateMatrixWorld();
   }
@@ -429,6 +456,18 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     return firstPart(hits, partIds, (id) => game.state.installed.has(id));
   }
 
+  /** Every installed part whose finger-sized hit volume is under the pointer. */
+  function partsUnder(clientX: number, clientY: number): PartId[] {
+    view.root.updateMatrixWorld();
+    raycaster.setFromCamera(ndcOf(clientX, clientY), camera);
+    const ids = new Set<PartId>();
+    for (const h of raycaster.intersectObjects([...hitMeshes], false)) {
+      const id = partIdOf(h.object, partIds);
+      if (id && game.state.installed.has(id)) ids.add(id);
+    }
+    return [...ids];
+  }
+
   const shown = (o: Object3D | null): boolean => {
     for (let p = o; p; p = p.parent) if (!p.visible) return false;
     return true;
@@ -490,6 +529,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     held: { point: Vector3; normal: Vector3 } | null;
     /** Set when G loosens the part under a held press: the press carries the part once it is loose. */
     carryWhenLoose: boolean;
+    /** The press's event time stamp, ms. */
+    downT: number;
   } | null = null;
 
   /** Rests the hand on the spot under a mouse pointer that is not pressing. */
@@ -522,7 +563,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     if (game.running && s.part) press(s.part); // the same press for every part, allowed or not (ADR 0007)
     // Pressing grabs what is under the pointer, the same way whatever it is (ADR 0020).
     if (game.running && hand && loosening.size === 0) hand.grab(s.point, s.normal, shapeOf(s.part));
-    drag = { id: e.pointerId, touch: e.pointerType !== "mouse", startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY, part: game.running ? s.part : null, surface: s, mode: "pending", held: null, carryWhenLoose: false };
+    drag = { id: e.pointerId, touch: e.pointerType !== "mouse", startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY, part: game.running ? s.part : null, surface: s, mode: "pending", held: null, carryWhenLoose: false, downT: e.timeStamp };
   }
 
   function startTurn(x: number, y: number): void {
@@ -544,12 +585,14 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       return;
     }
     const ndc = ndcOf(x, y);
-    orbit = turnToward(orbit, limits, [target.x, target.y, target.z], [drag.held.point.x, drag.held.point.y, drag.held.point.z], [ndc.x, ndc.y], fovY, camera.aspect);
+    const at = orbitNdc(ndc);
+    const turned = turnToward(cameraOrbit(), limits, [target.x, target.y, target.z], [drag.held.point.x, drag.held.point.y, drag.held.point.z], at, fovY, camera.aspect);
+    orbit = { ...orbit, azimuth: turned.azimuth, polar: turned.polar };
     placeCamera();
     // Let go and grab again under the pointer if the held spot has turned away or fallen behind the pointer.
-    const p = projectPoint(orbit, [target.x, target.y, target.z], [drag.held.point.x, drag.held.point.y, drag.held.point.z], fovY, camera.aspect);
+    const p = projectPoint(cameraOrbit(), [target.x, target.y, target.z], [drag.held.point.x, drag.held.point.y, drag.held.point.z], fovY, camera.aspect);
     const rect = renderer.domElement.getBoundingClientRect();
-    const lagPx = p ? Math.hypot(((p[0] - ndc.x) / 2) * rect.width, ((p[1] - ndc.y) / 2) * rect.height) : Infinity;
+    const lagPx = p ? Math.hypot(((p[0] - at[0]) / 2) * rect.width, ((p[1] - at[1]) / 2) * rect.height) : Infinity;
     const facing = drag.held.normal.dot(camera.position.clone().sub(drag.held.point)) > 0;
     if (lagPx > TURN.regripPx || !facing) {
       const s = surfaceAt(x, y);
@@ -602,10 +645,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     if (d.mode === "carry") dropCarry(e.clientX, e.clientY);
     else if (d.mode === "pending") {
       // A tap. Two on the same part make a double tap, which loosens it (ADR 0020).
-      const tap: Tap = { part: d.part, t: performance.now(), x: e.clientX, y: e.clientY };
-      if (isDoubleTap(lastTap, tap) && d.part) {
+      // Timed by the events' own time stamps, so a slow frame cannot push a quick double tap out of the window (0.9.3).
+      const under = lastTap?.part ? partsUnder(e.clientX, e.clientY) : [];
+      const tap: Tap = { part: d.part, under, down: d.downT, up: e.timeStamp, x: e.clientX, y: e.clientY };
+      const part = doubleTapPart(lastTap, tap);
+      if (part) {
         lastTap = null;
-        loosen(d.part);
+        loosen(part);
       } else lastTap = tap;
     }
     if (loosening.size > 0 || carry) return; // the hand is busy with a part
@@ -682,8 +728,74 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       }
       return null;
     };
+    /**
+     * Where a player would put a finger on a part: the visible point of the part nearest the middle of its picture on
+     * screen (not the hit volume), and which part a press there picks. Null if no point of it is in view.
+     */
+    const aim = (id: PartId): { x: number; y: number; pick: PartId | null; solid: boolean } | null => {
+      const pv = view.parts.get(id);
+      if (!pv || !shown(pv.group)) return null;
+      view.root.updateMatrixWorld();
+      const rect = renderer.domElement.getBoundingClientRect();
+      const box = new Box3().setFromObject(pv.visual);
+      const toScreen = (v: Vector3) => {
+        const p = v.clone().project(camera);
+        return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height };
+      };
+      const c = toScreen(box.getCenter(new Vector3()));
+      let reach = 0;
+      for (const cx of [box.min.x, box.max.x]) for (const cy of [box.min.y, box.max.y]) for (const cz of [box.min.z, box.max.z]) {
+        const s = toScreen(new Vector3(cx, cy, cz));
+        reach = Math.max(reach, Math.hypot(s.x - c.x, s.y - c.y));
+      }
+      const seen = (x: number, y: number): boolean => {
+        raycaster.setFromCamera(ndcOf(x, y), camera);
+        const hit = raycaster.intersectObject(view.root, true).find((h) => !hitMeshes.has(h.object) && shown(h.object) && h.face);
+        return !!hit && partIdOf(hit.object, partIds) === id;
+      };
+      // Prefer a point with the part all round it (a 5 px ring), where a finger lands squarely on it.
+      let edge: { x: number; y: number } | null = null;
+      for (let r = 0; r <= reach; r += 3) {
+        const n = r === 0 ? 1 : Math.max(8, Math.round(r / 2));
+        for (let k = 0; k < n; k++) {
+          const x = c.x + r * Math.cos((2 * Math.PI * k) / n);
+          const y = c.y + r * Math.sin((2 * Math.PI * k) / n);
+          if (x < rect.left + 8 || x > rect.right - 8 || y < rect.top + 8 || y > rect.bottom - 8 || !seen(x, y)) continue;
+          let solid = true;
+          for (let j = 0; j < 8 && solid; j++) solid = seen(x + 5 * Math.cos((j * Math.PI) / 4), y + 5 * Math.sin((j * Math.PI) / 4));
+          if (solid) return { x, y, pick: pickAt(x, y), solid: true };
+          edge ??= { x, y };
+        }
+      }
+      return edge ? { ...edge, pick: pickAt(edge.x, edge.y), solid: false } : null;
+    };
     (window as unknown as Record<string, unknown>).__openAmDevRender = {
       probe,
+      aim,
+      carrying: () => carry?.id ?? null,
+      /** The lowest screen y (CSS px) of any vertex of the machine still drawn, and the part it belongs to. */
+      machineBottom: () => {
+        view.root.updateMatrixWorld();
+        const rect = renderer.domElement.getBoundingClientRect();
+        const v = new Vector3();
+        let bottom: { y: number; part: PartId | null } | null = null;
+        view.root.traverse((o) => {
+          const mesh = o as Object3D & { isMesh?: boolean; geometry?: { attributes: { position?: { count: number } } } };
+          if (!mesh.isMesh || hitMeshes.has(o) || !shown(o) || !mesh.geometry?.attributes.position) return;
+          const m = o as unknown as { getVertexPosition(i: number, t: Vector3): Vector3; matrixWorld: import("three").Matrix4 };
+          const n = mesh.geometry.attributes.position.count;
+          for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 4000))) {
+            m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld).project(camera);
+            const y = rect.top + ((1 - v.y) / 2) * rect.height;
+            if (!bottom || y > bottom.y) bottom = { y, part: partIdOf(o, partIds) };
+          }
+        });
+        const b = bottom as { y: number; part: PartId | null } | null;
+        return b ? { y: Math.round(b.y), part: b.part } : null;
+      },
+      /** The part a press at (x, y) would take hold of: what a tap or a carry acts on. */
+      pressPart: (x: number, y: number) => surfaceAt(x, y).part,
+      tweenCount: () => tweens.size,
       busy: () => tweens.size > 0,
       hasHand: () => hand !== null,
       hand: () => (hand ? { visible: hand.visible, closed: hand.closed, action: hand.action, holding: hand.holding } : null),
@@ -719,6 +831,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
     last = now;
     tweens.update(dt);
+    // Settle into the space above the controls, but never under a finger that is carrying or turning.
+    if (cover !== coverWanted && !drag && !carry && !chip) {
+      const next = cover + (coverWanted - cover) * (1 - Math.pow(0.5, dt / REFRAME_HALF_LIFE));
+      cover = Math.abs(coverWanted - next) < 0.5 ? coverWanted : next;
+      applyFraming();
+    }
     placeCamera();
     hand?.update(dt);
     renderer.render(scene, camera);
@@ -730,6 +848,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   return {
     partImage,
+    setBottomCover(px) {
+      coverWanted = Number.isFinite(px) ? Math.max(0, px) : 0;
+    },
     setTrayTest(fn) {
       overTray = fn;
     },
