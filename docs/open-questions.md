@@ -30,6 +30,8 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 
 - Fasteners on each part of the real machine: how many, what heads (hex bolt, Phillips screw, nut on a stud), and what size spanner. Unknown for every part. Likely candidates: alternator cover, recoil starter (often three bolts), muffler (nuts on studs plus a bolt), carburettor (two nuts on studs), fuel tank (screws, per the Benco video), air filter door. Drafts go in machine.json marked unverified; the mechanic checks them.
 - Whether any fastener is captive (stays in the cover) rather than coming out loose.
+- Plan 0011 drafted these fasteners in machine.json, all unverified: fuel tank 4 screws on the side flanges; recoil starter 4 bolts, one per ear; muffler 2 nuts on the exhaust studs and 2 bolts through the heat shield; carburettor 2 nuts on the flange studs; alternator cover 4 bolts; air filter cover 2 bolts (it also rocks off a clip). Counts, heads, sizes and positions all need the mechanic. The capacitor's mounting (a strap screw?) is unknown, so it has none.
+- Air filter cover: the model shows two bolts on the lower door, but its motion is `unclip`. Bolted, clipped, or both?
 - Sounds: until the owner records the real machine, the cord pull, the failed start and the engine are stand-ins from CC0 recordings, not a TG950.
 
 ## Owner decisions pending

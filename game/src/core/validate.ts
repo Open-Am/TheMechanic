@@ -1,7 +1,7 @@
 // Validator for machine.json and faults.json (ADR 0003 section "Validation", ADR 0008).
 // Never throws. Returns every issue found so a data author sees them all at once.
 
-import { CUSTOMER_MOMENTS, MOTION_TYPES, SYMPTOMS, type CustomerFile, type FaultFile, type Machine, type ValidationIssue, type ValidationResult } from "./types.ts";
+import { CUSTOMER_MOMENTS, FASTENER_KINDS, MOTION_TYPES, SYMPTOMS, type CustomerFile, type FaultFile, type Machine, type ValidationIssue, type ValidationResult, type Vec3 } from "./types.ts";
 
 function result(issues: ValidationIssue[]): ValidationResult {
   return { ok: !issues.some((i) => i.level === "error"), issues };
@@ -68,6 +68,26 @@ export function validateMachine(machine: Machine): ValidationResult {
     }
     if (p.motion &&!(MOTION_TYPES as readonly string[]).includes(p.motion.type)) {
       issues.push(warning("unknown_motion", `Part "${p.id}" has motion type "${p.motion.type}", which this build does not know. It will play as "slide".`));
+    }
+  }
+
+  // Fasteners (ADR 0020): every field, ids unique across the machine and written <part id>.<name>.
+  const fastenerIds = new Set<string>();
+  const isVec = (v: unknown): v is Vec3 => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === "number" && Number.isFinite(x));
+  for (const p of machine.parts) {
+    if (p.fasteners === undefined) continue;
+    if (!Array.isArray(p.fasteners)) {
+      issues.push(error("bad_fasteners", `Part "${p.id}" has fasteners that are not a list.`));
+      continue;
+    }
+    for (const f of p.fasteners) {
+      const id = typeof f?.id === "string" ? f.id : "";
+      if (!id.startsWith(`${p.id}.`) || id.length <= p.id.length + 1) issues.push(error("bad_fastener_id", `Fastener "${id}" on "${p.id}" must be written "${p.id}.<name>".`));
+      if (fastenerIds.has(id) || ids.has(id)) issues.push(error("duplicate_id", `Duplicate ID "${id}".`));
+      fastenerIds.add(id);
+      if (!(FASTENER_KINDS as readonly string[]).includes(f?.kind)) issues.push(error("bad_fastener_kind", `Fastener "${id}" has kind "${String(f?.kind)}"; it must be one of ${FASTENER_KINDS.join(", ")}.`));
+      if (!isVec(f?.position)) issues.push(error("bad_fastener_position", `Fastener "${id}" needs a position of three numbers.`));
+      if (!isVec(f?.axis) || Math.abs(Math.hypot(...f.axis) - 1) > 1e-3) issues.push(error("bad_fastener_axis", `Fastener "${id}" needs an axis that is a unit vector.`));
     }
   }
 

@@ -40,7 +40,13 @@
       "inspectOk": "Clean inside. Fuel smells fresh.",
       "placeholder": { "shape": "box", "size": [0.338, 0.1561, 0.293], "position": [0, 0.321, 0], "color": "#2456b4" },
       "explode": [0, 0.15, 0],
-      "motion": { "type": "lift" }
+      "motion": { "type": "lift" },
+      "fasteners": [
+        {"id": "fuel_tank.screw_1", "kind": "screw", "position": [0.17, 0.2475, 0.09], "axis": [1, 0, 0]},
+        {"id": "fuel_tank.screw_2", "kind": "screw", "position": [0.17, 0.2475, -0.09], "axis": [1, 0, 0]},
+        {"id": "fuel_tank.screw_3", "kind": "screw", "position": [-0.17, 0.2475, 0.03], "axis": [-1, 0, 0]},
+        {"id": "fuel_tank.screw_4", "kind": "screw", "position": [-0.17, 0.2475, -0.09], "axis": [-1, 0, 0]}
+      ]
     },
     {
       "id": "air_filter_cover",
@@ -50,7 +56,11 @@
       "inspectOk": "Not cracked. Clips are fine.",
       "placeholder": { "shape": "box", "size": [0.25, 0.088, 0.011], "position": [-0.025, 0.1, 0.1605], "color": "#222222" },
       "explode": [0, 0, 0.12],
-      "motion": { "type": "unclip", "axis": "x" }
+      "motion": { "type": "unclip", "axis": "x" },
+      "fasteners": [
+        {"id": "air_filter_cover.bolt_1", "kind": "bolt", "position": [-0.1, 0.1, 0.1635], "axis": [0, 0, 1]},
+        {"id": "air_filter_cover.bolt_2", "kind": "bolt", "position": [0.03, 0.1, 0.1635], "axis": [0, 0, 1]}
+      ]
     },
     {
       "id": "air_filter",
@@ -70,7 +80,11 @@
       "inspectOk": "Bowl is clean. Jet is clear.",
       "placeholder": { "shape": "box", "size": [0.071, 0.0915, 0.039], "position": [-0.0795, 0.1087, 0.1175], "color": "#a9adb1" },
       "explode": [0, 0, 0.12],
-      "motion": { "type": "unbolt", "axis": "z" }
+      "motion": { "type": "unbolt", "axis": "z" },
+      "fasteners": [
+        {"id": "carburetor.nut_1", "kind": "nut", "position": [-0.099, 0.112, 0.104], "axis": [0, 0, 1]},
+        {"id": "carburetor.nut_2", "kind": "nut", "position": [-0.051, 0.112, 0.104], "axis": [0, 0, 1]}
+      ]
     },
     {
       "id": "plug_cap",
@@ -100,7 +114,13 @@
       "inspectOk": "Rope is sound. Spring pulls it back.",
       "placeholder": { "shape": "cylinder", "axis": "x", "size": [0.079, 0.209, 0.296], "position": [0.1615, 0.1385, 0.003], "color": "#2b2b2b" },
       "explode": [0.12, 0, 0],
-      "motion": { "type": "unbolt", "axis": "x" }
+      "motion": { "type": "unbolt", "axis": "x" },
+      "fasteners": [
+        {"id": "recoil_starter.bolt_1", "kind": "bolt", "position": [0.127, 0.205, -0.13], "axis": [1, 0, 0]},
+        {"id": "recoil_starter.bolt_2", "kind": "bolt", "position": [0.127, 0.077, -0.13], "axis": [1, 0, 0]},
+        {"id": "recoil_starter.bolt_3", "kind": "bolt", "position": [0.127, 0.232, 0.115], "axis": [1, 0, 0]},
+        {"id": "recoil_starter.bolt_4", "kind": "bolt", "position": [0.127, 0.045, 0.06], "axis": [1, 0, 0]}
+      ]
     },
     {
       "id": "muffler",
@@ -110,7 +130,13 @@
       "inspectOk": "A thin layer of soot. Gas passes freely.",
       "placeholder": { "shape": "box", "size": [0.2015, 0.115, 0.0795], "position": [-0.0633, 0.1205, -0.1088], "color": "#26262a" },
       "explode": [0, 0, -0.12],
-      "motion": { "type": "unbolt", "axis": "z" }
+      "motion": { "type": "unbolt", "axis": "z" },
+      "fasteners": [
+        {"id": "muffler.nut_1", "kind": "nut", "position": [0.029, 0.15, -0.078], "axis": [-1, 0, 0]},
+        {"id": "muffler.nut_2", "kind": "nut", "position": [0.029, 0.15, -0.122], "axis": [-1, 0, 0]},
+        {"id": "muffler.bolt_1", "kind": "bolt", "position": [-0.11, 0.1225, -0.1475], "axis": [0, 0, -1]},
+        {"id": "muffler.bolt_2", "kind": "bolt", "position": [-0.03, 0.1225, -0.1475], "axis": [0, 0, -1]}
+      ]
     },
     {
       "id": "alternator_cover",
@@ -120,7 +146,13 @@
       "inspectOk": "Not cracked. Vents are clear.",
       "placeholder": { "shape": "box", "size": [0.0222, 0.1725, 0.172], "position": [-0.1741, 0.1352, -0.01], "color": "#b3b4b6" },
       "explode": [-0.12, 0, 0],
-      "motion": { "type": "unbolt", "axis": "x" }
+      "motion": { "type": "unbolt", "axis": "x" },
+      "fasteners": [
+        {"id": "alternator_cover.bolt_1", "kind": "bolt", "position": [-0.18, 0.1859, 0.0409], "axis": [-1, 0, 0]},
+        {"id": "alternator_cover.bolt_2", "kind": "bolt", "position": [-0.18, 0.0841, 0.0409], "axis": [-1, 0, 0]},
+        {"id": "alternator_cover.bolt_3", "kind": "bolt", "position": [-0.18, 0.0841, -0.0609], "axis": [-1, 0, 0]},
+        {"id": "alternator_cover.bolt_4", "kind": "bolt", "position": [-0.18, 0.1859, -0.0609], "axis": [-1, 0, 0]}
+      ]
     },
     {
       "id": "capacitor",

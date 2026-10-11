@@ -108,3 +108,39 @@ describe("validateFaults rejections", () => {
     expect(validateFaults({ machine: "x", schema: 1, faults: [] }, empty).ok).toBe(false);
   });
 });
+
+describe("fasteners (ADR 0020, plan 0011)", () => {
+  const codes = (m: Machine) => validateMachine(m).issues.map((i) => i.code);
+  const withCover = (edit: (f: NonNullable<Machine["parts"][number]["fasteners"]>[number]) => void) => {
+    const m = clone(machine);
+    const cover = m.parts.find((p) => p.id === "alternator_cover")!;
+    edit(cover.fasteners![0]!);
+    return m;
+  };
+
+  it("the shipped draft fasteners are valid, and only on parts that are held on by them", () => {
+    expect(validateMachine(machine).issues.filter((i) => i.code.includes("fastener"))).toEqual([]);
+    const held = machine.parts.filter((p) => (p.fasteners ?? []).length > 0).map((p) => p.id).sort();
+    expect(held).toEqual(["air_filter_cover", "alternator_cover", "carburetor", "fuel_tank", "muffler", "recoil_starter"]);
+  });
+
+  it("ids must be written <part id>.<name> and be unique across the machine", () => {
+    expect(codes(withCover((f) => (f.id = "bolt_1")))).toContain("bad_fastener_id");
+    expect(codes(withCover((f) => (f.id = "alternator_cover.")))).toContain("bad_fastener_id");
+    expect(codes(withCover((f) => (f.id = "alternator_cover.bolt_2")))).toContain("duplicate_id");
+  });
+
+  it("kind, position and a unit axis are checked", () => {
+    expect(codes(withCover((f) => ((f as { kind: string }).kind = "rivet")))).toContain("bad_fastener_kind");
+    expect(codes(withCover((f) => ((f as { position: unknown }).position = [0, 0])))).toContain("bad_fastener_position");
+    expect(codes(withCover((f) => (f.axis = [0, 2, 0])))).toContain("bad_fastener_axis");
+  });
+
+  it("a part with no fasteners is fine, and fasteners that are not a list are not", () => {
+    const m = clone(machine);
+    delete m.parts.find((p) => p.id === "alternator_cover")!.fasteners;
+    expect(validateMachine(m).ok).toBe(true);
+    (m.parts[0] as unknown as { fasteners: unknown }).fasteners = "four bolts";
+    expect(codes(m)).toContain("bad_fasteners");
+  });
+});

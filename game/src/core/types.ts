@@ -33,6 +33,20 @@ export interface BasePiece {
   placeholder: Placeholder;
 }
 
+/** What holds a part on (ADR 0020): a bolt, a screw or a nut. Fasteners are not parts. */
+export const FASTENER_KINDS = ["bolt", "screw", "nut"] as const;
+export type FastenerKind = (typeof FASTENER_KINDS)[number];
+
+export interface Fastener {
+  /** Unique across the machine, written `<part id>.<name>`, e.g. `alternator_cover.bolt_1`. */
+  id: string;
+  kind: FastenerKind;
+  /** Where it sits, in the machine's axes and metres, as `placeholder.position` is. */
+  position: Vec3;
+  /** The direction it backs out along, a unit vector. */
+  axis: Vec3;
+}
+
 export interface Part {
   id: PartId;
   name: string;
@@ -44,6 +58,8 @@ export interface Part {
   placeholder: Placeholder;
   explode: Vec3;
   motion?: Motion;
+  /** What holds it on, undone by the hand while loosening (ADR 0020). Absent means none. */
+  fasteners?: Fastener[];
 }
 
 export interface Machine {
