@@ -121,7 +121,25 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   // ---- Parts ----
 
   const tweens = new Tweens();
-  const hand: HandRig | null = assets.hand ? createHandRig(scene, camera, assets.hand) : null;
+  // The hand keeps out of the machine as the camera sees it (plan 0010): any sampled point of it behind the machine's
+  // surface brings the whole hand towards the camera, so it stays under the pointer but in front.
+  const collideRay = new Raycaster();
+  const collide = (points: readonly Vector3[]): number => {
+    let need = 0;
+    view.root.updateMatrixWorld();
+    for (const p of points) {
+      const dir = p.clone().sub(camera.position);
+      const dist = dir.length();
+      collideRay.set(camera.position, dir.divideScalar(dist));
+      collideRay.far = dist;
+      // The part the hand holds does not count: fingers curl behind what they grip.
+      const held = hand?.holding ?? null;
+      const hit = collideRay.intersectObject(view.root, true).find((h) => !hitMeshes.has(h.object) && shown(h.object) && (held === null || partIdOf(h.object, partIds) !== held));
+      if (hit) need = Math.max(need, dist - hit.distance + HAND.margin);
+    }
+    return need;
+  };
+  const hand: HandRig | null = assets.hand ? createHandRig(scene, camera, assets.hand, collide) : null;
   const tmpQ = new Quaternion();
   const partById = (id: PartId) => machine.parts.find((p) => p.id === id)!;
 
@@ -659,6 +677,23 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       hand: () => (hand ? { visible: hand.visible, closed: hand.closed, action: hand.action, holding: hand.holding } : null),
       handGripping: () => (hand ? hand.visible && hand.closed > 0.5 : false),
       loose: () => [...loose],
+      // Share of the hand's sample points hidden behind the machine's surface from the camera: a hand that sinks into
+      // the machine shows here (plan 0010 fix).
+      handHidden: () => {
+        if (!hand || !hand.visible) return 0;
+        const pts = hand.samplePoints();
+        let hidden = 0;
+        view.root.updateMatrixWorld();
+        for (const p of pts) {
+          const dir = p.clone().sub(camera.position);
+          const dist = dir.length();
+          raycaster.set(camera.position, dir.normalize());
+              const held = hand.holding;
+          const hit = raycaster.intersectObject(view.root, true).find((h) => !hitMeshes.has(h.object) && shown(h.object) && (held === null || partIdOf(h.object, partIds) !== held));
+          if (hit && hit.distance < dist - 0.004) hidden++;
+        }
+        return pts.length ? hidden / pts.length : 0;
+      },
       orbit: () => ({ ...orbit }),
       marker: "open-am-dev-hook",
     };

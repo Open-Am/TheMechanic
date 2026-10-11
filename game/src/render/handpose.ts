@@ -19,11 +19,18 @@ export const HAND = {
   gripFloat: 0.012,
   /** Metres the pinching fingertips sit off the surface. */
   pinchFloat: 0.004,
-  /** Where the forearm comes from, relative to the camera: right, down and forward, in metres. Level with the camera
-   *  and well below it, so the forearm leaves through the bottom of the screen and the sleeve's end is never seen. */
-  anchorRight: 0.3,
-  anchorDown: 0.6,
-  anchorForward: 0,
+  /** Where the arm is aimed, relative to the camera: right, down and forward, in metres. In front of the camera but
+   *  outside its view, low and to the right, so the arm leaves through the bottom right of the screen while staying
+   *  far enough from the camera to look its real size. */
+  anchorRight: 0.35,
+  anchorDown: 0.5,
+  anchorForward: 0.35,
+  /** Metres every point of the hand keeps outside the surface it rests on or holds. */
+  margin: 0.003,
+  /** Floor on how much moving towards the camera lifts the hand off a surface seen almost edge-on. */
+  minLift: 0.25,
+  /** Most the hand is moved back in one go, metres. */
+  maxPush: 0.2,
 } as const;
 
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -106,17 +113,35 @@ export type HandAction = "hover" | GripShape;
 
 /**
  * The hand's pose at the pointer: `point` is the spot under the pointer and `normal` the surface's outward normal there
- * (or the direction to the camera off the machine). The forearm comes from `anchor`; the palm faces the surface. The
- * hand point that lands on the spot is the fingertips (`tip`) when hovering, the pinch point when pinching, and the
- * grip point (the origin) when gripping; each floats its own distance off the surface.
+ * (or the direction to the camera off the machine). The forearm comes from `anchor`. The hand keeps one steady attitude
+ * relative to the screen, palm turned down towards the scene (`screenUp` is the camera's up), the way a hand reaching
+ * into a scene looks; it does not roll to face each surface it passes over. The hand point that lands on the spot is
+ * the fingertips (`tip`) when hovering, the pinch point when pinching, and the grip point (the origin) when gripping;
+ * each floats its own distance off the surface. `pushOut` then keeps the rest of the hand out of the surface.
  */
-export function pointerPose(point: Vec3, normal: Vec3, anchor: Vec3, action: HandAction, points: { tip: Vec3 | null; pinch: Vec3 | null }): { position: Vec3; quaternion: [number, number, number, number] } {
+export function pointerPose(point: Vec3, normal: Vec3, anchor: Vec3, screenUp: Vec3, action: HandAction, points: { tip: Vec3 | null; pinch: Vec3 | null }): { position: Vec3; quaternion: [number, number, number, number] } {
   const n = normalize(normal);
-  const basis = handBasis(normalize(sub(point, anchor)), n);
+  const basis = handBasis(normalize(sub(point, anchor)), screenUp);
   const float = action === "hover" ? HAND.hoverFloat : action === "pinch" ? HAND.pinchFloat : HAND.gripFloat;
   const at = add(point, scale(n, float));
   const handPoint: Vec3 = action === "hover" ? (points.tip ?? [0, 0, 0]) : action === "pinch" ? (points.pinch ?? [0, 0, 0]) : [0, 0, 0];
   return { position: originFor(at, handPoint, basis), quaternion: basisToQuaternion(basis) };
+}
+
+/**
+ * How far to move the hand so no point of it (`samples`, in world space) is inside the surface through `point` with
+ * outward `normal`: every sample ends at least `margin` outside. The hand moves along `toward` (a unit vector, towards
+ * the camera), so it stays under the pointer on screen and only its depth changes. Returns the offset to add.
+ */
+export function pushOut(samples: readonly Vec3[], point: Vec3, normal: Vec3, toward: Vec3, margin: number = HAND.margin): Vec3 {
+  const n = normalize(normal);
+  const along = Math.max(HAND.minLift, toward[0] * n[0] + toward[1] * n[1] + toward[2] * n[2]);
+  let t = 0;
+  for (const s of samples) {
+    const d = (s[0] - point[0]) * n[0] + (s[1] - point[1]) * n[1] + (s[2] - point[2]) * n[2];
+    if (d < margin) t = Math.max(t, (margin - d) / along);
+  }
+  return scale(toward, Math.min(t, HAND.maxPush));
 }
 
 /** The share of the remaining distance to cover this frame, for smoothing with a half-life of `halfLife` seconds. */
