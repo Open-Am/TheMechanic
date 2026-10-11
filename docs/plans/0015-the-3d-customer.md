@@ -1,0 +1,109 @@
+---
+id: 0015
+title: The 3D customer
+status: proposed
+date: 2026-10-11
+adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0020, 0021]
+branch: plan/0015-the-3d-customer
+---
+
+# 0015. The 3D customer
+
+## Goal
+
+The round's customer stands in the scene, behind the generator and to its right, so the default view on a portrait phone shows their head and upper body above the machine without hiding any part, the toolbox or the tray. There are three people, one for each `look` in `game/public/customers.json`: Mama Ngozi (`woman_market`), Alhaji Musa (`man_kaftan`) and Tunde (`man_young`). Each is made from a MakeHuman body in Blender by script, dressed and textured with our own materials, rigged, and animated. They stand and breathe while they wait, check the time when patience falls to half, cross their arms and tap a foot when it is nearly gone, react to a failed pull, nod when the engine starts, and turn and walk off when they leave. They never react to anything done to a part. The patience rule, the walk-out and the score do not change.
+
+## ADRs relied on
+
+- **0015** decides all of it: the 3D customer behind and beside the machine with their upper body in the default view and no part hidden; an idle loop and a short animation for each moment (checking a watch, arms crossed, tapping a foot, walking off, nodding); reactions follow the meter only (time passing, a failed pull, nearly out, leaving, pleased), never a removal; the customer can never be picked and taps pass through; characters read as real Lagos people, never caricatures, and the owner approves each one; animation licences are recorded beside each file; the budget of 1.5 MB, 15,000 triangles and one 1024 px texture set per customer, and one customer per round; `render` draws the customer, `core` and `app` keep the rule. The patience rule, `customers.json`, the meter and the lines were built by plan 0007 and are not changed.
+- **0020** restates what stays from ADR 0016 (superseded): MPFB is an approved tool for the customer as well as the hand; only CC0 material, or material whose licence only asks for credit, is shipped; every MakeHuman item used is listed in `assets/<model>/LICENCE.md`; MakeHuman gives the shape and textures are our own; a MakeHuman image needs the owner's approval of that image. ADR 0016's text was what first approved MPFB for the customer.
+- **0007**: the customer shows nothing about the fault. Their animations come only from the clock and the cord, the same for every fault and every part.
+- **0013**: the realism target, the comparison against reference photos, reference photos of people kept out of git and never used as textures.
+- **0014**: the frame rate must hold at 30 fps at 4x CPU throttle with the customer, the hand and the toolbox on screen.
+- **0012**: Blender 4.5, scripts that find Blender through `BLENDER`, `.blend` files in Git LFS.
+- **0010**: the customer is drawn in `render`; `app` gains one read-only field; `core` and `ui` do not change.
+- **0021**: the toolbox sits front left of the machine; the customer must stay clear of it.
+
+No ADR is contradicted. One reading below (one file for all three people) is a reading of ADR 0015's "one customer per round" row; the owner should confirm it.
+
+## Exploration summary
+
+Done by Claude (Opus) in one pass, without a separate small-model agent.
+
+- `game/public/customers.json` (plan 0007) holds three customers with `look` values `woman_market`, `man_kaftan` and `man_young`. Nothing reads `look` yet; `validateCustomers` only checks it is a non-empty string. Patience is 750, 550 and 400 seconds since the drop and patience fix.
+- `app/round.ts` picks the round's customer in `newRound()` and exposes `customerName`, `patience()` and the events `patience` (mood `waiting` at 50 percent, `annoyed` at 20 percent, from `core/constants.ts`), `left`, `pulled` (with `started`) and `ended`. It does not expose the customer's `look`.
+- `ui/index.ts` shows the meter and the speech line, and opens the result screen 900 ms after `ended` and 1,600 ms after `left`. Those delays set how long the pleased nod and the walk-off can be seen.
+- `render/model.ts` loads `model.glb`, the environment, the ground shadow and `hand/hand.glb` at startup, each optional. It returns only `gltf.scene`, so animation clips would be dropped today. `main.ts` loads everything before the first round; ADR 0010 says nothing is fetched after that.
+- `render/view.ts` frames the camera on the machine (`fitDistance` from the machine's radius) and orbits the camera round a still machine. The hand keeps out of the machine with a ray check against the machine's meshes.
+- The hand was made by `tools/blender/hand.py` with MPFB 2.0.18 and the CC0 system assets pack. Its poses are morph targets; no skeleton ships. `assets/hand/LICENCE.md` is the model for a licence file. `tools/pipeline/budgets.json`, `check.ts` (`checkHand`) and `assets.mjs` export, optimise, check and copy the hand. `assets/*/reference/` and `assets/*/match/` are already git-ignored.
+- `tools/verify/phone-play.ts` plays all six faults at 390 by 844 through the dev hook `window.__openAmDevRender`, and forces a walk-out with `?patience=5`.
+- Plan 0012 (proposed) places the toolbox front left and fixed in the world, so it turns with the machine.
+
+Risks: three dressed, rigged and animated people in 1.5 MB is tight (see reading 2). A skinned mesh costs more per frame than the morph-target hand. A person is far harder to make believable than a machine, and a face that reads wrong reads as a caricature, which ADR 0015 forbids. At phone size from the default view the customer's head is small, so build, clothing, colour and posture carry most of the realism.
+
+## Simpler readings chosen
+
+1. **One person per look.** Three distinct people, one for each `look`, not one body with swapped clothes: a market woman, an older man in a kaftan and a young man read as different people only if their bodies differ. Each is its own MPFB body with its own skeleton and clips.
+2. **One file, loaded at startup.** All three people go in one file, `game/public/customers/customers.glb`, whose whole size is within one customer's budget (1.5 MB), loaded at startup with the hand. ADR 0010 forbids fetches after load, and free play changes the customer every round, so fetching each round's customer would need a new ADR. One file within 1.5 MB keeps both rules: a round never costs more download than one customer, and nothing is fetched mid-game. Each person is still held to 15,000 triangles and one 1024 px texture set. Only the round's person is shown and animated. If the three cannot fit in 1.5 MB at an acceptable look, the build stops and asks the owner (see "Needs an ADR first").
+3. **Who they are.** All plainly dressed, everyday people, with MakeHuman's sliders near average so no feature is exaggerated:
+   - `woman_market`: a woman of about 50, fuller build, in a wrapper and blouse of a wax-print pattern we design ourselves, and a head tie.
+   - `man_kaftan`: a man of about 55, average build, in a plain long kaftan over trousers, with a cap.
+   - `man_young`: a man of about 25, slim, in a plain or football-style T-shirt with no real club, brand or badge, jeans and slides.
+   Clothes, head tie and cap are modelled by our script on the body; the CC0 pack's hair, eyes, eyebrows and teeth meshes may be used. All textures are baked from our own procedural materials (ADR 0013, ADR 0020); no MakeHuman image ships.
+4. **Skeleton.** Unlike the hand, the customers ship a skeleton, because walking off and crossing arms cannot be done with a few morphs. MPFB's game-engine rig (fewer bones, no finger chains) if its licence is CC0, otherwise MakeHuman's default rig with the finger and face bones removed. At most 64 joints per person, a constant in `check.ts`. Bone names carry the look as a prefix so the three skeletons do not clash in one file.
+5. **Animations are ours.** Keyframed by the build script in Blender, the same poses applied to each skeleton. No motion capture or downloaded animation, so every clip's licence is "the project's own work". Clips per person, named `<look>.<clip>`:
+
+   | Clip | When | Length |
+   | --- | --- | --- |
+   | `idle` | Waiting, loops: breathing, a slow weight shift | 4 s loop |
+   | `arrive` | Round starts (`started`): a small nod and lifted hand | 1 s, then `idle` |
+   | `waiting` | `patience`, mood `waiting`: looks at a wrist or phone | 1.5 s, then `idle` |
+   | `annoyed` | `patience`, mood `annoyed`: crosses arms | 1 s, then `annoyed_idle` |
+   | `annoyed_idle` | Nearly out of patience, loops: arms crossed, foot tapping | 2 s loop |
+   | `failed_pull` | `pulled` with `started` false: hands to hips, head shakes | 1.2 s, then back to the current loop |
+   | `pleased` | `ended` (the engine started): nods, a small clap or thumbs up | under 0.9 s, held |
+   | `leaving` | `left`: turns away and walks off to the right | 1.6 s, then hidden |
+
+   No other event moves the customer. `removed`, `installed`, `inspected`, `fixed`, `refused`, loosening, carrying, hovering and turning the view do nothing to them. Their head does not follow the hand or any part.
+6. **When patience runs out.** ADR 0015 says the customer takes the generator and leaves. The simpler reading: in 3D they turn and walk off without lifting the machine, inside the 1,600 ms before the result screen, which already says they took the generator. Animating someone carrying the machine away would need the machine group handed to a skinned hand, for no gain in play. ADR 0007 is kept: the walk-off is the same for every fault.
+7. **Where they stand.** On the ground behind the machine and to its right, about 0.6 m behind its back edge, outside the toolbox's ground circle, facing the camera. Their spot is worked out from the camera's turn round the machine (its azimuth), not fixed in the world, so the customer always stays behind the machine as seen. The player turns the machine with the hand; a customer who swung round in front of it would hide parts. The camera's framing does not change: it still fits the machine. The customer's legs are mostly behind the machine and the ground fade. A soft drawn shadow sits under their feet, part of the customer group.
+8. **Never picked.** The customer is on its own Three.js layer, left out of picking, the pointer's hit tests, the hand's collision check and the hover. A tap or drag on the customer is a tap or drag on empty space, so it turns the machine.
+9. **Approval before release.** ADR 0015: the owner approves each character. A look reaches `game/public/customers/customers.glb` on `main` only once the owner sets it to `approved` in `assets/customers/STATUS.md`. The branch and the phone preview carry all three for the owner to judge. A look that is not approved is left out of the file, and its customer plays without a 3D figure.
+10. **Fallback.** No `customers.glb`, a file that fails to load, or a round whose `look` is not in it: the round plays exactly as now, with the meter and the lines and no figure. No customers at all: no figure, as now.
+11. **Lines unchanged.** The draft Pidgin lines and the speech bubble stay as plan 0007 left them. The customer's mouth does not move.
+
+## Needs an ADR first
+
+- If all three people cannot fit in one 1.5 MB file at an acceptable look, the choices are: fewer people in the first version (a change to ADR 0015's three customers), a larger budget (a change to ADR 0015's table), or fetching each round's customer when its round starts (a change to ADR 0010's "nothing is fetched after load"). Each needs a new ADR and the owner's acceptance. None of them is in the steps.
+- Voices or sounds for the customer. ADR 0018 does not cover them. Not in this plan.
+
+## Steps
+
+1. **Tools and licences.** Check MPFB 2.0.18 and the CC0 system assets pack are still installed, as recorded in ADR 0016's history; if a version changes, add a history line to ADR 0020. Read the licence of every MPFB item the customers will use: base mesh, macro targets, the rig, hair, eyes, eyebrows, teeth. Write `assets/customers/LICENCE.md` from `assets/hand/LICENCE.md`'s pattern, one row per item, plus "the project's own work" for clothes, textures and every animation clip. Anything not CC0, or credit-only, or unclear, is not used. Gather reference photos of everyday Lagos dress (wrapper and blouse with head tie, kaftan and cap, young men's casual wear) into `assets/customers/reference/` (git-ignored) and catalogue their links in a new "The customers" section of `docs/reference/visual-references.md`. Photos of identifiable people are used only for clothing, colour and build, never for a face.
+2. **Budgets.** `tools/pipeline/budgets.json` gains `customers`: `trianglesPerLook` 15000, `bytes` 1500000 (the whole file), `texturePx` 1024, `jointsPerLook` 64. `game/tests/pipeline.test.ts` covers it.
+3. **Model.** `tools/blender/customer.py -- build [look ...]` reads the looks from `game/public/customers.json` (all of them by default; the release build names only the approved ones) and, for each: makes the MPFB body with the settings in reading 3, adds the rig of reading 4, models the clothes, head tie or cap on the body, adds the CC0 hair and eye meshes, bakes skin, cloth and eyes with `tools/blender/texture.py` into one 1024 px set, decimates to budget, keyframes the clips of reading 5, prefixes bone and clip names with the look, and saves `assets/customers/blend/customers.blend` (Git LFS). `-- preview <dir>` renders each person front and three-quarter, and a strip of each clip, without baking.
+4. **Export and check.** `tools/pipeline/assets.mjs` exports, optimises (`optimise.mjs`) and checks the file. `tools/pipeline/check.ts` gains `checkCustomers`: one root `customers`; children named `customer_<look>`, each for a `look` in `customers.json`, and nothing else; each within 15,000 triangles and 64 joints; every image within 1024 px; every clip of reading 5 present for each look; the whole file within 1.5 MB. It copies the file to `game/public/customers/customers.glb`. Tests in `game/tests/pipeline.test.ts` for each check, including a missing clip, an extra node and a look over budget.
+5. **Compare.** Match images of each person, standing and from the default game view, against the reference photos, at least two rounds, recorded in `assets/customers/STATUS.md` with the status, triangle count, size and what still differs.
+6. **App.** `game/src/app/round.ts` gains `customerLook: string | null` on `Game`, the round's `look`. A test that it follows the picked customer and is null without customers.
+7. **Pure render parts.** `game/src/render/customerpose.ts`: the customer's ground spot and facing from the camera's azimuth and the machine's size; and `clipFor(event)`, which maps game events to clips as in reading 5 and returns nothing for every other event. Tests in `game/tests/render.test.ts`: the spot is always farther from the camera than the machine's far side, at any azimuth; it stays outside the toolbox's circle; `clipFor` returns nothing for `removed`, `installed`, `inspected`, `fixed` and `refused`, and the same clip for every part and fault.
+8. **In the game.** `game/src/render/model.ts` keeps the clips: `loadModel` returns the scene and its animations, and `RenderAssets` gains `customers`. `game/src/main.ts` passes `customers/customers.glb`. A new `game/src/render/customer.ts` shows only the round's look, plays its clips with one `AnimationMixer`, places it each frame from `customerpose.ts`, and keeps it off the picking layer, out of the hand's collision check and out of the hover. `game/src/render/view.ts` mounts it, listens to `started`, `patience`, `pulled`, `ended` and `left`, and updates it each frame. The dev hook gains `customer()`: the look, the playing clip, whether it is shown, its projected screen box and its nearest distance from the camera.
+9. **Browser check.** `tools/verify/phone-play.ts`, at 390 by 844 and 360 by 640: the customer is shown in the default view with the head inside the screen, below the HUD and above the machine; the customer's nearest point is farther from the camera than the machine's farthest point at the default view and after turns of 90, 180 and 270 degrees; its screen box does not overlap the toolbox's or the tray's; a tap on the customer picks nothing and a drag there turns the machine; `idle` plays at the start; loosening and removing a part does not change the clip; a failed pull plays `failed_pull`; solving plays `pleased`; the forced walk-out (`?patience=5`) plays `annoyed` then `leaving` before the result screen; with `customers.glb` renamed away, all six faults still solve with no figure and no console errors; all six faults solve with the customer present; no console errors; at least 30 fps at 4x CPU throttle with the customer, hand and toolbox on screen. Screenshots of each person in the default view and of the walk-off.
+10. **Notes.** `docs/design/animation.md` gains the customer's clips and when they play. Release note `docs/releases/0.14.0.md` names the looks that are approved and the status of the others. Republish the phone preview.
+
+## Done when
+
+- `npm test`, `npm run typecheck`, `npm run docs:check`, `npm run build`, `npm run size` pass.
+- `npm run assets` builds and checks `customers.glb`: each person within 15,000 triangles and 64 joints, every image within 1024 px, every clip present, the whole file within 1.5 MB.
+- `npm run verify:phone` passes every check in step 9.
+- `assets/customers/LICENCE.md` lists every MakeHuman item used with its licence and every clip as our own work. `assets/customers/STATUS.md` records each person's status and match images.
+- The owner looks at each person on the phone and sets each one `approved` or says what is wrong. Only approved people ship in 0.14.0.
+
+## Depends on
+
+- Plan 0012 (the toolbox) merged into `main`, because the customer's spot and the browser check are placed against the toolbox and the framing it is placed against.
+- Plan 0011 merged, which plan 0012 depends on.
+- The owner's approval of this plan, and of each character before it ships.
+
+## Release note line
+
+Added: the customer stands behind the generator while you work, waits, gets impatient as their patience runs down, reacts to a failed pull, nods when the engine starts, and walks off if they run out of patience (plan 0015, ADR 0015).
