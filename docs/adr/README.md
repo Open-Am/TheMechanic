@@ -21,3 +21,4 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0013](ADR-0013-visual-target-and-how-models-are-made.md) | Visual target and how the models are made | accepted |
 | [0014](ADR-0014-performance-budgets-and-realistic-lighting.md) | Performance budgets and realistic lighting | accepted |
 | [0015](ADR-0015-customer-patience-and-the-mechanics-hand.md) | The customer, their patience, and the mechanic's hand | accepted |
+| [0016](ADR-0016-makehuman-and-the-hand-on-rotation.md) | MakeHuman for characters, and the hand turns the machine | proposed |
