@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SYMPTOMS } from "../src/core/types.ts";
-import { formatTime, patienceMood, starText } from "../src/ui/format.ts";
+import { DROP_REACH, formatTime, inDropZone, patienceMood, starText } from "../src/ui/format.ts";
 import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
 import { loadFaults } from "./helpers.ts";
 
@@ -55,5 +55,17 @@ describe("customers in the interface (ADR 0015)", () => {
     expect(TEMPLATES.walkedTitle("Tunde")).toBe("Tunde took the generator to another mechanic.");
     expect(TEMPLATES.speech("Tunde", "You never finish?")).toBe("Tunde: “You never finish?”");
     expect(TEMPLATES.customerSays("Mama Ngozi")).toBe("Mama Ngozi says");
+  });
+});
+
+describe("the tray drop zone (ADR 0020)", () => {
+  it("is the whole strip from a little above the controls to the bottom of the screen", () => {
+    const top = 700;
+    const bottom = 844;
+    expect(inDropZone(top, top, bottom)).toBe(true);
+    expect(inDropZone(top - DROP_REACH, top, bottom)).toBe(true);
+    expect(inDropZone(top - DROP_REACH - 1, top, bottom)).toBe(false);
+    expect(inDropZone(bottom, top, bottom)).toBe(true);
+    expect(inDropZone(bottom + 1, top, bottom)).toBe(false);
   });
 });

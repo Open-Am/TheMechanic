@@ -5,7 +5,7 @@ import type { Game } from "../app/round.ts";
 import { briefingScreen } from "./briefing.ts";
 import { createCard } from "./card.ts";
 import { el } from "./dom.ts";
-import { formatTime, patienceMood } from "./format.ts";
+import { formatTime, inDropZone, patienceMood } from "./format.ts";
 import { resultScreen } from "./result.ts";
 import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "./strings.ts";
 import { type ChipCarry, createTray } from "./tray.ts";
@@ -26,10 +26,9 @@ export interface UiOptions {
 export interface Ui {
   /** True if a screen point (CSS px) is over the tray, where a carried part is dropped to remove it (ADR 0020). */
   overTray(x: number, y: number): boolean;
+  /** Shows where a carried part can be dropped: "carrying" lights the tray, "over" when the part is over it. */
+  setDropState(state: "none" | "carrying" | "over"): void;
 }
-
-/** Slack around the tray for dropping a part on it, CSS px. */
-const TRAY_SLACK = 24;
 
 export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, options: UiOptions = {}): Ui {
   const timer = el("div", { class: "timer", "aria-live": "off", text: "0:00" });
@@ -39,6 +38,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   const banner = el("div", { class: "banner", role: "status", hidden: "" });
   const pull = el("button", { class: "pull", type: "button", text: STRINGS.pullCord });
   const trayHost = el("div", { class: "tray-host" });
+  const dropHint = el("div", { class: "drop-hint", hidden: "", text: STRINGS.dropHere });
   const controls = el("div", { class: "controls" }, banner, pull, trayHost);
   const hud = el("div", { class: "hud", hidden: "" }, timer, meter, speech, controls);
   const overlays = el("div", { class: "overlays" });
@@ -50,6 +50,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     return hit !== null && stage.contains(hit);
   };
   const tray = createTray(trayHost, game, card, overMachine, options.partImage ?? (() => null), options.carry ?? null);
+  trayHost.appendChild(dropHint); // shown inside the lit tray while a part is carried
 
   let symptomText = "";
   let bannerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -141,10 +142,14 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   newRound();
 
   return {
-    overTray(x, y) {
+    overTray(_x, y) {
       if (hud.hidden) return false;
-      const r = trayHost.getBoundingClientRect();
-      return x >= r.left - TRAY_SLACK && x <= r.right + TRAY_SLACK && y >= r.top - TRAY_SLACK && y <= r.bottom + TRAY_SLACK;
+      return inDropZone(y, controls.getBoundingClientRect().top, window.innerHeight);
+    },
+    setDropState(state) {
+      controls.classList.toggle("carrying", state !== "none");
+      controls.classList.toggle("over", state === "over");
+      dropHint.hidden = state === "none";
     },
   };
 }

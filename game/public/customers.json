@@ -5,7 +5,7 @@
       "id": "mama_ngozi",
       "name": "Mama Ngozi",
       "look": "woman_market",
-      "patience": 150,
+      "patience": 750,
       "verified": false,
       "lines": {
         "arrive": ["Good morning o. Take your time, check am well well."],
@@ -19,7 +19,7 @@
       "id": "alhaji_musa",
       "name": "Alhaji Musa",
       "look": "man_kaftan",
-      "patience": 110,
+      "patience": 550,
       "verified": false,
       "lines": {
         "arrive": ["My brother, abeg help me look this gen."],
@@ -33,7 +33,7 @@
       "id": "tunde",
       "name": "Tunde",
       "look": "man_young",
-      "patience": 80,
+      "patience": 400,
       "verified": false,
       "lines": {
         "arrive": ["Bros, quick quick abeg. Match dey tonight."],

@@ -48,6 +48,8 @@ export interface RenderView {
   carryChip(partId: PartId, x: number, y: number): void;
   /** The chip drag ended; if the part did not go back on, it returns to the tray. */
   endChipCarry(partId: PartId): void;
+  /** Told whenever carrying a part to the tray starts, comes over the tray, leaves it, or ends. Supplied by main.ts. */
+  onCarry(fn: (state: "none" | "carrying" | "over") => void): void;
   dispose(): void;
 }
 
@@ -236,7 +238,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   // ---- Carrying a loose part to the tray ----
 
   let carry: { id: PartId; pv: PartView; startX: number; startY: number; free: { offset: Vector3; depth: Vector3 } | null } | null = null;
-  let overTray: (x: number, y: number) => boolean = (_x, y) => y > container.getBoundingClientRect().bottom - container.clientHeight * 0.15;
+  let overTray: (x: number, y: number) => boolean = (_x, y) => y > container.getBoundingClientRect().bottom - container.clientHeight * 0.25;
+  let carryState: (state: "none" | "carrying" | "over") => void = () => {};
+  let lastCarryState: "none" | "carrying" | "over" = "none";
+  const tellCarry = (state: "none" | "carrying" | "over"): void => {
+    if (state !== lastCarryState) carryState(state);
+    lastCarryState = state;
+  };
 
   function startCarry(id: PartId, x: number, y: number): void {
     const pv = view.parts.get(id);
@@ -244,10 +252,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     tweens.cancel(id);
     carry = { id, pv, startX: x, startY: y, free: null };
     hand?.attachTo(pv.group);
+    tellCarry("carrying");
   }
 
   function moveCarry(x: number, y: number): void {
     if (!carry) return;
+    tellCarry(overTray(x, y) ? "over" : "carrying");
     const part = partById(carry.id);
     const m = resolveMotion(part.motion);
     const c = carryProgress(Math.hypot(x - carry.startX, y - carry.startY));
@@ -268,6 +278,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   function dropCarry(x: number, y: number): void {
     if (!carry) return;
     const c = carry;
+    tellCarry("none");
     if (overTray(x, y) && game.propose({ type: "remove", partId: c.id })) return; // "removed" sinks it into the tray
     carry = null;
     const part = partById(c.id);
@@ -388,6 +399,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     game.events.on("installed", (e) => animateInstall(e.partId)),
     game.events.on("pulled", () => pressHome()),
     game.events.on("started", () => {
+      tellCarry("none");
       hand?.hide();
       loose.clear();
       loosening.clear();
@@ -720,6 +732,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     partImage,
     setTrayTest(fn) {
       overTray = fn;
+    },
+    onCarry(fn) {
+      carryState = fn;
     },
     carryChip,
     endChipCarry,
