@@ -1,7 +1,7 @@
 ---
 id: 0011
 title: Bolts and screws, and the spanner and screwdriver in the hand
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0003, 0004, 0007, 0010, 0012, 0013, 0014, 0020]
 branch: plan/0011-bolts-and-tools
@@ -12,6 +12,8 @@ branch: plan/0011-bolts-and-tools
 ## Goal
 
 The parts that are held on by bolts, screws or nuts show them as their own pieces, and loosening a part undoes them one by one: the hand picks up a spanner or a screwdriver, turns each fastener out until it stands proud of its hole, then frees the part. When the part is carried to the tray its fasteners go with it; when it is put back, the hand does them up again. Fasteners are in `machine.json` and in the model, checked by the validator and the asset check. Nothing changes in the rules or the score.
+
+Approved by the owner on 2026-10-11, who wrote "I am also approving the plan so that we can proceed [...] Plan 11 is approved."
 
 ## ADRs relied on
 
