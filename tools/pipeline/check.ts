@@ -20,6 +20,7 @@ export interface Budgets {
   groundBytes: number;
   allocation: Record<string, number>;
   hand: { triangles: number; bytes: number; texturePx: number };
+  customers: { trianglesPerLook: number; bytesPerLook: number; texturePx: number; jointsPerLook: number };
 }
 
 interface GltfJson {

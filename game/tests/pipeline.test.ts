@@ -188,6 +188,12 @@ describe("companion files", () => {
   });
 });
 
+describe("the customers' budgets (ADR 0015, plan 0015)", () => {
+  it("each look is held to 15,000 triangles, 1.5 MB, one 1024 px texture set and 64 joints", () => {
+    expect(budgets.customers).toMatchObject({ trianglesPerLook: 15000, bytesPerLook: 1500000, texturePx: 1024, jointsPerLook: 64 });
+  });
+});
+
 describe("the mechanic's hand (ADRs 0015 and 0020)", () => {
   const handJson = (name: string, tris: number, morph: boolean, targetNames = ["grip"], extras?: Record<string, unknown>) => ({
     scene: 0,
