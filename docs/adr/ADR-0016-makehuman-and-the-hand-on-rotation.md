@@ -1,7 +1,7 @@
 ---
 id: 0016
 title: MakeHuman for characters, and the hand turns the machine
-status: proposed
+status: accepted
 date: 2026-10-11
 supersedes: []
 superseded_by: null
@@ -50,3 +50,5 @@ Work this creates, for a plan: install and record MPFB; remake the hand with it 
 ## History
 
 - 2026-10-11: proposed by Claude, from the owner's message quoted above.
+- 2026-10-11: accepted by the owner, who answered "Yes, accept ADR 16" when asked.
+- 2026-10-11: installed for the user that runs the asset scripts. MPFB 2.0.18 from https://extensions.blender.org/add-ons/mpfb/ (download add-on-mpfb-v2.0.18.zip, sha256 c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad, matching the platform's published hash), licence GPL-3.0-or-later, installed with `blender --command extension install-file -r user_default -e <zip>`. MakeHuman system assets pack, CC0 variant, from https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip (no version stated, metadata dated 2020-01-01; sha256 b542127a8e25547c7c29c19f2d1d2adb9a664c80396ecd694095dbc8028a0107 computed here, none published), unpacked into MPFB's user data folder. Its metadata marks all 94 items CC0; the base mesh file says it was released as CC0 in September 2020. A headless test made a human of 19,158 vertices with a 137-bone rig.

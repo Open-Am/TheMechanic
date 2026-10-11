@@ -1,7 +1,7 @@
 ---
 id: 0009
 title: A MakeHuman hand, and the hand turns the machine
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0016, 0017]
 branch: plan/0009-makehuman-hand
@@ -12,6 +12,8 @@ branch: plan/0009-makehuman-hand
 ## Goal
 
 The mechanic's hand is remade from a MakeHuman body: a sculpted, properly proportioned right hand and forearm of a Lagos mechanic, with knuckles, tendons and finger pads in the shape, posed with MakeHuman's own hand skeleton into an open hand, a grip and a fingertip pinch. Small parts such as the spark plug get the pinch instead of a fist closing around air. When the player drags to rotate the view, the hand comes in, takes hold of the base frame and turns the machine with the drag, lets go when the drag ends, and changes its hold hand over hand on a long turn. The hand stays within its budget and the game plays as before.
+
+Approved by the owner on 2026-10-11, who wrote "I approve the 3 new adr and plan", and accepted ADR 0016 the same day.
 
 ## ADRs relied on
 
