@@ -1,7 +1,7 @@
 ---
 id: 0015
 title: The 3D customer
-status: proposed
+status: approved
 date: 2026-10-11
 adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0020, 0021]
 branch: plan/0015-the-3d-customer
@@ -12,6 +12,8 @@ branch: plan/0015-the-3d-customer
 ## Goal
 
 The round's customer stands in the scene, behind the generator and to its right, so the default view on a portrait phone shows their head and upper body above the machine without hiding any part, the toolbox or the tray. There are three people, one for each `look` in `game/public/customers.json`: Mama Ngozi (`woman_market`), Alhaji Musa (`man_kaftan`) and Tunde (`man_young`). Each is made from a MakeHuman body in Blender by script, dressed and textured with our own materials, rigged, and animated. They stand and breathe while they wait, check the time when patience falls to half, cross their arms and tap a foot when it is nearly gone, react to a failed pull, nod when the engine starts, and turn and walk off when they leave. They never react to anything done to a part. The patience rule, the walk-out and the score do not change.
+
+Approved by the owner on 2026-10-11, who wrote "Plan 12, 15 and adr 22 is approved."
 
 ## ADRs relied on
 
