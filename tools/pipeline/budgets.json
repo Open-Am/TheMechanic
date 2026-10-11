@@ -1,5 +1,5 @@
 {
-  "_source": "ADR 0014 budgets and the triangle allocation in docs/design/modelling-brief.md. Read by tools/blender/common.py and tools/pipeline/check.ts.",
+  "_source": "ADR 0014 budgets (with ADR 0018's 250 KB of sound) and the triangle allocation in docs/design/modelling-brief.md. Read by tools/blender/common.py and tools/pipeline/check.ts.",
   "glbBytes": 5000000,
   "glbAimBytes": 3000000,
   "triangles": 60000,
@@ -8,6 +8,7 @@
   "atlasCount": 1,
   "environmentBytes": 400000,
   "groundBytes": 64000,
+  "audioBytes": 250000,
   "allocation": {
     "fuel_tank": 5000,
     "recoil_starter": 4500,

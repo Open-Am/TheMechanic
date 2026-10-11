@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { MOMENTS } from "../src/platform/interfaces/index.ts";
+import { checkAudio, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
 import { checkFileSize, checkHand, checkModel, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
@@ -299,5 +301,138 @@ describe("the tools (ADR 0020, plan 0011)", () => {
     expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver", "hammer"]))), budgets).errors.join(" ")).toMatch(/"hammer" is not a tool/);
     expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], false))), budgets).errors.join(" ")).toMatch(/no grip_point/);
     expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], true, 1001))), budgets).errors.join(" ")).toMatch(/over their budget of 2000/);
+  });
+});
+
+
+describe("sounds (ADR 0018, plan 0013 step 4)", () => {
+  /** One Ogg page holding `body` (under 255 bytes), on logical stream `serial`. The checksum is not checked. */
+  function page(serial: number, body: Uint8Array, bos = false): Uint8Array {
+    const out = new Uint8Array(28 + body.length);
+    out.set([0x4f, 0x67, 0x67, 0x53, 0, bos ? 2 : 0]);
+    new DataView(out.buffer).setUint32(14, serial, true);
+    out[26] = 1;
+    out[27] = body.length;
+    out.set(body, 28);
+    return out;
+  }
+  const cat = (...parts: Uint8Array[]) => {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  };
+  const text = (s: string) => new TextEncoder().encode(s);
+  const opusHeadBody = (channels: number) => cat(text("OpusHead"), new Uint8Array([1, channels, 0x38, 1, 0x80, 0xbb, 0, 0, 0, 0, 0]));
+  /** A small Ogg Opus file: its head, its tags and one packet. */
+  const opus = (channels = 1, serial = 7) => cat(page(serial, opusHeadBody(channels), true), page(serial, text("OpusTags........")), page(serial, new Uint8Array(40).fill(9)));
+  const theora = (serial = 3) => cat(page(serial, cat(new Uint8Array([0x80]), text("theora"), new Uint8Array([3, 2, 1])), true), page(serial, new Uint8Array(30).fill(1)));
+  const names = () => MOMENTS.map((m) => `${m}.ogg`);
+  const all = (): Array<{ name: string; bytes: Uint8Array }> => MOMENTS.map((m) => ({ name: `${m}.ogg`, bytes: opus() }));
+  const cc0 = (files = names()) =>
+    ["| File | Source | Author | Licence | Fetched | Trim |", "| --- | --- | --- | --- | --- | --- |", ...files.map((n) => `| ${n} | https://freesound.org/x | someone | CC0 1.0 | 2026-10-11 | 0–1 s |`)].join("\n");
+  const check = (files = all(), licence: string | null = cc0(), budget = budgets.audioBytes, required = true) => checkAudio(files, licence, MOMENTS, budget, required);
+
+  it("the shipped folder passes; until the owner adds the files, each missing one is a warning, not an error", () => {
+    const dir = join(root, "game", "public", "audio");
+    const files = existsSync(dir) ? readdirSync(dir).filter((n) => n !== "LICENCE.md").map((name) => ({ name, bytes: new Uint8Array(readFileSync(join(dir, name))) })) : [];
+    const licence = existsSync(join(dir, "LICENCE.md")) ? readFileSync(join(dir, "LICENCE.md"), "utf8") : null;
+    // Once any file ships, every file is required, as in npm run audio.
+    const result = checkAudio(files, licence, MOMENTS, budgets.audioBytes, files.length > 0);
+    expect(result.errors).toEqual([]);
+    if (files.length === 0) expect(result.warnings).toEqual([`10 of 10 sound files are missing: ${names().join(", ")}. Until they are added, those moments are silent.`]);
+    expect(budgets.audioBytes).toBe(250_000);
+  });
+
+  it("a full set of mono Ogg Opus files, CC0 or our own, within budget, passes", () => {
+    expect(check()).toEqual({ errors: [], warnings: [], bytes: all().reduce((n, f) => n + f.bytes.length, 0) });
+    const own = cc0().replace("| turn.ogg | https://freesound.org/x | someone | CC0 1.0 |", "| turn.ogg | the workshop | the owner | own recording |");
+    expect(check(all(), own).errors).toEqual([]);
+  });
+
+  it("fails a stereo file", () => {
+    const files = all();
+    files[0] = { name: "turn.ogg", bytes: opus(2) };
+    expect(check(files).errors).toEqual(["turn.ogg has 2 channels: sounds are mono (ADR 0018)."]);
+  });
+
+  it("fails a file that is not Opus, or not Ogg", () => {
+    const files = all();
+    files[1] = { name: "give-unbolt.ogg", bytes: page(1, cat(new Uint8Array([1]), text("vorbis"), new Uint8Array([0, 0, 0, 0, 1])), true) };
+    files[2] = { name: "give-unclip.ogg", bytes: text("RIFF....WAVEfmt ") };
+    expect(check(files).errors).toEqual(["give-unbolt.ogg has no Opus stream: sounds are Ogg Opus (ADR 0018).", "give-unclip.ogg is not an Ogg file."]);
+  });
+
+  it("fails a file with another stream beside the sound", () => {
+    const files = all();
+    files[3] = { name: "give-pull.ogg", bytes: cat(theora(), opus()) };
+    expect(check(files).errors).toEqual(["give-pull.ogg holds another stream beside the sound (Blender's video stream?): run it through opusOnly."]);
+  });
+
+  it("fails over the budget", () => {
+    const bytes = all().reduce((n, f) => n + f.bytes.length, 0);
+    expect(check(all(), cc0(), bytes - 1).errors).toEqual([`The sounds are ${(bytes / 1000).toFixed(1)} KB, over the ${(bytes - 1) / 1000} KB budget (ADR 0018).`]);
+    expect(check(all(), cc0(), bytes).errors).toEqual([]);
+  });
+
+  it("fails a missing licence row, a missing LICENCE.md, and any licence but CC0 1.0 or our own recording", () => {
+    expect(check(all(), cc0(names().filter((n) => n !== "seat.ogg"))).errors).toEqual(["seat.ogg has no row in LICENCE.md."]);
+    expect(check(all(), null).errors).toEqual(["LICENCE.md is missing: every sound file is listed there with its source and licence (ADR 0018)."]);
+    const by = cc0().replace("| land.ogg | https://freesound.org/x | someone | CC0 1.0 |", "| land.ogg | https://freesound.org/x | someone | CC BY 4.0 |");
+    expect(check(all(), by).errors).toEqual(['land.ogg is listed as "CC BY 4.0" in LICENCE.md: only CC0 1.0 or own recording is allowed (ADR 0018).']);
+  });
+
+  it("fails an extra file", () => {
+    const files = [...all(), { name: "remove.ogg", bytes: opus() }];
+    expect(check(files, cc0([...names(), "remove.ogg"])).errors).toEqual([`remove.ogg is not one of the moments' files (${names().join(", ")}): remove it.`]);
+  });
+
+  it("fails a missing moment in the release check, and only warns in the game's own tests", () => {
+    const files = all().filter((f) => f.name !== "cord.ogg");
+    const missing = "1 of 10 sound files are missing: cord.ogg. Until they are added, those moments are silent.";
+    expect(check(files).errors).toEqual([missing]);
+    const relaxed = check(files, cc0(), budgets.audioBytes, false);
+    expect(relaxed.errors).toEqual([]);
+    expect(relaxed.warnings).toEqual([missing]);
+  });
+
+  it("opusOnly drops Blender's video stream and keeps every Opus page byte for byte", () => {
+    const sound = opus(1, 9);
+    const head = page(9, opusHeadBody(1), true);
+    const mixed = cat(theora().subarray(0, 38), head, theora().subarray(38), sound.subarray(head.length));
+    const only = opusOnly(mixed)!;
+    expect(only).toEqual(sound);
+    expect(oggPages(only)!.every((p) => p.serial === 9)).toBe(true);
+    expect(opusHead(only, oggPages(only)!)).toEqual({ serial: 9, channels: 1 });
+    expect(opusOnly(sound)).toBe(sound); // nothing to drop
+    expect(opusOnly(theora())).toBeNull();
+    expect(opusOnly(new Uint8Array([1, 2, 3]))).toBeNull();
+  });
+
+  it("oggPages refuses a page that runs past the end, and an empty file", () => {
+    const f = opus();
+    expect(oggPages(f.subarray(0, f.length - 1))).toBeNull();
+    expect(oggPages(new Uint8Array())).toBeNull();
+  });
+
+  it("LICENCE.md written from sounds.json reads back and passes", () => {
+    const row: SoundSource = { source: "a.wav", url: "https://freesound.org/people/x/sounds/1/", author: "x", licence: "CC0 1.0", fetched: "2026-10-11", start: 0.1, end: 0.4, fadeIn: 0, fadeOut: 0.05, gainDb: 0 };
+    const sounds = Object.fromEntries(MOMENTS.map((m) => [m, row]));
+    const written = licenceText(sounds, MOMENTS);
+    expect(licenceRows(written).get("turn.ogg")).toBe("CC0 1.0");
+    expect(written).toContain("| turn.ogg | https://freesound.org/people/x/sounds/1/ | x | CC0 1.0 | 2026-10-11 | 0.10–0.40 s |");
+    expect(check(all(), written).errors).toEqual([]);
+  });
+
+  it("assets/audio/sounds.json has a row for every moment, and only CC0 or our own licences", () => {
+    const file = JSON.parse(readFileSync(join(root, "assets", "audio", "sounds.json"), "utf8")) as { sounds: Record<string, SoundSource> };
+    expect(Object.keys(file.sounds).sort()).toEqual([...MOMENTS].sort());
+    for (const [m, s] of Object.entries(file.sounds)) {
+      if (s.licence !== null) expect(["CC0 1.0", "own recording"], m).toContain(s.licence);
+      if (s.source !== null) expect(s.end, m).toBeGreaterThan(s.start);
+    }
   });
 });
