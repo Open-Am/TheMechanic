@@ -25,4 +25,4 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0017](ADR-0017-hands-on-removal.md) | Hands-on removal, a gesture for each kind of part | accepted |
 | [0018](ADR-0018-sound-and-vibration.md) | Sound and vibration | accepted |
 | [0019](ADR-0019-visible-fasteners.md) | Visible bolts and screws | accepted |
-| [0020](ADR-0020-the-hand-follows-the-pointer.md) | The hand follows the pointer, and parts follow the hand | proposed |
+| [0020](ADR-0020-the-hand-follows-the-pointer.md) | The hand follows the pointer; loosen a part, then drag it to the tray | proposed |
