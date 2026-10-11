@@ -30,20 +30,36 @@ export function screenDirection(view: { x: number; y: number; z: number }): Scre
 
 // ---- Deliberate removal (plan 0010, ADR 0020) ----
 
-/** A double tap: two taps on the same part within this many ms and this many CSS px of each other. */
-export const DOUBLE_TAP = { ms: 300, px: 30 } as const;
+/**
+ * A double tap: the second tap comes down within `ms` of the first lifting, within `px` CSS px of it, and is itself a
+ * tap of at most `holdMs`. Times are the events' own time stamps, not when the page got round to handling them, so a
+ * slow frame cannot push a quick double tap past the window (release 0.9.3).
+ */
+export const DOUBLE_TAP = { ms: 300, px: 30, holdMs: 500 } as const;
 
 export interface Tap {
+  /** The part the press took hold of, or null for the base or empty space. */
   part: string | null;
-  t: number;
+  /** Every part under the pointer, by its finger-sized hit volume as well as by what shows. */
+  under: readonly string[];
+  /** Event time stamps, ms: when the press came down and when it lifted. */
+  down: number;
+  up: number;
   x: number;
   y: number;
 }
 
-/** True if `tap` completes a double tap on a part, after `prev`. A double tap on nothing is not one. */
-export function isDoubleTap(prev: Tap | null, tap: Tap): boolean {
-  if (!prev || !tap.part || prev.part !== tap.part) return false;
-  return tap.t - prev.t <= DOUBLE_TAP.ms && Math.hypot(tap.x - prev.x, tap.y - prev.y) <= DOUBLE_TAP.px;
+/**
+ * The part a double tap loosens if `tap` completes one after `prev`, or null. It is the first tap's part; the second
+ * tap counts if that part is still under the finger (a thumb's second tap lands a few pixels off, which on a small part
+ * can show a neighbour). A double tap on nothing is not one.
+ */
+export function doubleTapPart(prev: Tap | null, tap: Tap): string | null {
+  if (!prev?.part) return null;
+  if (tap.part !== prev.part && !tap.under.includes(prev.part)) return null;
+  const gap = tap.down - prev.up;
+  if (gap < 0 || gap > DOUBLE_TAP.ms || tap.up - tap.down > DOUBLE_TAP.holdMs) return null;
+  return Math.hypot(tap.x - prev.x, tap.y - prev.y) <= DOUBLE_TAP.px ? prev.part : null;
 }
 
 /**

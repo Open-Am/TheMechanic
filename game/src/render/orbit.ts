@@ -59,6 +59,33 @@ export function fitDistance(radius: number, fovY: number, aspect: number, margin
   return (radius * margin) / Math.sin(fov / 2);
 }
 
+// ---- Framing above the controls (release 0.9.3) ----
+
+export const FRAME = {
+  /** The machine always gets at least this share of the view's height, however tall the controls grow. */
+  minFreeShare: 0.4,
+} as const;
+
+/**
+ * Frames the machine in the part of the view the controls leave free: `coverPx` CSS px at the bottom of a view
+ * `widthPx` by `heightPx` are covered by the pull cord and the tray. Returns how far to move the picture up (CSS px, a
+ * view offset on the camera) and how much farther the camera must stand than the whole-view fit for the machine to fit
+ * the free part. On a narrow portrait screen the width decides the fit, so the scale stays 1 and the machine keeps its
+ * size; it only moves up.
+ */
+export function frameAbove(fovY: number, widthPx: number, heightPx: number, coverPx: number): { shiftPx: number; distanceScale: number } {
+  if (!(coverPx > 0) || !(heightPx > 0) || !(widthPx > 0)) return { shiftPx: 0, distanceScale: 1 };
+  const free = Math.max(heightPx * FRAME.minFreeShare, heightPx - coverPx);
+  const fovFree = 2 * Math.atan((Math.tan(fovY / 2) * free) / heightPx);
+  const scale = fitDistance(1, fovFree, widthPx / free) / fitDistance(1, fovY, widthPx / heightPx);
+  return { shiftPx: (heightPx - free) / 2, distanceScale: Math.max(1, scale) };
+}
+
+/** A y in normalised device coordinates of a view moved up by `shiftPx`, in the unmoved frustum the orbit maths uses. */
+export function unshiftNdcY(ndcY: number, shiftPx: number, heightPx: number): number {
+  return ndcY - (2 * shiftPx) / heightPx;
+}
+
 /** World units per CSS pixel at `distance` from a perspective camera. */
 export function worldPerPixel(distance: number, fovY: number, viewportHeightPx: number): number {
   return (2 * distance * Math.tan(fovY / 2)) / viewportHeightPx;

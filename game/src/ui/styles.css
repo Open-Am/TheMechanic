@@ -171,6 +171,7 @@ button.pull {
 }
 
 .tray-host {
+  position: relative;
   min-height: 52px;
   border-radius: var(--radius);
   transition: background-color 120ms, outline-color 120ms;
@@ -196,12 +197,28 @@ button.pull {
   display: none;
 }
 
+/* Laid over the tray, not added below it: the controls keep their height while a part is carried (release 0.9.3). */
 .drop-hint {
-  margin: 14px 0 0;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border-radius: var(--radius);
+  background: rgb(46 38 22 / 0.88);
+  pointer-events: none;
   text-align: center;
   color: var(--accent);
   font-weight: 600;
   font-size: 15px;
+  transition: background-color 120ms, color 120ms;
+}
+
+/* Brighter while the carried part is over the drop zone, as the tray itself does. */
+.controls.over .drop-hint {
+  background: rgb(150 108 22 / 0.92);
+  color: var(--text);
 }
 
 /* Wraps instead of scrolling: chips swallow touch drags (a drag puts a part back), so a scrolling tray could not be scrolled. */
