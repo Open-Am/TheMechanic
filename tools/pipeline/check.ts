@@ -33,6 +33,8 @@ interface GltfJson {
   textures?: Array<{ source?: number; extensions?: Record<string, { source?: number }> }>;
   materials?: Array<Record<string, unknown>>;
   bufferViews?: Array<{ byteOffset?: number; byteLength: number }>;
+  skins?: Array<{ joints: number[] }>;
+  animations?: Array<{ name?: string }>;
 }
 
 export interface Glb {
@@ -240,6 +242,47 @@ export function checkHand(glb: Glb, budgets: Budgets): CheckResult {
   return { errors, warnings: [], triangles };
 }
 
+/** The clips every customer carries, named <look>.<clip> in the file (plan 0015 reading 5). */
+export const CUSTOMER_CLIPS = ["idle", "arrive", "waiting", "annoyed", "annoyed_idle", "failed_pull", "pleased", "leaving"] as const;
+
+/**
+ * One customer's file (ADRs 0015 and 0023, plan 0015 step 4): one root node customer_<look> for a look in
+ * customers.json and nothing else; within the triangle, joint, texture and byte budgets; every clip present.
+ */
+export function checkCustomer(glb: Glb, look: string, looks: readonly string[], budgets: Budgets): CheckResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const b = budgets.customers;
+  if (!looks.includes(look)) errors.push(`"${look}" is not a look in customers.json.`);
+  const roots = rootNodes(glb.json);
+  const name = `customer_${look}`;
+  if (roots.length !== 1 || roots[0]!.name !== name) {
+    errors.push(`The file must have one root node named "${name}"; found ${roots.map((r) => r.name || "(unnamed)").join(", ") || "none"}.`);
+  }
+  const triangles = roots.reduce((n, r) => n + nodeTriangles(glb.json, r.index), 0);
+  if (triangles > b.trianglesPerLook) errors.push(`${look} has ${triangles} triangles, over its budget of ${b.trianglesPerLook}.`);
+  const skins = glb.json.skins ?? [];
+  if (skins.length === 0) errors.push(`${look} has no skin (skeleton).`);
+  const joints = new Set(skins.flatMap((s) => s.joints)).size;
+  if (joints > b.jointsPerLook) errors.push(`${look} has ${joints} joints, over its budget of ${b.jointsPerLook}.`);
+  if (glb.byteLength > b.bytesPerLook) errors.push(`${look} is ${(glb.byteLength / 1e6).toFixed(2)} MB, over its ${b.bytesPerLook / 1e6} MB budget.`);
+  const clips = new Set((glb.json.animations ?? []).map((a) => a.name ?? ""));
+  for (const clip of CUSTOMER_CLIPS) if (!clips.has(`${look}.${clip}`)) errors.push(`${look} has no clip "${look}.${clip}".`);
+  const known = new Set(CUSTOMER_CLIPS.map((c) => `${look}.${c}`));
+  for (const c of clips) if (!known.has(c)) warnings.push(`${look} has a clip "${c}" that nothing plays.`);
+  for (const [i, img] of (glb.json.images ?? []).entries()) {
+    if (img.uri) {
+      errors.push(`Image ${i} is an external file (${img.uri}); everything must be inside the GLB.`);
+      continue;
+    }
+    const bv = img.bufferView !== undefined ? glb.json.bufferViews?.[img.bufferView] : undefined;
+    if (!bv || !glb.bin) continue;
+    const size = imageSize(glb.bin.subarray(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength));
+    if (size && Math.max(size.width, size.height) > b.texturePx) errors.push(`${look} image ${i} is ${size.width} x ${size.height}, over ${b.texturePx} px.`);
+  }
+  return { errors, warnings, triangles };
+}
+
 /** A companion file (environment, ground shadow) against its byte budget. */
 export function checkFileSize(label: string, bytes: number | null, budget: number, required: boolean): string[] {
   if (bytes === null) return required ? [`${label} is missing.`] : [];
@@ -268,10 +311,40 @@ function mainHand(root: string, argv: string[]): void {
   }
 }
 
+function mainCustomer(root: string, argv: string[]): void {
+  const plain = argv.filter((a) => !a.startsWith("--"));
+  const look = plain[0];
+  if (!look) {
+    console.error("Usage: check.ts --customer <look> [file.glb] [--no-copy]");
+    process.exit(1);
+  }
+  const input = resolve(plain[1] ?? join(root, "assets", "customers", "export", `${look}.optimised.glb`));
+  const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
+  const customers = JSON.parse(readFileSync(join(root, "game", "public", "customers.json"), "utf8")) as { customers: Array<{ look: string }> };
+  if (!existsSync(input)) {
+    console.error(`No customer at ${input}.`);
+    process.exit(1);
+  }
+  const glb = readGlb(new Uint8Array(readFileSync(input)));
+  const result = checkCustomer(glb, look, customers.customers.map((c) => c.look), budgets);
+  for (const w of result.warnings) console.log(`warning: ${w}`);
+  for (const e of result.errors) console.log(`error: ${e}`);
+  const joints = new Set((glb.json.skins ?? []).flatMap((s) => s.joints)).size;
+  console.log(`Checked ${input}: ${(glb.byteLength / 1000).toFixed(1)} KB, ${result.triangles} triangles, ${joints} joints, ${result.errors.length} error(s).`);
+  if (result.errors.length) process.exit(1);
+  if (!argv.includes("--no-copy")) {
+    const out = join(root, "game", "public", "customers");
+    mkdirSync(out, { recursive: true });
+    copyFileSync(input, join(out, `${look}.glb`));
+    console.log(`Copied ${look}.glb to ${out}`);
+  }
+}
+
 function main(): void {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const argv = process.argv.slice(2);
   if (argv.includes("--hand")) return mainHand(root, argv.filter((a) => a !== "--hand"));
+  if (argv.includes("--customer")) return mainCustomer(root, argv.filter((a) => a !== "--customer"));
   const copy = !argv.includes("--no-copy");
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "gen950", "export", "model.optimised.glb"));
   const groundIn = join(root, "assets", "gen950", "export", "ground.png");

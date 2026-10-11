@@ -426,7 +426,7 @@ def shape_clothes(body, lm, spec, zones, dom):
     top, bottom = spec["top"], spec["bottom"]
     if top:
         m = z == "top"
-        co = smooth(co, nb, m, 6 if top["loose"] > 0.01 else 3)
+        co = smooth(co, nb, m, 10)
         torso = m & np.isin(d, list(TORSO | {"neck_01"}))
         co = drape_torso(co, torso, lm, top, lm.level(top["hem"]))
         for side in ("l", "r"):

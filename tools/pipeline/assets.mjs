@@ -1,7 +1,9 @@
 // npm run assets: the Blender file to a validated, compressed model in the game (plan 0005, brief section 9).
-// Validate, export, bake the ground shadow, optimise, check and copy. Stops at the first step that fails.
+// Validate, export, bake the ground shadow, optimise, check and copy; then the hand and each customer. Stops at the
+// first step that fails.
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +24,20 @@ const steps = [
   ["Optimise the hand", [join(root, "tools", "pipeline", "optimise.mjs"), handGlb, handOpt]],
   ["Check and copy the hand", [join(root, "tools", "pipeline", "check.ts"), "--hand"]],
 ];
+
+// The customers, one file per look (plan 0015, ADR 0023): each look's .blend is exported, optimised with 1024 px
+// textures (ADR 0015), checked and copied to game/public/customers/<look>.glb.
+const customers = JSON.parse(readFileSync(join(root, "game", "public", "customers.json"), "utf8")).customers;
+for (const { look } of customers) {
+  const glb = join(root, "assets", "customers", "export", `${look}.glb`);
+  const opt = join(root, "assets", "customers", "export", `${look}.optimised.glb`);
+  const file = join(root, "assets", "customers", "blend", `${look}.blend`);
+  steps.push(
+    [`Validate and export ${look}`, blender("customer.py", file, "export", look)],
+    [`Optimise ${look}`, [join(root, "tools", "pipeline", "optimise.mjs"), glb, opt, "1024"]],
+    [`Check and copy ${look}`, [join(root, "tools", "pipeline", "check.ts"), "--customer", look]],
+  );
+}
 
 for (const [label, args] of steps) {
   console.log(`\n== ${label} ==`);
