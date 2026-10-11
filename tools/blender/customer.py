@@ -77,9 +77,9 @@ LOOKS = {
         "hair": None,
         "feet": "slippers",
         "materials": {
-            "top": {"kind": "print", "palette": ["#1e2a5e", "#d9a21f", "#c2451c", "#efdfba"], "scale": 9.0},
-            "wrapper": {"kind": "print", "palette": ["#1e2a5e", "#d9a21f", "#c2451c", "#efdfba"], "scale": 9.0},
-            "headwear": {"kind": "print", "palette": ["#2f5d3a", "#e0b54a", "#a9331f", "#f1e6c8"], "scale": 14.0},
+            "top": {"kind": "print", "palette": ["#1e2a5e", "#d9a21f", "#c2451c", "#efdfba"], "scale": 24.0},
+            "wrapper": {"kind": "print", "palette": ["#1e2a5e", "#d9a21f", "#c2451c", "#efdfba"], "scale": 24.0},
+            "headwear": {"kind": "print", "palette": ["#2f5d3a", "#e0b54a", "#a9331f", "#f1e6c8"], "scale": 30.0},
             "strap": {"kind": "fabric", "colour": "#5a3a22", "roughness": 0.6},
         },
         "stride": 16,
@@ -87,7 +87,7 @@ LOOKS = {
     "man_kaftan": {
         "macro": {"gender": 1.0, "age": 0.73, "muscle": 0.48, "weight": 0.58, "proportions": 0.5, "height": 0.34, "cupsize": 0.5, "firmness": 0.5},
         "skin": "#4b2e20",
-        "top": {"kind": "kaftan", "sleeve": ("lowerarm", 0.9), "neck": 0.04, "thickness": 0.01, "loose": 0.012, "hem": "hip", "taper": -0.12, "sleeve_flare": 0.6},
+        "top": {"kind": "kaftan", "sleeve": ("lowerarm", 0.9), "neck": 0.04, "thickness": 0.01, "loose": 0.012, "hem": "hip", "taper": -0.08, "sleeve_flare": 0.25},
         "bottom": {"kind": "trousers", "thickness": 0.008, "hem": 0.025, "hem_radius": 0.068},
         "skirt": {"top": "hip", "bottom": "shin", "flare": 0.06, "margin": 0.03, "material": "top"},
         "head": "cap",
@@ -95,8 +95,8 @@ LOOKS = {
         "beard": True,
         "feet": "sandals",
         "materials": {
-            "top": {"kind": "fabric", "colour": "#93a9ba", "roughness": 0.8},
-            "bottom": {"kind": "fabric", "colour": "#8ea4b5", "roughness": 0.8},
+            "top": {"kind": "fabric", "colour": "#6f8ea6", "roughness": 0.8},
+            "bottom": {"kind": "fabric", "colour": "#6a889f", "roughness": 0.8},
             "headwear": {"kind": "cap", "colour": "#e4d9c1", "pattern": "#7a2a24"},
             "strap": {"kind": "fabric", "colour": "#4a2c1a", "roughness": 0.55},
         },
@@ -566,18 +566,18 @@ def envelope(co, z0, z1):
     return cx, cy, float(np.abs(sel[:, 0] - cx).max()), float(np.abs(sel[:, 1] - cy).max())
 
 
-def build_skirt(body, lm, spec):
+def build_skirt(body, lm, spec, fit):
     """A wrapper or a kaftan's skirt: rings fitted round the hips and legs from the top level down, never narrower
     than the ring above by more than the cloth allows, flaring towards the hem."""
     sk = spec["skirt"]
     z_top, z_bot = lm.level(sk["top"]), lm.level(sk["bottom"])
-    co = np.array([v.co[:] for v in body.data.vertices])
+    co = np.array([v.co[:] for v in body.data.vertices])[fit]  # hips and legs only, never the hanging hands
     seg, levels = 28, 14
     rings, prev = [], None
     for k in range(levels + 1):
         s = k / levels
         z = z_top + (z_bot - z_top) * s
-        env = envelope(co, z - 0.03, z + 0.03)
+        env = envelope(co, z - 0.03, z + 0.03) or envelope(co, z - 0.1, z + 0.1)
         cx, cy, ax, ay = env if env else prev
         ax += sk["margin"] + sk["flare"] * s ** 1.5
         ay += sk["margin"] * 0.8 + sk["flare"] * 0.6 * s ** 1.5
@@ -618,8 +618,8 @@ def build_skirt(body, lm, spec):
 def build_cap(body, lm):
     """A soft round cap (fila/kufi) on the crown: rings fitted to the head at the cap's line, a slight taper, a domed top."""
     co = np.array([v.co[:] for v in body.data.vertices])
-    base = lm.eye_z + 0.045
-    height = 0.085
+    base = lm.eye_z + 0.032
+    height = 0.08
     seg = 32
     c = lm.head_centre
     sel = co[(co[:, 2] > base - 0.005) & (co[:, 2] < base + 0.005)]
@@ -991,11 +991,11 @@ def build_person(look, preview=False):
     zone_ids["hidden"] = zone_ids["skin"]
     attr = body.data.attributes.new("zone", "INT", "POINT")
     attr.data.foreach_set("value", [zone_ids.get(z, 0) for z in zones])
-    remove_vertices(body, keep)
-
     extras = []
     if spec["skirt"]:
-        extras.append(build_skirt(body, lm, spec))
+        fit = np.array([(d in LEGS or d in ("pelvis", "spine_01", "spine_02")) for d in dom])
+        extras.append(build_skirt(body, lm, spec, fit))
+    remove_vertices(body, keep)
     if spec["head"] == "cap":
         extras.append(build_cap(body, lm))
     if spec["head"] == "headtie":
