@@ -205,6 +205,7 @@ async function carryTo(id: string, x: number, y: number, tx: number, ty: number)
   for (let i = 1; i <= steps; i++) {
     await mouse("mouseMoved", x + ((tx - x) * i) / steps, y + ((ty - y) * i) / steps, true);
     await sleep(16);
+    if (i === 3) await noteHidden(`starting to carry ${id}`);
     if (i === 14) {
       const h = await handNow();
       if (h && h.holding === id && h.closed > 0.5) {
@@ -229,6 +230,8 @@ async function pullOff(id: string): Promise<void> {
     const p = await probe(id);
     if (p) {
       await doubleTap(p.x, p.y);
+      await sleep(350);
+      await noteHidden(`loosening ${id}`);
       if (await waitFor(`${id} loose`, async () => (await looseNow()).includes(id), 3000).catch(() => false)) {
         await idle();
         const q = (await probe(id)) ?? p; // a loose part sits a few millimetres proud
@@ -275,6 +278,14 @@ let handSeen: boolean | null = null;
 let pinchSeen: boolean | null = null;
 const PINCHED = new Set(["spark_plug", "plug_cap", "fuel_tap", "capacitor"]);
 const checks: string[] = [];
+/** The most of the hand's sample points ever seen hidden behind the machine's surface: the hand sinking in. */
+let worstHidden = { share: 0, where: "" };
+const HIDDEN_LIMIT = 0.1;
+async function noteHidden(where: string): Promise<void> {
+  const share = await evaluate<number>("window.__openAmDevRender.handHidden()");
+  if (process.env.HIDDEN_DEBUG && share > 0.05) console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}`);
+  if (share > worstHidden.share) worstHidden = { share, where };
+}
 {
   await tapSelector(".briefing .primary");
   await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
@@ -294,6 +305,22 @@ const checks: string[] = [];
       if (!overHose?.visible || !overTank?.visible) failures.push("hover: the hand did not follow the mouse");
       else if (overHose.action !== overTank.action || Math.abs(overHose.closed - overTank.closed) > 0.01) failures.push("hover: the hand looked different over a blocked part");
       else checks.push("the open hand follows the mouse and looks the same over a removable and a blocked part");
+
+      // The hand stays out of the machine: hovering over every part in view, and over the base.
+      let shot = 0;
+      for (const id of machine.parts.map((pp) => pp.id)) {
+        const at = await probe(id);
+        if (!at) continue;
+        await mouse("mouseMoved", at.x, at.y, false);
+        await sleep(350);
+        await noteHidden(`hovering on ${id}`);
+        if (shot < 3 && ["recoil_starter", "air_filter_cover", "alternator_cover", "muffler", "fuel_tap"].includes(id)) await screenshot(`11-hover-${++shot}-${id}`);
+      }
+      for (const [fx, fy] of [[0.5, 0.62], [0.35, 0.55], [0.65, 0.58]]) {
+        await mouse("mouseMoved", VIEWPORT.width * fx!, VIEWPORT.height * fy!, false);
+        await sleep(350);
+        await noteHidden("hovering on the base");
+      }
 
       // A double tap on the blocked tank does nothing.
       await doubleTap(tank.x, tank.y);
@@ -439,6 +466,8 @@ console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
 console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
 console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}`);
 console.log(`Checks: ${checks.join("; ") || "not run"}`);
+console.log(`Hand inside the machine: at most ${(worstHidden.share * 100).toFixed(0)}% of its points hidden${worstHidden.where ? ` (${worstHidden.where})` : ""}, limit ${HIDDEN_LIMIT * 100}%`);
+if (worstHidden.share > HIDDEN_LIMIT) failures.push(`hand: ${(worstHidden.share * 100).toFixed(0)}% of it went inside the machine, ${worstHidden.where}`);
 if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen carrying a part");
 console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps`);
 console.log(`Console errors: ${consoleErrors.length}`);

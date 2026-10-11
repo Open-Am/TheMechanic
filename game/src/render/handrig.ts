@@ -2,16 +2,22 @@
 // on whatever the pointer points at, closes on it on a press, rides along with a part it holds, and withdraws when
 // the pointer leaves. It looks and moves the same over every part, removable or not (ADR 0007).
 
-import { type Camera, type Mesh, type Object3D, Quaternion, type Scene, Vector3 } from "three";
+import { type Camera, Matrix4, type Mesh, type Object3D, Quaternion, type Scene, Vector3 } from "three";
 import type { Vec3 } from "../core/index.ts";
-import { armAnchor, followShare, type GripShape, HAND, type HandAction, pointerPose } from "./handpose.ts";
+import { armAnchor, followShare, type GripShape, HAND, type HandAction, pointerPose, pushOut } from "./handpose.ts";
+
+/** Points of the hand checked against the surface each frame: about this many, from the hand, not the sleeve. */
+const SAMPLE_COUNT = 64;
+/** The sleeve starts this far up the forearm from the grip point (hand frame, +Z), metres; samples stay below it. */
+const SAMPLE_MAX_Z = 0.07;
 
 export interface HandRig {
   /** Rests the open hand on `at` (the spot under the pointer; `normal` faces out of the surface). Comes in if hidden. */
   point(at: Vector3, normal: Vector3): void;
   /** Closes the hand on `at`: a grip, or a fingertip pinch. Comes in if hidden. */
   grab(at: Vector3, normal: Vector3, shape: GripShape): void;
-  /** Holds on to an object and moves with it, keeping the pose it has now (a part being loosened or carried). */
+  /** Holds on to an object and moves with it, keeping its own attitude: it follows the part's position, never its
+   *  spin (a part being loosened or carried). */
   attachTo(object: Object3D): void;
   /** Lets go of the object it rides with; it follows the pointer again from where it is. */
   detach(): void;
@@ -29,12 +35,25 @@ export interface HandRig {
   readonly action: HandAction;
   /** The name of the object the hand rides with, or null. */
   readonly holding: string | null;
+  /** For the browser check: the hand's sample points where they are now, in world space. */
+  samplePoints(): Vector3[];
 }
 
 const v3 = (v: Vector3): Vec3 => [v.x, v.y, v.z];
 const isPoint = (p: unknown): p is Vec3 => Array.isArray(p) && p.length === 3 && p.every((v) => typeof v === "number");
 
-export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onState?: () => void): HandRig {
+/**
+ * Tells how far (metres) the hand must come towards the camera so none of `points` (world space) is behind the machine's
+ * surface as the camera sees it. Supplied by the view, which knows the machine.
+ */
+export type Collide = (points: readonly Vector3[]) => number;
+
+/** Every this-many of the sample points is also checked against the whole machine, not just the surface held. */
+const COLLIDE_EVERY = 6;
+/** The whole-machine check runs every this-many frames; in between the last result is reused (smoothing hides it). */
+const COLLIDE_FRAMES = 3;
+
+export function createHandRig(scene: Scene, camera: Camera, model: Object3D, collide?: Collide, onState?: () => void): HandRig {
   const root = model;
   root.name = "mechanic_hand";
   root.visible = false;
@@ -42,22 +61,50 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onS
   let pinchPoint: Vec3 | null = null;
   let tipPoint: Vec3 | null = null;
   const meshes: Mesh[] = [];
+  root.updateMatrixWorld(true);
+  const samples: Array<{ mesh: Mesh; index: number }> = [];
+  const meshToRoot = new Map<Mesh, Matrix4>();
   root.traverse((o) => {
     const m = o as Mesh;
     if (m.isMesh) {
       m.frustumCulled = false; // the morphs move vertices outside the rest-pose bounds
       meshes.push(m);
+      // The node's own transform (glTF quantization puts a decoding scale there) relative to the hand's root.
+      meshToRoot.set(m, new Matrix4().copy(root.matrixWorld).invert().multiply(m.matrixWorld));
     }
     const ud = o.userData ?? {};
     if (isPoint(ud["pinch_point"])) pinchPoint = ud["pinch_point"];
     if (isPoint(ud["tip_point"])) tipPoint = ud["tip_point"];
   });
 
+  // Pick sample points spread over the hand (not the sleeve), for keeping it out of surfaces.
+  {
+    const v = new Vector3();
+    const candidates: Array<{ mesh: Mesh; index: number }> = [];
+    for (const m of meshes) {
+      const pos = m.geometry.getAttribute("position");
+      const toRoot = meshToRoot.get(m)!;
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(toRoot);
+        if (v.z < SAMPLE_MAX_Z) candidates.push({ mesh: m, index: i });
+      }
+    }
+    const step = Math.max(1, Math.floor(candidates.length / SAMPLE_COUNT));
+    for (let i = 0; i < candidates.length; i += step) samples.push(candidates[i]!);
+  }
+  const sampleLocal = new Vector3();
+  const goalMatrix = new Matrix4();
+
+  let collideFrame = 0;
+  let lastMore = 0;
+
   let action: HandAction = "hover";
   let closed = 0;
   let wantClosed = 0;
   let target: { at: Vector3; normal: Vector3 } | null = null;
   let attached: Object3D | null = null;
+  /** While following an object: the held spot's offset from the object's position, in world axes. */
+  const attachOffset = new Vector3();
   let withdrawing: { to: Vector3; left: number } | null = null;
   const goalPos = new Vector3();
   const goalQ = new Quaternion();
@@ -69,20 +116,42 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onS
     }
   }
 
-  function anchor(): Vec3 {
+  function cameraAxes(): { right: Vec3; up: Vec3; forward: Vec3 } {
     const e = camera.matrixWorld.elements;
-    const right: Vec3 = [e[0]!, e[1]!, e[2]!];
-    const up: Vec3 = [e[4]!, e[5]!, e[6]!];
-    const forward: Vec3 = [-e[8]!, -e[9]!, -e[10]!];
-    return armAnchor(v3(camera.position), right, up, forward);
+    return { right: [e[0]!, e[1]!, e[2]!], up: [e[4]!, e[5]!, e[6]!], forward: [-e[8]!, -e[9]!, -e[10]!] };
   }
 
+  /** Where the hand should be: at the spot under the pointer, steady relative to the screen, out of the surface. */
   function goal(): boolean {
     if (!target) return false;
+    if (attached) target.at.copy(attached.getWorldPosition(new Vector3())).add(attachOffset);
     const usable = action === "pinch" && !pinchPoint ? "grip" : action;
-    const p = pointerPose(v3(target.at), v3(target.normal), anchor(), usable, { tip: tipPoint, pinch: pinchPoint });
+    const axes = cameraAxes();
+    const p = pointerPose(v3(target.at), v3(target.normal), armAnchor(v3(camera.position), axes.right, axes.up, axes.forward), axes.up, usable, { tip: tipPoint, pinch: pinchPoint });
     goalPos.set(...p.position);
     goalQ.set(...p.quaternion);
+    // Keep every sampled point of the hand, as the fingers are curled now, outside the surface: move back towards the
+    // camera, along the line of sight, so the hand stays under the pointer.
+    goalMatrix.compose(goalPos, goalQ, new Vector3(1, 1, 1));
+    const world: Vec3[] = [];
+    for (const smp of samples) {
+      smp.mesh.getVertexPosition(smp.index, sampleLocal);
+      sampleLocal.applyMatrix4(meshToRoot.get(smp.mesh)!).applyMatrix4(goalMatrix);
+      world.push(v3(sampleLocal));
+    }
+    const toward = camera.position.clone().sub(target.at).normalize();
+    const push = new Vector3(...pushOut(world, v3(target.at), v3(target.normal), v3(toward)));
+    goalPos.add(push);
+    // Then against the whole machine: a hand pinching a small part low down must not end inside the tank above it.
+    if (collide) {
+      // Holding a part, the hand moves with it and is checked every frame; hovering, every few frames is enough.
+      if (attached || collideFrame++ % COLLIDE_FRAMES === 0) {
+        const checked: Vector3[] = [];
+        for (let i = 0; i < world.length; i += COLLIDE_EVERY) checked.push(new Vector3(...world[i]!).add(push));
+        lastMore = Math.min(collide(checked), HAND.maxPush);
+      }
+      if (lastMore > 0) goalPos.addScaledVector(toward, lastMore);
+    }
     return true;
   }
 
@@ -98,10 +167,7 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onS
   }
 
   function letGo(): void {
-    if (attached) {
-      scene.attach(root);
-      attached = null;
-    }
+    attached = null;
   }
 
   const rig: HandRig = {
@@ -123,8 +189,8 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onS
 
     attachTo(object) {
       if (attached === object) return;
-      letGo();
-      object.attach(root);
+      if (!target) target = { at: root.position.clone(), normal: new Vector3(0, 1, 0) };
+      attachOffset.copy(target.at).sub(object.getWorldPosition(new Vector3()));
       attached = object;
       onState?.();
     },
@@ -174,7 +240,6 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onS
         }
         return;
       }
-      if (attached) return; // riding with the part
       if (!goal()) return;
       const k = followShare(dt);
       root.position.lerp(goalPos, k);
@@ -192,6 +257,10 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, onS
     },
     get holding() {
       return attached ? attached.name : null;
+    },
+    samplePoints() {
+      root.updateMatrixWorld(true);
+      return samples.map((smp) => smp.mesh.getVertexPosition(smp.index, new Vector3()).applyMatrix4(smp.mesh.matrixWorld));
     },
   };
   return rig;

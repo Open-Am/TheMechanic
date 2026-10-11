@@ -7,7 +7,7 @@ import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/plac
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
-import { armAnchor, basisToQuaternion, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose } from "../src/render/handpose.ts";
+import { armAnchor, basisToQuaternion, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -529,36 +529,69 @@ describe("turning with the hand (plan 0010, ADR 0020)", () => {
 describe("the hand as the pointer (plan 0010, ADR 0020)", () => {
   const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
   const points = { tip: [0.01, -0.01, -0.1] as Vec3, pinch: [-0.04, -0.05, -0.03] as Vec3 };
-  const anchor = armAnchor([0.5, 0.6, 1], [0.9, 0, -0.4], [0, 1, 0], [-0.5, -0.3, -0.8]);
+  const screenUp: Vec3 = [0, 1, 0];
+  const anchor = armAnchor([0.5, 0.6, 1], [0.9, 0, -0.4], screenUp, [-0.5, -0.3, -0.8]);
 
-  it("rests its fingertips just off the surface under the pointer, palm towards it", () => {
+  it("rests its fingertips just off the surface under the pointer", () => {
     const point: Vec3 = [0.05, 0.2, 0.15];
     const normal: Vec3 = [0, 0, 1];
-    const p = pointerPose(point, normal, anchor, "hover", points);
-    const q = new Quaternion(...p.quaternion);
-    const tip = new Vector3(...points.tip).applyQuaternion(q).add(new Vector3(...p.position));
+    const p = pointerPose(point, normal, anchor, screenUp, "hover", points);
+    const tip = new Vector3(...points.tip).applyQuaternion(new Quaternion(...p.quaternion)).add(new Vector3(...p.position));
     expect(tip.x).toBeCloseTo(point[0]);
     expect(tip.y).toBeCloseTo(point[1]);
     expect(tip.z).toBeCloseTo(point[2] + HAND.hoverFloat);
-    const palm = new Vector3(0, -1, 0).applyQuaternion(q);
-    expect(dot([palm.x, palm.y, palm.z], normal)).toBeLessThan(0); // the palm faces into the surface
+  });
+
+  it("keeps one steady attitude, palm down on screen, whatever surface it passes over", () => {
+    const point: Vec3 = [0.05, 0.2, 0.15];
+    const onTop = pointerPose(point, [0, 1, 0], anchor, screenUp, "hover", points);
+    const onSide = pointerPose(point, [1, 0, 0], anchor, screenUp, "hover", points);
+    const onFront = pointerPose(point, [0, 0, 1], anchor, screenUp, "hover", points);
+    expect(onSide.quaternion).toEqual(onTop.quaternion);
+    expect(onFront.quaternion).toEqual(onTop.quaternion);
+    const palm = new Vector3(0, -1, 0).applyQuaternion(new Quaternion(...onTop.quaternion));
+    expect(dot([palm.x, palm.y, palm.z], screenUp)).toBeLessThan(0);
   });
 
   it("grips with its grip point and pinches with its pinch point", () => {
     const point: Vec3 = [0, 0.3, 0];
     const normal: Vec3 = [0, 1, 0];
-    const g = pointerPose(point, normal, anchor, "grip", points);
+    const g = pointerPose(point, normal, anchor, screenUp, "grip", points);
     expect(g.position[1]).toBeCloseTo(point[1] + HAND.gripFloat);
-    const p = pointerPose(point, normal, anchor, "pinch", points);
+    const p = pointerPose(point, normal, anchor, screenUp, "pinch", points);
     const pinch = new Vector3(...points.pinch).applyQuaternion(new Quaternion(...p.quaternion)).add(new Vector3(...p.position));
     expect(pinch.y).toBeCloseTo(point[1] + HAND.pinchFloat);
   });
 
   it("the open hand depends only on the spot, never on whether the part could come off (ADR 0007)", () => {
     // The pose takes no part and no rule; the same spot gives the same hand.
-    const a = pointerPose([0.1, 0.2, 0.1], [0, 0, 1], anchor, "hover", points);
-    const b = pointerPose([0.1, 0.2, 0.1], [0, 0, 1], anchor, "hover", points);
+    const a = pointerPose([0.1, 0.2, 0.1], [0, 0, 1], anchor, screenUp, "hover", points);
+    const b = pointerPose([0.1, 0.2, 0.1], [0, 0, 1], anchor, screenUp, "hover", points);
     expect(a).toEqual(b);
+  });
+
+  it("never sinks into the surface: points inside are pushed out towards the camera, along the line of sight", () => {
+    const point: Vec3 = [0, 0.3, 0];
+    const up: Vec3 = [0, 1, 0];
+    const toward: Vec3 = [0, 0.6, 0.8];
+    const samples: Vec3[] = [[0, 0.31, 0], [0.02, 0.28, 0.01], [0.01, 0.295, -0.02]];
+    const push = pushOut(samples, point, up, toward);
+    // The deepest point is 20 mm in; it must end HAND.margin out.
+    const moved = samples.map((s) => s[1] + push[1]);
+    for (const y of moved) expect(y).toBeGreaterThanOrEqual(point[1] + HAND.margin - 1e-9);
+    expect(Math.min(...moved)).toBeCloseTo(point[1] + HAND.margin);
+    // Along the line of sight only: the push is a multiple of `toward`.
+    expect(push[0]).toBeCloseTo(0);
+    expect(push[2] / push[1]).toBeCloseTo(toward[2] / toward[1]);
+  });
+
+  it("leaves a hand that is already clear where it is", () => {
+    expect(pushOut([[0, 0.32, 0], [0.01, 0.35, 0]], [0, 0.3, 0], [0, 1, 0], [0, 0.6, 0.8])).toEqual([0, 0, 0]);
+  });
+
+  it("limits the push on a surface seen almost edge-on", () => {
+    const push = pushOut([[0, 0.2, 0]], [0, 0.3, 0], [0, 1, 0], [0, 0.01, 0.99995]);
+    expect(Math.hypot(...push)).toBeLessThanOrEqual(HAND.maxPush + 1e-6);
   });
 
   it("the forearm comes from the camera's lower right", () => {
