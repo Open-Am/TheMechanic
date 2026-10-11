@@ -7,7 +7,7 @@
 // chips back, pulls the cord, and repeats with "Next customer" until all six faults are solved. Saves screenshots,
 // reports console errors and a frame-rate sample at 4x CPU throttle. Exits 1 on any failure.
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -50,8 +50,14 @@ const children: ChildProcess[] = [];
 const failures: string[] = [];
 const consoleErrors: string[] = [];
 
+/** Stops Vite and the browser. On Windows, kill() stops only the top process and leaves the browser's helpers running
+ *  (hundreds of headless Edge processes piled up), so the whole process tree is ended with taskkill. */
 function cleanup(): void {
-  for (const c of children) c.kill();
+  for (const c of children) {
+    if (process.platform === "win32" && c.pid !== undefined && c.exitCode === null) {
+      spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+    } else c.kill();
+  }
 }
 process.on("exit", cleanup);
 
@@ -232,7 +238,23 @@ async function pullOff(id: string): Promise<void> {
       await doubleTap(p.x, p.y);
       await sleep(350);
       await noteHidden(`loosening ${id}`);
-      if (await waitFor(`${id} loose`, async () => (await looseNow()).includes(id), 3000).catch(() => false)) {
+      // Plan 0011: a part held on by fasteners is undone with the right tool, fastener by fastener.
+      const count = FASTENED.get(id) ?? 0;
+      if (count > 0) {
+        const tool = await evaluate<string | null>("window.__openAmDevRender.tool()");
+        if (tool) toolsSeen.add(tool);
+        if (tool && !fastenerShots.has(tool)) {
+          fastenerShots.add(tool);
+          await screenshot(`12-hand-${tool}`);
+        }
+      }
+      if (await waitFor(`${id} loose`, async () => (await looseNow()).includes(id), 4000).catch(() => false)) {
+        if (count > 0) {
+          const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners(${JSON.stringify(id)})`);
+          if (outs.length !== count || outs.some((d) => d < 0.006)) failures.push(`fasteners: ${id} came loose with its fasteners not all out (${outs.map((d) => (d * 1000).toFixed(1)).join(", ")} mm)`);
+          else fastenedOut.add(id);
+          if (await evaluate<string | null>("window.__openAmDevRender.tool()")) failures.push(`fasteners: the tool was still out after ${id} came loose`);
+        }
         await idle();
         const q = (await probe(id)) ?? p; // a loose part sits a few millimetres proud
         const tray = await trayAt();
@@ -246,6 +268,13 @@ async function pullOff(id: string): Promise<void> {
   throw new Error(`could not take ${id} off`);
 }
 
+/** Parts with fasteners in machine.json, and how many (plan 0011). */
+const FASTENED = new Map(machine.parts.filter((p) => (p.fasteners ?? []).length > 0).map((p) => [p.id, p.fasteners!.length]));
+const toolsSeen = new Set<string>();
+const fastenerShots = new Set<string>();
+const fastenedOut = new Set<string>();
+const fastenedBackIn = new Set<string>();
+
 async function putBack(id: string): Promise<void> {
   await idle();
   const chip = await evaluate<{ x: number; y: number }>(
@@ -254,6 +283,12 @@ async function putBack(id: string): Promise<void> {
   // Drop over the machine, right of centre: clear of the diagnostic panel in the top-left corner.
   await drag(chip.x, chip.y, VIEWPORT.width * 0.72, VIEWPORT.height * 0.5, 12);
   await waitFor(`${id} back on`, async () => !(await trayHas(id)), 3000);
+  if (FASTENED.has(id)) {
+    await idle();
+    const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners(${JSON.stringify(id)})`);
+    if (outs.some((d) => d > 0.0005)) failures.push(`fasteners: ${id} went back on with its fasteners not done up`);
+    else fastenedBackIn.add(id);
+  }
 }
 
 // ---- The run ----
@@ -466,6 +501,9 @@ console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
 console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
 console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}`);
 console.log(`Checks: ${checks.join("; ") || "not run"}`);
+console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done up again on ${[...fastenedBackIn].join(", ") || "none"}; tools seen: ${[...toolsSeen].join(", ") || "none"}`);
+if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
+if (!toolsSeen.has("spanner")) failures.push("fasteners: the spanner was never seen in the hand");
 console.log(`Hand inside the machine: at most ${(worstHidden.share * 100).toFixed(0)}% of its points hidden${worstHidden.where ? ` (${worstHidden.where})` : ""}, limit ${HIDDEN_LIMIT * 100}%`);
 if (worstHidden.share > HIDDEN_LIMIT) failures.push(`hand: ${(worstHidden.share * 100).toFixed(0)}% of it went inside the machine, ${worstHidden.where}`);
 if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen carrying a part");

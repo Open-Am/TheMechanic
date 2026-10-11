@@ -21,17 +21,17 @@ import {
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId } from "../core/index.ts";
 import { dragMode, GESTURE, isDoubleTap, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
-import { CARRY, carryPose, carryProgress, LOOSEN, loosePose, poseAt, resolveMotion, TIMING, type Pose } from "./motion.ts";
+import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, poseAt, resolveMotion, spannerSwing, TIMING, type Pose } from "./motion.ts";
 import { fitDistance, position, projectPoint, rotate, TURN, turnToward, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
-import { gripShapeFor, type GripShape, HAND } from "./handpose.ts";
-import type { RenderAssets } from "./model.ts";
-import { buildMachine, setPartOpacity, sizeHitVolumes, type PartView } from "./placeholders.ts";
+import { basisToQuaternion, gripShapeFor, type GripShape, HAND, toolBasis, toolFor } from "./handpose.ts";
+import type { RenderAssets, Tool } from "./model.ts";
+import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
 import { createGround } from "./ground.ts";
 import { createLighting } from "./lighting.ts";
-import { ease, Tweens } from "./tween.ts";
+import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
 
 /** Minimum finger target, CSS px (docs/design/interface.md). */
 const FINGER_PX = 44;
@@ -160,6 +160,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   function reset(pv: PartView): void {
     tweens.cancel(pv.id);
+    for (const f of pv.fasteners) applyFastener(f, 0);
     pv.group.visible = true;
     pv.group.position.set(...pv.home);
     pv.group.quaternion.identity();
@@ -192,11 +193,15 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const m = resolveMotion(part.motion);
     loosening.add(id);
     const s = lastSurface && lastSurface.part === id ? lastSurface : surfaceOfPart(pv);
-    hand?.grab(s.point, s.normal, shapeOf(id));
+    const freeing: TweenSpec[] = pv.fasteners.length
+      ? [...fastenerSteps(pv), { duration: FASTEN.freeSeconds, ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) }, ...toolReturn()]
+      : [
+          { duration: HAND.close, update: () => hand?.grab(s.point, s.normal, shapeOf(id)), done: () => hand?.attachTo(pv.group) },
+          { duration: LOOSEN.seconds[m.type], ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) },
+        ];
     tweens.play(
       `loosen:${id}`,
-      { duration: HAND.close, update: () => {}, done: () => hand?.attachTo(pv.group) },
-      { duration: LOOSEN.seconds[m.type], ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) },
+      ...freeing,
       {
         duration: 0,
         update: () => {},
@@ -211,6 +216,123 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         },
       },
     );
+  }
+
+  // ---- Fasteners and tools (plan 0011, ADR 0020) ----
+
+  const tools = assets.tools ?? null;
+  if (tools) {
+    for (const t of [tools.spanner, tools.screwdriver]) {
+      t.object.visible = false;
+      scene.add(t.object);
+    }
+  }
+  /** Seconds to fetch the tool to the first fastener, or take it back after the last. */
+  const TOOL_TRAVEL = 0.3;
+  /** Share of each fastener's time spent moving the tool to it from the last one. */
+  const TOOL_HOP = 0.25;
+  let toolInHand: Tool | null = null;
+  let toolFrom = new Vector3();
+
+  function applyFastener(f: FastenerView, q: number): void {
+    const p = fastenerPose(q);
+    f.pivot.position.copy(f.rest).addScaledVector(f.axis, p.out);
+    f.pivot.quaternion.setFromAxisAngle(f.axis, p.angle);
+  }
+
+  const screen = (): { right: [number, number, number]; up: [number, number, number]; forward: Vector3 } => {
+    const e = camera.matrixWorld.elements;
+    return { right: [e[0]!, e[1]!, e[2]!], up: [e[4]!, e[5]!, e[6]!], forward: new Vector3(-e[8]!, -e[9]!, -e[10]!) };
+  };
+
+  /** Where tools come from and go back to: just off screen at the lower left. (ADR 0021, proposed, would put a toolbox here.) */
+  function toolSource(): Vector3 {
+    const sc = screen();
+    return camera.position.clone().addScaledVector(new Vector3(...sc.right), -0.3).addScaledVector(new Vector3(...sc.up), -0.5).addScaledVector(sc.forward, 0.45);
+  }
+
+  const fastenerAt = (f: FastenerView): Vector3 => f.pivot.getWorldPosition(new Vector3());
+  const fastenerAxis = (pv: PartView, f: FastenerView): Vector3 => f.axis.clone().transformDirection(pv.group.matrixWorld);
+
+  /** Puts a tool with its working end at `at`, along `axis`, turned by `angle`, and the hand on its grip. */
+  function holdTool(tool: Tool, at: Vector3, axis: Vector3, angle: number): void {
+    const sc = screen();
+    tool.object.quaternion.set(...basisToQuaternion(toolBasis([axis.x, axis.y, axis.z], sc.right, sc.up, angle)));
+    tool.object.position.copy(at);
+    tool.object.visible = true;
+    const grip = new Vector3(...tool.grip).applyQuaternion(tool.object.quaternion).add(at);
+    hand?.grab(grip, camera.position.clone().sub(grip).normalize(), "grip");
+  }
+
+  /** The steps that undo each of a part's fasteners in turn, fetching the right tool first (ADR 0020). */
+  function fastenerSteps(pv: PartView): TweenSpec[] {
+    const steps: TweenSpec[] = [];
+    const first = pv.fasteners[0]!;
+    const firstTool = tools ? tools[toolFor(first.kind)] : null;
+    if (firstTool) {
+      let from: Vector3 | null = null;
+      steps.push({
+        duration: TOOL_TRAVEL,
+        ease: ease.inOutCubic,
+        update: (p) => {
+          from ??= toolSource();
+          holdTool(firstTool, from.clone().lerp(fastenerAt(first), p), fastenerAxis(pv, first), 0);
+          toolInHand = firstTool;
+        },
+      });
+    }
+    pv.fasteners.forEach((f, i) => {
+      steps.push({
+        duration: FASTEN.outSeconds,
+        update: (p) => {
+          const hop = i === 0 ? 1 : clamp01(p / TOOL_HOP);
+          const q = i === 0 ? clamp01(p) : clamp01((p - TOOL_HOP) / (1 - TOOL_HOP));
+          if (i > 0 && hop < 1) {
+            if (hop === 0 || toolFrom.lengthSq() === 0) toolFrom = fastenerAt(pv.fasteners[i - 1]!);
+          }
+          applyFastener(f, q);
+          const tool = tools ? tools[toolFor(f.kind)] : null;
+          if (tool) {
+            if (toolInHand && toolInHand !== tool) toolInHand.object.visible = false; // a different fastener, a different tool
+            toolInHand = tool;
+            const at = i > 0 && hop < 1 ? toolFrom.clone().lerp(fastenerAt(f), ease.inOutCubic(hop)) : fastenerAt(f);
+            holdTool(tool, at, fastenerAxis(pv, f), tool === tools?.screwdriver ? fastenerPose(q).angle : spannerSwing(q));
+          } else {
+            // No tools file: the fingers turn it.
+            const ax = fastenerAxis(pv, f);
+            hand?.grab(fastenerAt(f).addScaledVector(ax, 0.01), ax, "pinch");
+          }
+        },
+        done: () => {
+          toolFrom = fastenerAt(f);
+        },
+      });
+    });
+    return steps;
+  }
+
+  /** Takes the tool back where it came from, then the hand is free. */
+  function toolReturn(): TweenSpec[] {
+    let from: Vector3 | null = null;
+    let axis: Vector3 | null = null;
+    return [
+      {
+        duration: TOOL_TRAVEL,
+        ease: ease.inOutCubic,
+        update: (p) => {
+          const tool = toolInHand;
+          if (!tool) return;
+          from ??= tool.object.position.clone();
+          axis ??= new Vector3(0, 0, 1).applyQuaternion(tool.object.quaternion);
+          holdTool(tool, from.clone().lerp(toolSource(), p), axis, 0);
+        },
+        done: () => {
+          if (toolInHand) toolInHand.object.visible = false;
+          toolInHand = null;
+          toolFrom.set(0, 0, 0);
+        },
+      },
+    ];
   }
 
   /** Before the cord is pulled, the hand presses every loose part home. No rule changes (ADR 0020). */
@@ -371,6 +493,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       pv.group.position.copy(start);
       setOpacity(pv, 0);
     }
+    for (const f of pv.fasteners) applyFastener(f, 1); // they come back with the part, out of their holes
     chip = null;
     tweens.play(
       id,
@@ -385,6 +508,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       {
         duration: m.duration,
         update: (p) => applyPose(pv, poseAt(m, part.explode, 1 - p)),
+      },
+      // The part is home; its fasteners go back in, one after another (ADR 0020).
+      ...pv.fasteners.map((f) => ({ duration: FASTEN.upSeconds, update: (p: number) => applyFastener(f, 1 - p) })),
+      {
+        duration: 0,
+        update: () => {},
         done: () => {
           hand?.detach();
           hand?.withdraw();
@@ -689,6 +818,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       hand: () => (hand ? { visible: hand.visible, closed: hand.closed, action: hand.action, holding: hand.holding } : null),
       handGripping: () => (hand ? hand.visible && hand.closed > 0.5 : false),
       loose: () => [...loose],
+      // Plan 0011: the tool in the hand, and how far each fastener of a part stands out of its hole (metres).
+      tool: () => (toolInHand ? (toolInHand === tools?.spanner ? "spanner" : "screwdriver") : null),
+      fasteners: (id: PartId) => (view.parts.get(id)?.fasteners ?? []).map((f) => f.pivot.position.distanceTo(f.rest)),
       // Share of the hand's sample points hidden behind the machine's surface from the camera: a hand that sinks into
       // the machine shows here (plan 0010 fix).
       handHidden: () => {

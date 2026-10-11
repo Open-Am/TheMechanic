@@ -20,6 +20,7 @@ export interface Budgets {
   groundBytes: number;
   allocation: Record<string, number>;
   hand: { triangles: number; bytes: number; texturePx: number };
+  tools: { triangles: number; bytes: number; texturePx: number };
 }
 
 interface GltfJson {
@@ -117,6 +118,8 @@ export interface CheckResult {
 export interface MachineIds {
   parts: string[];
   base: string[];
+  /** Fastener ids by part (ADR 0020): each must be a node under its part's node. */
+  fasteners?: Record<string, string[]>;
 }
 
 /** The model contract (brief section 8) and the ADR 0014 budgets. */
@@ -136,10 +139,42 @@ export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckRe
     if (!expected.includes(r.name)) errors.push(`Root node "${r.name || "(unnamed)"}" is not a part or base ID in machine.json.`);
   }
 
+  // Fasteners (ADR 0020): one node each, named by its id, somewhere under its part's node. They count towards the
+  // machine's total and their own allocation, not their part's.
+  const nodes = glb.json.nodes ?? [];
+  const under = (rootIndex: number, target: number): boolean => {
+    const stack = [...(nodes[rootIndex]?.children ?? [])];
+    while (stack.length) {
+      const i = stack.pop()!;
+      if (i === target) return true;
+      stack.push(...(nodes[i]?.children ?? []));
+    }
+    return false;
+  };
+  const fastenerTris = new Map<string, number>();
+  let allFastenerTris = 0;
+  for (const [part, list] of Object.entries(ids.fasteners ?? {})) {
+    const root = roots.find((r) => r.name === part);
+    for (const id of list) {
+      const index = nodes.findIndex((n) => n.name === id);
+      if (index < 0) {
+        errors.push(`No node named "${id}" (a fastener of "${part}").`);
+        continue;
+      }
+      if (root && !under(root.index, index)) errors.push(`Fastener "${id}" must be a node under "${part}", so it moves with it.`);
+      const tris = nodeTriangles(glb.json, index);
+      fastenerTris.set(part, (fastenerTris.get(part) ?? 0) + tris);
+      allFastenerTris += tris;
+    }
+  }
+  const fastenerAllowance = budgets.allocation["fasteners"];
+  if (fastenerAllowance !== undefined && allFastenerTris > fastenerAllowance) errors.push(`The fasteners have ${allFastenerTris} triangles, over their allocation of ${fastenerAllowance}.`);
+
   let total = 0;
   for (const r of roots) {
-    const tris = nodeTriangles(glb.json, r.index);
-    total += tris;
+    const all = nodeTriangles(glb.json, r.index);
+    total += all;
+    const tris = all - (fastenerTris.get(r.name) ?? 0);
     const allowed = budgets.allocation[r.name];
     if (allowed !== undefined && tris > allowed) errors.push(`"${r.name}" has ${tris} triangles, over its allocation of ${allowed}.`);
   }
@@ -239,6 +274,35 @@ export function checkHand(glb: Glb, budgets: Budgets): CheckResult {
   return { errors, warnings: [], triangles };
 }
 
+/** Tool names in tools.glb (ADR 0020): each a root node with its grip point. */
+export const TOOL_NAMES = ["spanner", "screwdriver"] as const;
+
+/** The spanner and screwdriver (ADR 0020, plan 0011): two root nodes, each with a grip_point, within their budget. */
+export function checkTools(glb: Glb, budgets: Budgets): CheckResult {
+  const errors: string[] = [];
+  const roots = rootNodes(glb.json);
+  for (const name of TOOL_NAMES) {
+    const r = roots.find((x) => x.name === name);
+    if (!r) {
+      errors.push(`No root node named "${name}".`);
+      continue;
+    }
+    const g = glb.json.nodes?.[r.index]?.extras?.["grip_point"];
+    if (!(Array.isArray(g) && g.length === 3 && g.every((v) => typeof v === "number" && Number.isFinite(v)))) errors.push(`"${name}" has no grip_point of three numbers.`);
+  }
+  for (const r of roots) if (!(TOOL_NAMES as readonly string[]).includes(r.name)) errors.push(`Root node "${r.name || "(unnamed)"}" is not a tool.`);
+  const triangles = roots.reduce((n, r) => n + nodeTriangles(glb.json, r.index), 0);
+  if (triangles > budgets.tools.triangles) errors.push(`The tools have ${triangles} triangles, over their budget of ${budgets.tools.triangles}.`);
+  if (glb.byteLength > budgets.tools.bytes) errors.push(`The tools are ${(glb.byteLength / 1000).toFixed(1)} KB, over their ${budgets.tools.bytes / 1000} KB budget.`);
+  for (const [i, img] of (glb.json.images ?? []).entries()) {
+    const bv = img.bufferView !== undefined ? glb.json.bufferViews?.[img.bufferView] : undefined;
+    if (!bv || !glb.bin) continue;
+    const size = imageSize(glb.bin.subarray(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength));
+    if (size && Math.max(size.width, size.height) > budgets.tools.texturePx) errors.push(`Tools image ${i} is ${size.width} x ${size.height}, over ${budgets.tools.texturePx} px.`);
+  }
+  return { errors, warnings: [], triangles };
+}
+
 /** A companion file (environment, ground shadow) against its byte budget. */
 export function checkFileSize(label: string, bytes: number | null, budget: number, required: boolean): string[] {
   if (bytes === null) return required ? [`${label} is missing.`] : [];
@@ -246,6 +310,26 @@ export function checkFileSize(label: string, bytes: number | null, budget: numbe
 }
 
 // ---- Command line ----
+
+function mainTools(root: string, argv: string[]): void {
+  const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "tools", "export", "tools.optimised.glb"));
+  const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
+  if (!existsSync(input)) {
+    console.error(`No tools at ${input}.`);
+    process.exit(1);
+  }
+  const glb = readGlb(new Uint8Array(readFileSync(input)));
+  const result = checkTools(glb, budgets);
+  for (const e of result.errors) console.log(`error: ${e}`);
+  console.log(`Checked ${input}: ${(glb.byteLength / 1000).toFixed(1)} KB, ${result.triangles} triangles, ${result.errors.length} error(s).`);
+  if (result.errors.length) process.exit(1);
+  if (!argv.includes("--no-copy")) {
+    const out = join(root, "game", "public", "hand");
+    mkdirSync(out, { recursive: true });
+    copyFileSync(input, join(out, "tools.glb"));
+    console.log(`Copied tools.glb to ${out}`);
+  }
+}
 
 function mainHand(root: string, argv: string[]): void {
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "hand", "export", "hand.optimised.glb"));
@@ -271,20 +355,22 @@ function main(): void {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const argv = process.argv.slice(2);
   if (argv.includes("--hand")) return mainHand(root, argv.filter((a) => a !== "--hand"));
+  if (argv.includes("--tools")) return mainTools(root, argv.filter((a) => a !== "--tools"));
   const copy = !argv.includes("--no-copy");
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "gen950", "export", "model.optimised.glb"));
   const groundIn = join(root, "assets", "gen950", "export", "ground.png");
   const envPath = join(root, "game", "public", "env", "workshop.hdr");
   const machineDir = join(root, "game", "public", "machines", "gen950");
   const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
-  const machine = JSON.parse(readFileSync(join(machineDir, "machine.json"), "utf8")) as { parts: Array<{ id: string }>; base: Array<{ id: string }> };
+  const machine = JSON.parse(readFileSync(join(machineDir, "machine.json"), "utf8")) as { parts: Array<{ id: string; fasteners?: Array<{ id: string }> }>; base: Array<{ id: string }> };
 
   if (!existsSync(input)) {
     console.error(`No model at ${input}.`);
     process.exit(1);
   }
   const glb = readGlb(new Uint8Array(readFileSync(input)));
-  const result = checkModel(glb, { parts: machine.parts.map((p) => p.id), base: machine.base.map((b) => b.id) }, budgets);
+  const fasteners = Object.fromEntries(machine.parts.filter((p) => p.fasteners?.length).map((p) => [p.id, p.fasteners!.map((f) => f.id)]));
+  const result = checkModel(glb, { parts: machine.parts.map((p) => p.id), base: machine.base.map((b) => b.id), fasteners }, budgets);
   const size = (p: string) => (existsSync(p) ? statSync(p).size : null);
   result.errors.push(...checkFileSize("The environment map", size(envPath), budgets.environmentBytes, true));
   result.errors.push(...checkFileSize("The ground shadow", size(groundIn), budgets.groundBytes, false));

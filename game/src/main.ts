@@ -65,7 +65,7 @@ async function start(): Promise<void> {
   const game = createGame({ ...data, clock: createClock(), audio: createAudio(), random: Math.random, ...(customers ? { customers } : {}) });
 
   // The model, its ground shadow and the environment come with the machine folder; nothing is fetched later (ADR 0010).
-  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`);
+  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`, `${import.meta.env.BASE_URL}hand/tools.glb`);
   let view;
   try {
     view = mountRender(stage, game, assets);

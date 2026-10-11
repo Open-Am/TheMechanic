@@ -4,8 +4,22 @@
 // it moves never fades another part that shares a material in the GLB.
 
 import { Box3, BoxGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, Vector3, type BufferGeometry, type Material, type Object3D } from "three";
-import type { Machine, PartId, Placeholder, Vec3 } from "../core/index.ts";
+import type { Fastener, FastenerKind, Machine, PartId, Placeholder, Vec3 } from "../core/index.ts";
 import { matchNodes } from "./match.ts";
+
+/** A fastener on a part (plan 0011, ADR 0020): turned out about its own axis by the hand while the part loosens. */
+export interface FastenerView {
+  id: string;
+  kind: FastenerKind;
+  /** At the fastener's head, inside the part's visual: turning and backing out move this. */
+  pivot: Group;
+  /** Its done-up position in the part's local space. */
+  rest: Vector3;
+  /** The direction it backs out along, in the part's (and the machine's) axes. */
+  axis: Vector3;
+  /** Where it came from. */
+  source: "model" | "placeholder";
+}
 
 export interface PartView {
   id: PartId;
@@ -21,6 +35,8 @@ export interface PartView {
   size: Vec3;
   /** Where the part came from. */
   source: "model" | "placeholder";
+  /** What holds it on, in the order the hand undoes them. Empty if nothing. */
+  fasteners: FastenerView[];
 }
 
 export interface MachineView {
@@ -115,6 +131,7 @@ export function buildMachine(machine: Machine, model: Object3D | null = null): M
       size = [...part.placeholder.size];
     }
     group.position.set(...home);
+    const fasteners = buildFasteners(part.fasteners ?? [], visual, home);
     const meshes = ownMaterials(visual);
     const hit = new Mesh(new BoxGeometry(1, 1, 1), hitMaterial);
     hit.name = `${part.id}__hit`;
@@ -122,11 +139,44 @@ export function buildMachine(machine: Machine, model: Object3D | null = null): M
     hit.scale.set(...size);
     group.add(visual, hit);
     root.add(group);
-    parts.set(part.id, { id: part.id, group, visual, meshes, hit, home, size, source: node ? "model" : "placeholder" });
+    parts.set(part.id, { id: part.id, group, visual, meshes, hit, home, size, source: node ? "model" : "placeholder", fasteners });
   }
 
   const [sx, sy, sz] = machine.size;
   return { root, parts, center: [0, sy / 2, 0], radius: Math.hypot(sx, sy, sz) / 2, fallbacks };
+}
+
+const fastenerMaterial = new MeshStandardMaterial({ color: "#9a9ea3", roughness: 0.45, metalness: 0.8 });
+
+/**
+ * Wraps each fastener in a pivot at its head, inside the part's visual (which sits at the part's origin, untransformed),
+ * so it can turn about its own axis. A model node named by the fastener's id (the loader keeps the original name in
+ * userData.name) is moved into the pivot keeping where it is; without one, a small stand-in bolt is drawn.
+ */
+function buildFasteners(list: Fastener[], visual: Object3D, home: Vec3): FastenerView[] {
+  visual.updateMatrixWorld(true);
+  return list.map((f) => {
+    const pivot = new Group();
+    pivot.name = `${f.id}__pivot`;
+    const rest = new Vector3(f.position[0] - home[0], f.position[1] - home[1], f.position[2] - home[2]);
+    pivot.position.copy(rest);
+    let node: Object3D | undefined;
+    visual.traverse((o) => {
+      if (!node && (o.userData?.["name"] === f.id || o.name === f.id)) node = o;
+    });
+    visual.add(pivot);
+    pivot.updateMatrixWorld(true);
+    if (node) {
+      pivot.attach(node);
+    } else {
+      const axis = new Vector3(...f.axis).normalize();
+      const stand = new Mesh(new CylinderGeometry(0.0055, 0.0055, 0.005, 6), fastenerMaterial);
+      stand.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), axis);
+      stand.name = f.id;
+      pivot.add(stand);
+    }
+    return { id: f.id, kind: f.kind, pivot, rest, axis: new Vector3(...f.axis).normalize(), source: node ? "model" : "placeholder" };
+  });
 }
 
 /** Grows every hit volume to at least `minWorld` on each axis, never smaller than the part. */
