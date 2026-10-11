@@ -1,9 +1,11 @@
-// The running game (ADR 0010): picks a fault, runs the timer, passes proposals to the reducer, keeps the action log, emits events.
+// The running game (ADR 0010): picks a fault (free play) or plays the day's (ADR 0005), runs the timer, passes proposals
+// to the reducer, keeps the action log, emits events and saves results (ADR 0022, ADR 0024).
 // render and ui only propose and listen. Condition text reaches them only through conditionOf.
 
 import { apply, conditionText, hasWalked, initialState, moodFor, patienceAt, scoreState, walkOutTime } from "../core/index.ts";
 import type { Action, ActionType, Customer, CustomerFile, CustomerMoment, Fault, FaultFile, FaultId, Machine, PartId, Refusal, RoundState, ScoreBreakdown, Symptom } from "../core/index.ts";
-import type { Audio, Clock } from "../platform/interfaces/index.ts";
+import type { Audio, Clock, ScoreStore, StoredResult } from "../platform/interfaces/index.ts";
+import { dailyCustomer, recordResult, recordUnfinished } from "./daily.ts";
 import { Emitter } from "./emitter.ts";
 import { pickCustomer, pickFault } from "./faults.ts";
 
@@ -32,6 +34,26 @@ export interface Briefing {
   symptom: Symptom;
   /** The round's customer, or null when the game has no customers. */
   customer: { name: string; line: string } | null;
+  /** Today's fault (ADR 0005): its day and whether this attempt is scored. Null in free play. */
+  daily: { day: number; scored: boolean } | null;
+}
+
+/** Which round to play. Omitted for free play. A daily's day is fixed here, when the round is chosen. */
+export interface RoundChoice {
+  day: number;
+  faultId: FaultId;
+  /** False for practice: today's attempt is already used (ADR 0005, ADR 0024). Practice is never recorded. */
+  scored: boolean;
+}
+
+/** What was saved when a round ended, for the result screen. */
+export interface RoundRecord {
+  mode: "free" | "daily" | "practice";
+  day: number | null;
+  /** The lowest fixed total for this fault after this round, or null if there is none or nothing is stored. */
+  best: number | null;
+  /** This round set the best. */
+  newBest: boolean;
 }
 
 export interface Proposal {
@@ -48,13 +70,20 @@ export interface GameDeps {
   random: () => number;
   /** Customers (ADR 0015). Without them there is no patience, as before. */
   customers?: CustomerFile;
+  /** Where results are saved (ADR 0005, ADR 0022). Without it nothing is saved. */
+  scores?: ScoreStore;
 }
 
 export interface Game {
   readonly events: Emitter<GameEvents>;
   readonly machine: Machine;
-  /** Picks the next fault and resets the round. The timer does not run until begin(). */
-  newRound(): Briefing;
+  /** Resets the round: free play picks a fault at random; a daily choice plays its fault with the day's customer. */
+  newRound(choice?: RoundChoice): Briefing;
+  /**
+   * What the last round saved. Settles once the round has ended and its result is stored; null before any round has
+   * ended. Never rejects.
+   */
+  readonly recorded: Promise<RoundRecord> | null;
   /** Starts the timer. */
   begin(): void;
   /** Proposes an action at the current time. Returns true if the reducer accepted it. */
@@ -91,6 +120,24 @@ export function createGame(deps: GameDeps): Game {
   let customer: Customer | null = null;
   let walkedAt: number | null = null;
   let mood: CustomerMoment = "arrive";
+  let choice: RoundChoice | null = null;
+  let recorded: Promise<RoundRecord> | null = null;
+
+  function mode(): RoundRecord["mode"] {
+    return choice === null ? "free" : choice.scored ? "daily" : "practice";
+  }
+
+  /** The round as saved (ADR 0022). `score` is the end score, or the start score for an unfinished daily. */
+  function stored(score: ScoreBreakdown, unfinished: boolean): StoredResult {
+    const result: StoredResult = { faultId: fault!.id, day: choice?.day ?? null, log: [...log], score, playedAt: clock.today().toISOString() };
+    if (unfinished) result.unfinished = true;
+    return result;
+  }
+
+  /** Saves the ended round: free play and a scored daily, never practice (ADR 0005). */
+  function finish(score: ScoreBreakdown): void {
+    recorded = recordResult(deps.scores, stored(score, false), mode());
+  }
 
   function now(): number {
     if (startedAt === null) return 0;
@@ -113,7 +160,9 @@ export function createGame(deps: GameDeps): Game {
     if (hasWalked(state, customer, t)) {
       walkedAt = walkOutTime(state, customer);
       audio.play("fail");
-      events.emit("left", { t: walkedAt, score: scoreState(machine, fault, state, walkedAt, customer), log: [...log], line: line("leaving") });
+      const score = scoreState(machine, fault, state, walkedAt, customer);
+      finish(score);
+      events.emit("left", { t: walkedAt, score, log: [...log], line: line("leaving") });
       return true;
     }
     const share = patienceAt(state, customer, t);
@@ -129,20 +178,36 @@ export function createGame(deps: GameDeps): Game {
     events,
     machine,
 
-    newRound() {
-      fault = pickFault(faults.faults, fault?.id ?? null, random);
-      customer = deps.customers ? pickCustomer(deps.customers.customers, customer?.id ?? null, random) : null;
+    newRound(c) {
+      if (c) {
+        const daily = faults.faults.find((f) => f.id === c.faultId);
+        if (!daily) throw new Error(`newRound: no fault ${c.faultId}`);
+        fault = daily;
+        customer = deps.customers ? dailyCustomer(deps.customers.customers, c.day) : null;
+      } else {
+        fault = pickFault(faults.faults, fault?.id ?? null, random);
+        customer = deps.customers ? pickCustomer(deps.customers.customers, customer?.id ?? null, random) : null;
+      }
+      choice = c ? { ...c } : null;
+      recorded = null;
       state = initialState(machine);
       log = [];
       startedAt = null;
       walkedAt = null;
       mood = "arrive";
-      return { complaint: fault.complaint, symptom: fault.symptom, customer: customer ? { name: customer.name, line: line("arrive") } : null };
+      return {
+        complaint: fault.complaint,
+        symptom: fault.symptom,
+        customer: customer ? { name: customer.name, line: line("arrive") } : null,
+        daily: choice ? { day: choice.day, scored: choice.scored } : null,
+      };
     },
 
     begin() {
       if (!fault || startedAt !== null) return;
       startedAt = clock.now();
+      // The day's scored attempt is used up now, saved unfinished until the round ends (ADR 0024).
+      if (choice?.scored) recordUnfinished(deps.scores, stored(scoreState(machine, fault, state, 0, customer ?? undefined), true));
       events.emit("started", { t: 0 });
     },
 
@@ -177,7 +242,9 @@ export function createGame(deps: GameDeps): Game {
           audio.play(started ? "start" : "fail");
           events.emit("pulled", { t: action.t, started, failedPulls: state.failedPulls });
           if (started) {
-            events.emit("ended", { t: action.t, score: scoreState(machine, fault, state, action.t, customer ?? undefined), log: [...log], line: customer ? line("pleased") : null });
+            const score = scoreState(machine, fault, state, action.t, customer ?? undefined);
+            finish(score);
+            events.emit("ended", { t: action.t, score, log: [...log], line: customer ? line("pleased") : null });
           } else {
             check(); // a failed pull costs patience: it may change the mood, or empty the meter at once
           }
@@ -210,6 +277,9 @@ export function createGame(deps: GameDeps): Game {
 
     get state() {
       return state;
+    },
+    get recorded() {
+      return recorded;
     },
     get log() {
       return log;
