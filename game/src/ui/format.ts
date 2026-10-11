@@ -1,9 +1,29 @@
 // Pure formatting helpers for the interface.
 
 import type { ScoreBreakdown } from "../core/index.ts";
-import { SHARE } from "./strings.ts";
+import { SHARE, STRINGS, TEMPLATES } from "./strings.ts";
 
-/** Milliseconds as m:ss. Negative or invalid input shows 0:00. */
+/** What the start screen needs to know about today's fault. */
+export interface DailyView {
+  day: number;
+  attempted: boolean;
+  result: { unfinished?: boolean; score: ScoreBreakdown } | null;
+}
+
+/** The daily button: today's day while the scored attempt is open, then practice (ADR 0005, ADR 0024). */
+export function dailyButtonText(s: DailyView): string {
+  return s.attempted ? STRINGS.dailyPractice : TEMPLATES.dailyDay(s.day);
+}
+
+/** Today's scored result for the start screen, or null before it is played. Unfinished shows as "Not finished". */
+export function todayResultText(s: DailyView): string | null {
+  const r = s.result;
+  if (!r) return null;
+  if (r.unfinished) return TEMPLATES.todayUnfinished(s.day);
+  if (r.score.outcome === "walked") return TEMPLATES.todayWalked(s.day);
+  return TEMPLATES.todayFixed(s.day, r.score.total, starText(r.score.stars));
+}
+
 /** CSS px above the controls (pull cord and tray) that still count as dropping on the tray (ADR 0020 tuning). */
 export const DROP_REACH = 64;
 
@@ -15,6 +35,15 @@ export function inDropZone(y: number, controlsTop: number, screenBottom: number)
   return y >= controlsTop - DROP_REACH && y <= screenBottom;
 }
 
+/**
+ * Share is offered only for a scored daily that ended with the engine running: ADR 0005 defines a text only for that.
+ * Free play, practice, walked and unfinished rounds get none (plan 0014 reading 8).
+ */
+export function shareOffered(mode: "free" | "daily" | "practice" | null, outcome: "fixed" | "walked" | null): boolean {
+  return mode === "daily" && outcome === "fixed";
+}
+
+/** Milliseconds as m:ss. Negative or invalid input shows 0:00. */
 export function formatTime(ms: number): string {
   const total = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
   const m = Math.floor(total / 60);

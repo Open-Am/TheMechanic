@@ -33,6 +33,17 @@ export const STRINGS = {
   cannotRunData: "The machine data could not be loaded.",
   patience: "Patience",
   walkedHint: "They ran out of patience. Nothing was fixed.",
+  startLabel: "Choose a job",
+  freePlay: "Free play",
+  dailyPractice: "Today's fault · practice",
+  practiceLabel: "Practice, not scored",
+  notScored: "Not scored",
+  best: "Best",
+  newBest: "New best",
+  share: "Share",
+  copied: "Copied",
+  copyByHand: "Copy this to share it",
+  loadingLabel: "Loading the machine",
 } as const;
 
 /** Player-facing text that names someone. */
@@ -40,6 +51,12 @@ export const TEMPLATES = {
   customerSays: (name: string) => `${name} says`,
   walkedTitle: (name: string) => `${name} took the generator to another mechanic.`,
   speech: (name: string, line: string) => `${name}: “${line}”`,
+  /** The daily button and the briefing's label (ADR 0005). */
+  dailyDay: (day: number) => `Today's fault · Day ${day}`,
+  /** Today's scored result on the start screen. */
+  todayFixed: (day: number, total: number, stars: string) => `Day ${day}: score ${total} ${stars}`,
+  todayWalked: (day: number) => `Day ${day}: the customer walked`,
+  todayUnfinished: (day: number) => `Day ${day}: Not finished`,
 } as const;
 
 /** The share text's words (ADR 0005). Its three lines are put together by shareText in format.ts. */
