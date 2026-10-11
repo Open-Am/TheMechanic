@@ -17,6 +17,7 @@ export const STRINGS = {
   start: "Start",
   pullCord: "Pull cord",
   trayEmpty: "Double tap a part to loosen it, then drag it to the tray",
+  dropHere: "Drop it here",
   close: "Close",
   fixing: "Working on it…",
   conditionLabel: "Condition",

@@ -172,6 +172,36 @@ button.pull {
 
 .tray-host {
   min-height: 52px;
+  border-radius: var(--radius);
+  transition: background-color 120ms, outline-color 120ms;
+}
+
+/* While a part is carried (ADR 0020): the whole strip from just above the pull cord down is the drop zone. */
+.controls.carrying {
+  background: linear-gradient(to top, rgb(0 0 0 / 0.7), rgb(0 0 0 / 0.15));
+}
+
+.controls.carrying .tray-host {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  background: rgb(224 165 38 / 0.12);
+}
+
+.controls.over .tray-host {
+  outline-style: solid;
+  background: rgb(224 165 38 / 0.3);
+}
+
+.controls.carrying .tray-empty {
+  display: none;
+}
+
+.drop-hint {
+  margin: 14px 0 0;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 15px;
 }
 
 /* Wraps instead of scrolling: chips swallow touch drags (a drag puts a part back), so a scrolling tray could not be scrolled. */

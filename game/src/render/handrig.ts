@@ -50,6 +50,10 @@ export type Collide = (points: readonly Vector3[]) => number;
 
 /** Every this-many of the sample points is also checked against the whole machine, not just the surface held. */
 const COLLIDE_EVERY = 6;
+/** Holding a part, close to the machine, more points are checked. */
+const COLLIDE_EVERY_HOLDING = 2;
+/** Holding a part, the hand keeps up with it closely: a shorter smoothing half-life, seconds. */
+const HOLD_HALF_LIFE = 0.015;
 /** The whole-machine check runs every this-many frames; in between the last result is reused (smoothing hides it). */
 const COLLIDE_FRAMES = 3;
 
@@ -147,7 +151,7 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
       // Holding a part, the hand moves with it and is checked every frame; hovering, every few frames is enough.
       if (attached || collideFrame++ % COLLIDE_FRAMES === 0) {
         const checked: Vector3[] = [];
-        for (let i = 0; i < world.length; i += COLLIDE_EVERY) checked.push(new Vector3(...world[i]!).add(push));
+        for (let i = 0; i < world.length; i += attached ? COLLIDE_EVERY_HOLDING : COLLIDE_EVERY) checked.push(new Vector3(...world[i]!).add(push));
         lastMore = Math.min(collide(checked), HAND.maxPush);
       }
       if (lastMore > 0) goalPos.addScaledVector(toward, lastMore);
@@ -241,7 +245,7 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
         return;
       }
       if (!goal()) return;
-      const k = followShare(dt);
+      const k = followShare(dt, attached ? HOLD_HALF_LIFE : HAND.followHalfLife);
       root.position.lerp(goalPos, k);
       root.quaternion.slerp(goalQ, k);
     },
