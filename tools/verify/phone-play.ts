@@ -9,7 +9,9 @@
 // chips back, pulls the cord, and repeats with "Next customer" and "Free play" until all six faults are solved. Saves
 // screenshots, reports console errors and fails below 30 fps at 4x CPU throttle (ADR 0014). Plan 0014 adds: the loading
 // bar with Start disabled, today's fault scored once then practice, Share text on the clipboard, a daily left mid-round
-// reading "Not finished" (ADR 0024), the next day's daily, and a round with localStorage throwing. Exits 1 on any failure.
+// reading "Not finished" (ADR 0024), the next day's daily, and a round with localStorage throwing. Plan 0013 adds sound
+// and vibration: nothing fetched before Start, the moments each action fires (read from a dev hook, so it works with no
+// sound files), the vibrations, a blocked part and the walk-out silent, and mute kept over a reload. Exits 1 on any failure.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -354,6 +356,10 @@ await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFacto
 await send("Page.addScriptToEvaluateOnNewDocument", {
   source: `try { delete Navigator.prototype.share; } catch {} if (navigator.clipboard) { const w = navigator.clipboard.writeText.bind(navigator.clipboard); navigator.clipboard.writeText = (t) => { window.__copied = t; return w(t); }; }`,
 });
+// Plan 0013: record every vibration, and keep every resource timing entry so the sound requests can be counted.
+await send("Page.addScriptToEvaluateOnNewDocument", {
+  source: `window.__vibrations = []; Navigator.prototype.vibrate = function (p) { window.__vibrations.push(p); return true; }; try { performance.setResourceTimingBufferSize(5000); } catch {}`,
+});
 await send("Browser.grantPermissions", { origin: `http://localhost:${PORT}`, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] }).catch((e: Error) => console.log(`   clipboard permission not granted: ${e.message}`));
 
 // Loading (plan 0014 step 6): the page carries a wordless bar before any script, and with the network throttled and the
@@ -446,11 +452,15 @@ async function noteHidden(where: string): Promise<void> {
         await noteHidden("hovering on the base");
       }
 
-      // A double tap on the blocked tank does nothing.
+      // A double tap on the blocked tank does nothing: no movement, no sound, no vibration (ADR 0007, ADR 0018).
+      await evaluate<void>("(window.__openAmDevAudio?.clear(), window.__vibrations = [], undefined)");
       await doubleTap(tank.x, tank.y);
       await sleep(900);
+      const blockedHeard = await evaluate<unknown[]>("window.__openAmDevAudio?.log() ?? []");
+      const blockedBuzz = await evaluate<unknown[]>("window.__vibrations ?? []");
       if ((await looseNow()).includes("fuel_tank") || (await trayHas("fuel_tank"))) failures.push("double tap: the blocked fuel tank loosened");
-      else checks.push("a double tap on a blocked part does nothing");
+      else if (blockedHeard.length || blockedBuzz.length) failures.push(`sound: a double tap on the blocked tank fired ${JSON.stringify(blockedHeard)} and vibrated ${JSON.stringify(blockedBuzz)}`);
+      else checks.push("a double tap on a blocked part does nothing, silently and without vibrating");
 
       // A drag on the blocked tank, and on the hose that could come off but is not loose, turns the machine.
       for (const [id, p] of [["fuel_tank", tank], ["fuel_hose", await probe("fuel_hose")]] as const) {
@@ -622,6 +632,145 @@ const toolRound: string[] = [];
   await atStart();
 }
 
+// Sound and vibration (plan 0013 step 8). No sound files ship until the owner chooses them, so this watches which
+// moments fire through the dev hook window.__openAmDevAudio, and every navigator.vibrate call through the recorder
+// installed on every page. Whether a moment could be heard depends on its file; the check reports how many arrived.
+const soundChecks: string[] = [];
+type Heard = { moment: string; audible: boolean };
+const heardNow = () => evaluate<Heard[]>("window.__openAmDevAudio?.log() ?? []");
+const vibrationsNow = () => evaluate<Array<number | number[]>>("window.__vibrations ?? []");
+async function clearSound(): Promise<void> {
+  await evaluate<void>("(window.__openAmDevAudio?.clear(), window.__vibrations = [], undefined)");
+}
+const audioRequests = () => evaluate<Array<{ name: string; size: number }>>(`performance.getEntriesByType("resource").filter((e) => new URL(e.name).pathname.includes("/audio/")).map((e) => ({ name: new URL(e.name).pathname, size: e.transferSize }))`);
+const moments = (h: Heard[]) => h.map((x) => x.moment);
+const count = (h: Heard[], m: string) => h.filter((x) => x.moment === m).length;
+const vibrationMs = (v: Array<number | number[]>) => v.reduce<number>((n, p) => n + (typeof p === "number" ? p : p.reduce((a, b) => a + b, 0)), 0);
+function sound(ok: boolean, passed: string, failed: string): void {
+  if (ok) soundChecks.push(passed);
+  else failures.push(`sound: ${failed}`);
+}
+const MOMENT_FILES = 10;
+let soundFiles = 0;
+try {
+  await load(url.replace("?diag", "?diag&patience=600"));
+  await toBriefing();
+  const before = await audioRequests();
+  const stateBefore = await evaluate<string>("window.__openAmDevAudio.state()");
+  sound(before.length === 0 && stateBefore !== "running", "nothing under /audio/ is fetched before Start, and audio is not running", `before Start: ${before.length} audio request(s), audio ${stateBefore}`);
+  await beginRound();
+  await waitFor("the sound requests", async () => (await audioRequests()).length >= MOMENT_FILES, 5000).catch(() => false);
+  await sleep(500);
+  const after = await audioRequests();
+  const bytes = after.reduce((n, r) => n + r.size, 0);
+  const state = await evaluate<string>("window.__openAmDevAudio.state()");
+  soundFiles = (await evaluate<string[]>("window.__openAmDevAudio.loaded()")).length;
+  sound(after.length === MOMENT_FILES && bytes <= 250_000, `after Start the ${MOMENT_FILES} sound files are asked for once (${(bytes / 1000).toFixed(1)} KB)`, `after Start ${after.length} audio request(s), ${bytes} bytes`);
+  sound(state === "running", "the first tap (Start) unlocks audio", `after Start audio was ${state}`);
+  console.log(`   sound files decoded: ${soundFiles} of ${MOMENT_FILES}${soundFiles === 0 ? " (none ship yet: every moment is silent)" : ""}`);
+  if (soundFiles > 0 && soundFiles < MOMENT_FILES) failures.push(`sound: only ${soundFiles} of ${MOMENT_FILES} files decoded`);
+
+  // Loosening and removing the alternator cover: four bolts of two turns, one bolt crack, one clunk in the tray.
+  await clearSound();
+  await pullOff("alternator_cover");
+  await idle();
+  let h = await heardNow();
+  let v = await vibrationsNow();
+  sound(
+    count(h, "turn") === 8 && count(h, "give-unbolt") === 1 && count(h, "land") === 1 && h.length === 10 && JSON.stringify(v) === "[15]",
+    "the alternator cover's 4 bolts click 8 turns, it cracks loose once (15 ms) and lands in the tray",
+    `the alternator cover logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`,
+  );
+
+  // The plug cap pops; the spark plug clicks its turns and has no give sound.
+  await clearSound();
+  await pullOff("plug_cap");
+  await idle();
+  h = await heardNow();
+  v = await vibrationsNow();
+  sound(JSON.stringify(moments(h)) === '["give-pull","land"]' && JSON.stringify(v) === "[15]", "the plug cap pops (15 ms) and lands", `the plug cap logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`);
+  await clearSound();
+  await pullOff("spark_plug");
+  await idle();
+  h = await heardNow();
+  v = await vibrationsNow();
+  sound(
+    count(h, "turn") >= 1 && !h.some((x) => x.moment.startsWith("give-")) && count(h, "land") === 1 && v.length === 0,
+    `the spark plug clicks ${count(h, "turn")} turns with no give sound and lands`,
+    `the spark plug logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`,
+  );
+
+  // Putting back: the part seats (15 ms) and its turns click going in.
+  await clearSound();
+  await putBack("spark_plug");
+  await idle();
+  h = await heardNow();
+  v = await vibrationsNow();
+  sound(count(h, "seat") === 1 && count(h, "turn") === 3 && JSON.stringify(v) === "[15]", "the spark plug goes back with 3 turns and seats (15 ms)", `putting the spark plug back logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`);
+  await putBack("plug_cap");
+  await idle(); // the plug cap seats before the log is cleared
+  await clearSound();
+  await putBack("alternator_cover");
+  await idle();
+  h = await heardNow();
+  v = await vibrationsNow();
+  sound(
+    JSON.stringify(moments(h)) === JSON.stringify(["seat", ...Array(8).fill("turn")]) && JSON.stringify(v) === "[15]",
+    "the alternator cover seats (15 ms), then its bolts click 8 turns going in",
+    `putting the alternator cover back logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`,
+  );
+
+  // A failed pull: the cord, then the cough, 0.6 s later, with 40 ms.
+  await clearSound();
+  await tapSelector(".pull");
+  await sleep(1200);
+  h = await heardNow();
+  v = await vibrationsNow();
+  sound(JSON.stringify(moments(h)) === '["cord","fail"]' && JSON.stringify(v) === "[40]", "a failed pull plays the cord then fail (40 ms)", `a failed pull logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`);
+
+  // Mute, then reload: the button stays muted, and every moment is silent with no vibration.
+  await tapSelector(".hud .mute");
+  const pressed = await evaluate<string | null>("document.querySelector('.hud .mute').getAttribute('aria-pressed')");
+  const stored = await evaluate<string | null>(`localStorage.getItem("openam.muted")`);
+  await screenshot("17-muted");
+  await load(url.replace("?diag", "?diag&patience=600"));
+  await toBriefing();
+  await beginRound();
+  const pressedAfter = await evaluate<string | null>("document.querySelector('.hud .mute').getAttribute('aria-pressed')");
+  const label = await evaluate<string | null>("document.querySelector('.hud .mute').getAttribute('aria-label')");
+  sound(pressed === "true" && stored === "1" && pressedAfter === "true" && label === "Sound off", "muting is remembered under openam.muted after a reload", `mute: pressed ${pressed}, stored ${stored}, after reload pressed ${pressedAfter}, label ${label}`);
+  await clearSound();
+  await pullOff("fuel_hose");
+  await idle();
+  h = await heardNow();
+  v = await vibrationsNow();
+  sound(h.length >= 2 && h.every((x) => !x.audible) && v.length === 0, "while muted every moment is silent and nothing vibrates", `while muted: ${JSON.stringify(h)} and vibrated ${JSON.stringify(v)}`);
+  await tapSelector(".hud .mute");
+  sound((await evaluate<string | null>(`localStorage.getItem("openam.muted")`)) === "0", "unmuting is remembered", "unmuting was not stored");
+
+  // The winning pull: the cord, then the engine, with a pattern under 300 ms.
+  await load(url.replace("?diag", "?diag&patience=600"));
+  await toBriefing();
+  await beginRound();
+  await solveRound();
+  await sleep(1000);
+  h = await heardNow();
+  v = await vibrationsNow();
+  const last = moments(h).slice(-2);
+  const startBuzz = v.at(-1);
+  sound(
+    JSON.stringify(last) === '["cord","start"]' && Array.isArray(startBuzz) && vibrationMs([startBuzz]) < 300,
+    `the winning pull plays the cord then start (${Array.isArray(startBuzz) ? vibrationMs([startBuzz]) : "no"} ms pattern)`,
+    `the winning pull ended with ${JSON.stringify(last)} and vibrated ${JSON.stringify(startBuzz)}`,
+  );
+  if (soundFiles > 0) sound(h.every((x) => x.audible), "every moment could be heard", "some moments could not be heard with their files decoded");
+  await tapSelector(".result .primary");
+  await atStart();
+} catch (e) {
+  failures.push(`sound: ${(e as Error).message}`);
+  await screenshot("fail-sound");
+}
+
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
 if (failures.length === 0) {
   await toBriefing();
@@ -642,12 +791,17 @@ if (failures.length === 0) {
   await load(url.replace("?diag", "?diag&patience=5"));
   await toBriefing();
   await tapSelector(".briefing .primary");
+  await evaluate<void>("(window.__openAmDevAudio?.clear(), window.__vibrations = [], undefined)");
   await sleep(3000);
   if (await evaluate<boolean>("!document.querySelector('.speech').hidden")) await screenshot("5-customer-line");
   else failures.push("walk-out: the customer said nothing at 50 percent patience");
   walkedOk = await waitFor("the walked result", () => evaluate<boolean>("!!document.querySelector('.result.walked')"), 12000).catch(() => false);
   if (walkedOk) await screenshot("6-walked");
   else failures.push("walk-out: no walked result screen after the patience ran out");
+  const walkHeard = await evaluate<unknown[]>("window.__openAmDevAudio?.log() ?? []");
+  const walkBuzz = await evaluate<unknown[]>("window.__vibrations ?? []");
+  if (walkHeard.length || walkBuzz.length) failures.push(`sound: the walk-out fired ${JSON.stringify(walkHeard)} and vibrated ${JSON.stringify(walkBuzz)}`);
+  else soundChecks.push("the walk-out is silent");
   if (await evaluate<boolean>("!!document.querySelector('.result .share')")) failures.push("walk-out: a walked free round offered Share");
 }
 
@@ -758,6 +912,7 @@ console.log(`Daily: ${dailyChecks.join("; ") || "not run"}`);
 console.log(`Storage blocked: ${blockedOk ? "a round played to the result with no console errors" : "FAILED"}`);
 console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}`);
 console.log(`Checks: ${checks.join("; ") || "not run"}`);
+console.log(`Sound: ${soundChecks.join("; ") || "not run"}; files decoded: ${soundFiles} of ${MOMENT_FILES}`);
 console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done up again on ${[...fastenedBackIn].join(", ") || "none"}; tools seen: ${[...toolsSeen].join(", ") || "none"}`);
 if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
 for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
