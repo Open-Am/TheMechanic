@@ -979,6 +979,11 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         return pts.length ? hidden / pts.length : 0;
       },
       orbit: () => ({ ...orbit }),
+      /** Sets the camera's azimuth and polar (radians), for checks that need a given angle. */
+      setOrbit: (azimuth: number, polar: number) => {
+        orbit = { ...orbit, azimuth, polar };
+        placeCamera();
+      },
       /** How far (metres) the whole hand, every sample point, would have to come towards the camera to clear the machine. */
       handNeed: () => (hand && hand.visible ? collide(hand.samplePoints()) : 0),
       marker: "open-am-dev-hook",
