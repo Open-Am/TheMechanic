@@ -1,7 +1,7 @@
 ---
 id: 0014
 title: Phase 4, the daily fault, local best scores, share, loading and the frame-rate check
-status: approved
+status: done
 date: 2026-10-11
 adrs: [0001, 0002, 0004, 0005, 0007, 0010, 0014, 0015, 0022, 0024]
 branch: plan/0014-phase-4
@@ -116,6 +116,20 @@ Nothing strictly. It touches `game/src/main.ts`, `game/src/ui/index.ts`, `game/s
 
 - **Share for a walked daily, free play and practice.** ADR 0005 gives a text only for a fixed daily. The plan shows no Share button otherwise. If the owner wants one (for example `Open Am · Day 12` / `Customer walked · 2 wrong parts` / url), that is a change to ADR 0005's share text and needs a superseding ADR.
 - **One extra tap in free play** (reading 1). Acceptable, or should "Next customer" go straight to another free-play round with the daily reachable from the result screen?
+
+## What changed during the build
+
+- ADR 0024 was accepted before the build started, so the unfinished record and the mid-round reload check were built with the rest.
+- The result screen learns what was saved from `game.recorded`, a promise app settles once the round's result is stored (with the best before and after), rather than ui asking the store. It waits at most 1.5 s.
+- A day's saved record is replaced only while it is unfinished, so a second scored record for a finished day can never overwrite it (ADR 0005: one scored attempt).
+- With a share sheet present, a cancel and a broken sheet with a refused clipboard both return "none" (as the step 4 test asks), so the hand-copy box shows only when there is no sheet. See the release note's known gaps.
+- The build's base path is relative (`./`), so the share link is that path resolved against the page's address, with no query or hash.
+- The progress counter lives in `game/src/render/progress.ts`, and its test with the progress-share test in `game/tests/loading.test.ts`, to keep the change to `render/model.ts` small for the merge with plan 0011.
+- `tools/verify/drop-play.ts` needed the same "Free play" tap. Both browser checks now close their browser over DevTools: a headless Edge left on the debug port by an earlier run was reused with that run's saved scores.
+
+## Results
+
+All checks in "Done when" that an agent can run pass: 295 tests, typecheck, docs check, build and size (184.3 KB); `boundaries.test.ts` unchanged. `npm run verify:phone` exits 0 with every check of step 7, at 117 fps at 4x CPU throttle in headless Edge, and exits 1 with the budget set to 1000 fps. `npm run verify:drop` exits 0. Unit tests cover the day change and the exact ADR 0005 text. Waiting on the owner: the start screen, progress bar, daily, practice and share sheet on a real phone over mobile data.
 
 ## Release note line
 
