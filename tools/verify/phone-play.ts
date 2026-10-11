@@ -6,8 +6,10 @@
 //   fresh temporary folder on every run.
 //
 // Starts the Vite dev server, opens the game with ?diag, takes each part off (double tap, then drag to the tray), fixes the culprit, drags the
-// chips back, pulls the cord, and repeats with "Next customer" until all six faults are solved. Saves screenshots,
-// reports console errors and a frame-rate sample at 4x CPU throttle. Exits 1 on any failure.
+// chips back, pulls the cord, and repeats with "Next customer" and "Free play" until all six faults are solved. Saves
+// screenshots, reports console errors and fails below 30 fps at 4x CPU throttle (ADR 0014). Plan 0014 adds: the loading
+// bar with Start disabled, today's fault scored once then practice, Share text on the clipboard, a daily left mid-round
+// reading "Not finished" (ADR 0024), the next day's daily, and a round with localStorage throwing. Exits 1 on any failure.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,7 +17,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { removalOrder } from "../../game/src/core/rules.ts";
-import type { FaultFile, Machine } from "../../game/src/core/types.ts";
+import type { FaultFile, Machine, ScoreBreakdown } from "../../game/src/core/types.ts";
+import { shareText } from "../../game/src/ui/format.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const arg = (name: string) => {
@@ -46,6 +49,8 @@ const faultFile = JSON.parse(readFileSync(join(machineDir, "faults.json"), "utf8
 const PORT = Number(process.env.OPEN_AM_PORT) || 5199;
 const DEBUG_PORT = Number(process.env.OPEN_AM_DEBUG_PORT) || 9333;
 const VIEWPORT = { width: 390, height: 844 };
+/** The frame-rate budget at 4x CPU throttle (ADR 0014). Below it, or unread, the run fails (plan 0014). */
+const FPS_BUDGET = Number(process.env.OPEN_AM_FPS_BUDGET) || 30;
 /**
  * A camera drag on empty background, clear of the diagnostic panel in the top-left corner: the same 80 by 20 px drag as
  * before, started higher. Since 0.9.3 frames the machine higher, the old start (290, 300) landed on the tank, so the
@@ -114,6 +119,8 @@ await new Promise((r, j) => {
   ws.onerror = j;
 });
 let nextId = 1;
+/** Requests held back by the Fetch domain, to see the loading screen before the model arrives. */
+const heldRequests: string[] = [];
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 ws.onmessage = (msg) => {
   const data = JSON.parse(String(msg.data)) as { id?: number; result?: unknown; error?: { message: string }; method?: string; params?: Record<string, unknown> };
@@ -125,6 +132,7 @@ ws.onmessage = (msg) => {
     return;
   }
   const params = data.params ?? {};
+  if (data.method === "Fetch.requestPaused") heldRequests.push(String(params.requestId));
   if (data.method === "Runtime.consoleAPICalled" && params.type === "error") {
     consoleErrors.push((params.args as Array<{ value?: unknown; description?: string }>).map((a) => a.value ?? a.description).join(" "));
   }
@@ -272,14 +280,66 @@ async function putBack(id: string): Promise<void> {
 
 // ---- The run ----
 
+/** The start screen after a page load (plan 0014). */
+const atStart = () => waitFor("the start screen", () => evaluate<boolean>("!!document.querySelector('.start')"), 30000);
+/** Text of an element, or null. */
+const textOf = (selector: string) => evaluate<string | null>(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`);
+/** From the start screen to the briefing through a button, then waits for Start to be enabled (the machine loaded). */
+async function toBriefing(button = ".start .free"): Promise<void> {
+  await tapSelector(button);
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await waitFor("Start enabled", () => evaluate<boolean>("document.querySelector('.briefing .primary')?.disabled === false"), 60000);
+  await sleep(300);
+}
+async function beginRound(): Promise<void> {
+  await tapSelector(".briefing .primary");
+  await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+}
+async function load(pageUrl: string): Promise<void> {
+  await send("Page.navigate", { url: pageUrl });
+  await atStart();
+}
+
 await send("Runtime.enable");
 await send("Log.enable");
 await send("Page.enable");
+await send("Network.enable");
 await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
-await send("Page.navigate", { url });
-await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
-await sleep(500);
-await screenshot("1-briefing");
+// The headless browser has no share sheet: make sure of it, so Share goes to the clipboard, and note what is copied.
+await send("Page.addScriptToEvaluateOnNewDocument", {
+  source: `try { delete Navigator.prototype.share; } catch {} if (navigator.clipboard) { const w = navigator.clipboard.writeText.bind(navigator.clipboard); navigator.clipboard.writeText = (t) => { window.__copied = t; return w(t); }; }`,
+});
+await send("Browser.grantPermissions", { origin: `http://localhost:${PORT}`, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] }).catch((e: Error) => console.log(`   clipboard permission not granted: ${e.message}`));
+
+// Loading (plan 0014 step 6): the page carries a wordless bar before any script, and with the network throttled and the
+// model held back, the start screen and briefing show with a progress bar and Start disabled until the model arrives.
+const loadingChecks: string[] = [];
+{
+  const html = await (await fetch(`http://localhost:${PORT}/`)).text();
+  if (/id="boot"/.test(html)) loadingChecks.push("the page has the loading bar before any script runs");
+  else failures.push("loading: index.html has no loading bar");
+  await send("Network.emulateNetworkConditions", { offline: false, latency: 150, downloadThroughput: (4 * 1024 * 1024) / 8, uploadThroughput: (1 * 1024 * 1024) / 8 });
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*model.glb*", requestStage: "Request" }] });
+  await load(url);
+  await screenshot("0-start");
+  await tapSelector(".start .free");
+  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
+  await waitFor("the model request held", async () => heldRequests.length > 0, 20000).catch(() => false);
+  const state = await evaluate<{ bar: boolean; disabled: boolean }>(
+    `({ bar: !!document.querySelector('.briefing .progress.loading'), disabled: document.querySelector('.briefing .primary').disabled === true })`,
+  );
+  await screenshot("1-briefing-loading");
+  if (state.bar && state.disabled) loadingChecks.push("the briefing shows a progress bar with Start disabled while the model loads");
+  else failures.push(`loading: while the model loaded the bar was ${state.bar ? "shown" : "missing"} and Start was ${state.disabled ? "disabled" : "enabled"}`);
+  for (const requestId of heldRequests.splice(0)) await send("Fetch.continueRequest", { requestId });
+  await send("Fetch.disable");
+  await waitFor("Start enabled", () => evaluate<boolean>("document.querySelector('.briefing .primary')?.disabled === false"), 60000);
+  if (await evaluate<boolean>("!document.querySelector('.briefing .progress.loading')")) loadingChecks.push("the bar goes and Start is enabled once the model is in");
+  else failures.push("loading: the progress bar stayed after the model loaded");
+  await send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  await sleep(500);
+  await screenshot("1-briefing");
+}
 
 const solved = new Map<string, string>();
 const shots = new Set<string>();
@@ -397,42 +457,49 @@ async function noteHidden(where: string): Promise<void> {
     } else failures.push("checks: the fuel hose or tank was not in view");
   }
   // Back to a fresh round for the faults.
-  await send("Page.navigate", { url });
-  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
-  await sleep(300);
+  await load(url);
 }
-for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round++) {
-  await tapSelector(".briefing .primary");
-  await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+
+/** Plays the running round's fault to the result screen, as a player does. Returns the fault and the shown total. */
+async function solveRound(): Promise<{ faultId: string; score: string }> {
   const m = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
   if (!m) throw new Error("diagnostic overlay did not show the fault");
   const fault = faultFile.faults.find((f) => f.id === m[1])!;
   const order = removalOrder(machine, fault);
+  for (const id of order) {
+    await pullOff(id);
+    const fill = await chipPictureFill(id);
+    if (fill < 0.03) throw new Error(`tray picture for ${id} is missing or blank (${(fill * 100).toFixed(1)}% opaque)`);
+    if (!shots.has("working")) {
+      shots.add("working");
+      await idle();
+      await screenshot("2-working");
+    }
+  }
+  await idle();
+  await tapSelector(`.tray [data-part="${fault.culprit}"]`);
+  await waitFor("the card", () => evaluate<boolean>("!!document.querySelector('.card .sheet')"));
+  if (!shots.has("card")) {
+    shots.add("card");
+    await screenshot("3-card");
+  }
+  await tapSelector(".card .primary");
+  await waitFor("the fix", async () => /fixed true/.test(await diag()), 5000);
+  await tapSelector(".card .close");
+  for (const id of [...order].reverse()) await putBack(id);
+  await tapSelector(".pull");
+  await waitFor("the result screen", () => evaluate<boolean>("!!document.querySelector('.result')"), 5000);
+  return { faultId: fault.id, score: await evaluate<string>("document.querySelector('.result .total').textContent") };
+}
+
+for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round++) {
+  await toBriefing();
+  await beginRound();
+  const m = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
+  if (!m) throw new Error("diagnostic overlay did not show the fault");
+  const fault = faultFile.faults.find((f) => f.id === m[1])!;
   try {
-    for (const id of order) {
-      await pullOff(id);
-      const fill = await chipPictureFill(id);
-      if (fill < 0.03) throw new Error(`tray picture for ${id} is missing or blank (${(fill * 100).toFixed(1)}% opaque)`);
-      if (!shots.has("working")) {
-        shots.add("working");
-        await idle();
-        await screenshot("2-working");
-      }
-    }
-    await idle();
-    await tapSelector(`.tray [data-part="${fault.culprit}"]`);
-    await waitFor("the card", () => evaluate<boolean>("!!document.querySelector('.card .sheet')"));
-    if (!shots.has("card")) {
-      shots.add("card");
-      await screenshot("3-card");
-    }
-    await tapSelector(".card .primary");
-    await waitFor("the fix", async () => /fixed true/.test(await diag()), 5000);
-    await tapSelector(".card .close");
-    for (const id of [...order].reverse()) await putBack(id);
-    await tapSelector(".pull");
-    await waitFor("the result screen", () => evaluate<boolean>("!!document.querySelector('.result')"), 5000);
-    const score = await evaluate<string>("document.querySelector('.result .total').textContent");
+    const { score } = await solveRound();
     if (!shots.has("result")) {
       shots.add("result");
       await screenshot("4-result");
@@ -447,26 +514,29 @@ for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round+
     break;
   }
   await tapSelector(".result .primary");
-  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"));
+  await atStart();
 }
-
 for (const f of faultFile.faults) if (!solved.has(f.id) && !failures.some((x) => x.startsWith(f.id))) failures.push(`${f.id}: never came up or not solved`);
 
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
-if (failures.length === 0) await tapSelector(".briefing .primary");
+if (failures.length === 0) {
+  await toBriefing();
+  await beginRound();
+}
 await send("Emulation.setCPUThrottlingRate", { rate: 4 });
 for (let i = 0; i < 6; i++) await drag(ROTATE.x0, ROTATE.y0, ROTATE.x1, ROTATE.y1, 20);
 await sleep(1200);
 const fps = Number(/fps (\d+)/.exec(await diag())?.[1] ?? "0");
 await send("Emulation.setCPUThrottlingRate", { rate: 1 });
+if (!(fps > 0)) failures.push("frame rate: could not be read from the diagnostic overlay");
+else if (fps < FPS_BUDGET) failures.push(`frame rate: ${fps} fps at 4x CPU throttle is under the ${FPS_BUDGET} fps budget (ADR 0014)`);
 
 // A forced walk-out (plan 0007): every customer gets 5 seconds of patience. The customer should react at 50 percent,
 // leave, and the walked result screen should show.
 let walkedOk = false;
 if (failures.length === 0) {
-  await send("Page.navigate", { url: url.replace("?diag", "?diag&patience=5") });
-  await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
-  await sleep(300);
+  await load(url.replace("?diag", "?diag&patience=5"));
+  await toBriefing();
   await tapSelector(".briefing .primary");
   await sleep(3000);
   if (await evaluate<boolean>("!document.querySelector('.speech').hidden")) await screenshot("5-customer-line");
@@ -474,16 +544,120 @@ if (failures.length === 0) {
   walkedOk = await waitFor("the walked result", () => evaluate<boolean>("!!document.querySelector('.result.walked')"), 12000).catch(() => false);
   if (walkedOk) await screenshot("6-walked");
   else failures.push("walk-out: no walked result screen after the patience ran out");
+  if (await evaluate<boolean>("!!document.querySelector('.result .share')")) failures.push("walk-out: a walked free round offered Share");
+}
+
+// Today's fault (plan 0014 step 7). The dates are set with the dev-only ?today= query; day N counts from 2026-10-01.
+const dailyChecks: string[] = [];
+const dayUrl = (iso: string) => `${url}&today=${encodeURIComponent(iso)}`;
+const DAY_A = { iso: "2026-10-21T08:00:00Z", day: 20 };
+const DAY_B = { iso: "2026-10-22T08:00:00Z", day: 21 };
+const DAY_C = { iso: "2026-10-23T08:00:00Z", day: 22 };
+function check(ok: boolean, passed: string, failed: string): void {
+  if (ok) dailyChecks.push(passed);
+  else failures.push(`daily: ${failed}`);
+}
+try {
+  // Scored once: the button and the briefing name the day; the result offers Share; Share copies ADR 0005's text.
+  await load(dayUrl(DAY_A.iso));
+  const button = await textOf(".start .daily");
+  check(button === `Today's fault · Day ${DAY_A.day}`, `the start screen offers "${button}"`, `the start screen's daily button read "${button}"`);
+  await toBriefing(".start .daily");
+  const label = await textOf(".briefing .daily-label");
+  check(label === `Today's fault · Day ${DAY_A.day}`, "the briefing names the day", `the briefing's daily label read "${label}"`);
+  await beginRound();
+  await solveRound();
+  await waitFor("the best row", () => evaluate<boolean>("!!document.querySelector('.result .best')"), 5000).catch(() => false);
+  await screenshot("12-daily-result");
+  check(await evaluate<boolean>("!!document.querySelector('.result .best')"), "the result shows the best", "the result screen showed no best");
+  check(await evaluate<boolean>("!!document.querySelector('.result .share')"), "the result shows Share", "the scored daily's result had no Share button");
+  const saved = await evaluate<string | null>(`localStorage.getItem("openam.scores.v1")`);
+  const record = saved ? (JSON.parse(saved) as { daily: Record<string, { score: ScoreBreakdown; unfinished?: boolean }> }).daily[String(DAY_A.day)] : undefined;
+  check(!!record && !record.unfinished && record.score.outcome === "fixed", "the day's result is saved under openam.scores.v1", "the day's result was not saved finished");
+  await tapSelector(".result .share");
+  const status = await waitFor("Copied", async () => ((await textOf(".result .share-status")) === "Copied" ? "Copied" : null), 5000).catch(() => null);
+  const copied = await evaluate<string | null>("window.__copied ?? null");
+  const expected = record ? shareText(DAY_A.day, record.score, `http://localhost:${PORT}/`) : "(no record)";
+  check(status === "Copied" && copied === expected, "Share copies the exact ADR 0005 text and says Copied", `Share copied ${JSON.stringify(copied)}, expected ${JSON.stringify(expected)}, status ${JSON.stringify(status)}`);
+  if (copied) console.log(`   shared text:\n      ${copied.split("\n").join("\n      ")}`);
+  await screenshot("13-shared");
+
+  // A reload: the daily is now practice, and the start screen shows the day's result.
+  await load(dayUrl(DAY_A.iso));
+  const again = await textOf(".start .daily");
+  const today = await textOf(".start .today");
+  check(again === "Today's fault · practice", "after a reload the daily reads practice", `after a reload the daily button read "${again}"`);
+  check(!!today && today.startsWith(`Day ${DAY_A.day}: score `), `the start screen shows "${today}"`, `the start screen's result read "${today}"`);
+  await screenshot("14-start-practice");
+  await toBriefing(".start .daily");
+  check((await textOf(".briefing .daily-label")) === "Practice, not scored", "the practice briefing says it is not scored", "the practice briefing did not say it is not scored");
+  await beginRound();
+  await solveRound();
+  await waitFor("Not scored", () => evaluate<boolean>("!!document.querySelector('.result .not-scored')"), 5000).catch(() => false);
+  check(
+    await evaluate<boolean>("!!document.querySelector('.result .not-scored') && !document.querySelector('.result .share') && !document.querySelector('.result .best')"),
+    "a practice result says Not scored, with no best and no Share",
+    "the practice result was not marked Not scored, or offered a best or Share",
+  );
+  const after = await evaluate<string | null>(`localStorage.getItem("openam.scores.v1")`);
+  check(after === saved || JSON.stringify(JSON.parse(after ?? "{}").daily?.[String(DAY_A.day)]) === JSON.stringify(record), "practice saves nothing", "practice changed the day's saved result");
+
+  // ADR 0024: a daily left mid-round (a reload) is used up, reads Not finished, and is not scored again.
+  await load(dayUrl(DAY_B.iso));
+  await toBriefing(".start .daily");
+  await beginRound();
+  await sleep(1500);
+  await load(dayUrl(DAY_B.iso));
+  const unfinished = await textOf(".start .today");
+  const buttonB = await textOf(".start .daily");
+  check(unfinished === `Day ${DAY_B.day}: Not finished`, "a daily left mid-round reads Not finished", `after leaving a daily mid-round the start screen read "${unfinished}"`);
+  check(buttonB === "Today's fault · practice", "and is not scored again", `after leaving a daily mid-round the button read "${buttonB}"`);
+  await screenshot("15-not-finished");
+
+  // The next day offers a new daily.
+  await load(dayUrl(DAY_C.iso));
+  const buttonC = await textOf(".start .daily");
+  check(buttonC === `Today's fault · Day ${DAY_C.day}`, "the next day offers a new daily", `the next day's daily button read "${buttonC}"`);
+  check((await textOf(".start .today")) === null, "with no result yet", "the next day showed a result before it was played");
+} catch (e) {
+  failures.push(`daily: ${(e as Error).message}`);
+  await screenshot("fail-daily");
+}
+
+// Storage blocked (ADR 0005): every touch of localStorage throws, and a round still plays to the result with no errors.
+let blockedOk = false;
+{
+  const errorsBefore = consoleErrors.length;
+  const { identifier } = await send<{ identifier: string }>("Page.addScriptToEvaluateOnNewDocument", {
+    source: `Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new DOMException("The operation is insecure.", "SecurityError"); } });`,
+  });
+  try {
+    await load(url);
+    await toBriefing();
+    await beginRound();
+    await solveRound();
+    await waitFor("the result's hint", () => evaluate<boolean>("!!document.querySelector('.result .hint')"), 5000);
+    blockedOk = consoleErrors.length === errorsBefore;
+    if (!blockedOk) failures.push("storage blocked: console errors during the round");
+    await screenshot("16-storage-blocked");
+  } catch (e) {
+    failures.push(`storage blocked: ${(e as Error).message}`);
+    await screenshot("fail-storage-blocked");
+  }
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
 }
 
 console.log(`\nFaults solved: ${solved.size} of ${faultFile.faults.length}`);
 console.log(`Forced walk-out: ${walkedOk ? "the customer reacted, left, and the walked result showed" : "not run or FAILED"}`);
+console.log(`Loading: ${loadingChecks.join("; ") || "not run"}`);
+console.log(`Daily: ${dailyChecks.join("; ") || "not run"}`);
+console.log(`Storage blocked: ${blockedOk ? "a round played to the result with no console errors" : "FAILED"}`);
 console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}`);
 console.log(`Checks: ${checks.join("; ") || "not run"}`);
 console.log(`Hand inside the machine: at most ${(worstHidden.share * 100).toFixed(0)}% of its points hidden${worstHidden.where ? ` (${worstHidden.where})` : ""}, limit ${HIDDEN_LIMIT * 100}%`);
 if (worstHidden.share > HIDDEN_LIMIT) failures.push(`hand: ${(worstHidden.share * 100).toFixed(0)}% of it went inside the machine, ${worstHidden.where}`);
 if (handSeen === null && (await evaluate<boolean>("window.__openAmDevRender?.hasHand?.() ?? false").catch(() => false))) failures.push("hand: never seen carrying a part");
-console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps`);
+console.log(`Frame rate at 4x CPU throttle (headless, software GL): ${fps} fps, budget ${FPS_BUDGET} fps`);
 console.log(`Console errors: ${consoleErrors.length}`);
 for (const e of consoleErrors) console.log(`   ${e}`);
 for (const f of failures) console.log(`FAIL ${f}`);

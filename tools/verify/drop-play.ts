@@ -405,8 +405,11 @@ for (const inp of INPUTS) {
   await send("Emulation.setTouchEmulationEnabled", { enabled: inp === "touch", maxTouchPoints: 5 });
   for (const place of DROPS) {
     await send("Page.navigate", { url });
+    await tapSelector(".start .free"); // the start screen (plan 0014): free play
     await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
     await sleep(300);
+    // Start stays disabled until the machine has loaded (plan 0014).
+    await waitFor("Start enabled", () => evaluate<boolean>("document.querySelector('.briefing .primary')?.disabled === false"), 30000);
     await tapSelector(".briefing .primary");
     await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
     // Collapse the diagnostic panel to its one-line frame rate so it covers nothing a player would touch.
