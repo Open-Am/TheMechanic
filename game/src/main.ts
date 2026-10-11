@@ -78,6 +78,7 @@ async function start(): Promise<void> {
   const mounted = mountUi(ui, stage, game, { partImage: view.partImage, carry: { move: view.carryChip, end: view.endChipCarry } });
   view.setTrayTest(mounted.overTray);
   view.onCarry(mounted.setDropState);
+  mounted.onCover(view.setBottomCover);
 
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("diag")) {
     const { mountDiagnostic } = await import("./diagnostic/overlay.ts");

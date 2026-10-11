@@ -21,6 +21,7 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 ## Modelling (Phase 3)
 
 - Capacitor look: a round cream cylinder (Nigerian video) or a black CBB61 box (listing). The placeholder is cream for now; the mechanic or a photo decides.
+- Capacitor in view: the removal check of release 0.9.3 (`tools/verify/drop-play.ts`) turned the machine all the way round at the default tilt, with the alternator end cover and every other part off, and no pixel of the capacitor showed from any side (other tilts not tried). It still comes off by tapping where it is, through its finger-sized hit volume, but a player cannot see it. Whether the model hides it inside the alternator end, and whether it should show, is for the model's next pass.
 - There is no tube frame. `base_frame` will be modelled as the die-cast base, rubber mounts and body shell. Its ID stays as it is (data contract).
 - Fuel tap position: not seen clearly in any photo. Plan 0005 puts it under the tank's left front corner with the lever facing left, and runs the hose down the left side into the filter compartment, so both can be seen and pulled. A photo of a real machine settles it.
 - Front panel variants: the Tiger TG950 has a full-width panel (round socket, warning label, switch, choke); other clones have a narrower panel with a blue Schuko socket and a meter, and the alternator further forward. The model follows the Tiger.

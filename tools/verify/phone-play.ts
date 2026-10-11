@@ -2,6 +2,8 @@
 // No dependencies: drives Edge or Chrome over the DevTools protocol with Node's own fetch and WebSocket.
 //
 //   node tools/verify/phone-play.ts [--out <dir>] [--browser <path>] [--lighting fallback]
+//   OPEN_AM_PORT=5299 OPEN_AM_DEBUG_PORT=9433 run it beside another copy (defaults 5199 and 9333). The browser profile is a
+//   fresh temporary folder on every run.
 //
 // Starts the Vite dev server, opens the game with ?diag, takes each part off (double tap, then drag to the tray), fixes the culprit, drags the
 // chips back, pulls the cord, and repeats with "Next customer" until all six faults are solved. Saves screenshots,
@@ -40,8 +42,9 @@ const machineDir = join(root, "game", "public", "machines", "gen950");
 const machine = JSON.parse(readFileSync(join(machineDir, "machine.json"), "utf8")) as Machine;
 const faultFile = JSON.parse(readFileSync(join(machineDir, "faults.json"), "utf8")) as FaultFile;
 
-const PORT = 5199;
-const DEBUG_PORT = 9333;
+/** Ports, overridable so two copies of a check can run at once: OPEN_AM_PORT (Vite) and OPEN_AM_DEBUG_PORT (DevTools). */
+const PORT = Number(process.env.OPEN_AM_PORT) || 5199;
+const DEBUG_PORT = Number(process.env.OPEN_AM_DEBUG_PORT) || 9333;
 const VIEWPORT = { width: 390, height: 844 };
 /** A camera drag on empty background, clear of the diagnostic panel in the top-left corner. */
 const ROTATE = { x0: 290, y0: 300, x1: 370, y1: 320 };
@@ -50,16 +53,16 @@ const children: ChildProcess[] = [];
 const failures: string[] = [];
 const consoleErrors: string[] = [];
 
-/** Stops Vite and the browser. On Windows, kill() stops only the top process and leaves the browser's helpers running
- *  (hundreds of headless Edge processes piled up), so the whole process tree is ended with taskkill. */
+/** Stops the dev server and the browser with all its child processes (on Windows a plain kill leaves Edge's helpers running). */
 function cleanup(): void {
   for (const c of children) {
-    if (process.platform === "win32" && c.pid !== undefined && c.exitCode === null) {
-      spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
-    } else c.kill();
+    if (c.exitCode !== null || c.pid === undefined) continue;
+    if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(c.pid), "/T", "/F"], { stdio: "ignore" });
+    else c.kill();
   }
 }
 process.on("exit", cleanup);
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => process.exit(130));
 
 async function waitFor<T>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 15000): Promise<T> {
   const end = Date.now() + ms;

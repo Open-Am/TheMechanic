@@ -28,6 +28,11 @@ export interface Ui {
   overTray(x: number, y: number): boolean;
   /** Shows where a carried part can be dropped: "carrying" lights the tray, "over" when the part is over it. */
   setDropState(state: "none" | "carrying" | "over"): void;
+  /**
+   * Tells `fn` how many CSS px at the bottom of the screen the controls (pull cord and tray) cover, now and whenever it
+   * changes, so the machine can be framed above them (release 0.9.3). 0 while the HUD is hidden.
+   */
+  onCover(fn: (px: number) => void): void;
 }
 
 export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, options: UiOptions = {}): Ui {
@@ -51,6 +56,18 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   };
   const tray = createTray(trayHost, game, card, overMachine, options.partImage ?? (() => null), options.carry ?? null);
   trayHost.appendChild(dropHint); // shown inside the lit tray while a part is carried
+
+  // How much of the screen the controls cover: they grow a row at a time as chips pile up in the tray.
+  let coverFn: ((px: number) => void) | null = null;
+  let lastCover = -1;
+  const tellCover = (): void => {
+    const px = hud.hidden ? 0 : Math.max(0, Math.round(window.innerHeight - controls.getBoundingClientRect().top));
+    if (px === lastCover) return;
+    lastCover = px;
+    coverFn?.(px);
+  };
+  new ResizeObserver(tellCover).observe(controls);
+  window.addEventListener("resize", tellCover);
 
   let symptomText = "";
   let bannerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -150,6 +167,11 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
       controls.classList.toggle("carrying", state !== "none");
       controls.classList.toggle("over", state === "over");
       dropHint.hidden = state === "none";
+    },
+    onCover(fn) {
+      coverFn = fn;
+      lastCover = -1;
+      tellCover();
     },
   };
 }

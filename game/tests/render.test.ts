@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DOUBLE_TAP, dragMode, isDoubleTap, screenDirection } from "../src/render/gesture.ts";
+import { DOUBLE_TAP, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
 import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, poseAt, resolveMotion, spannerSwing } from "../src/render/motion.ts";
-import { clampOrbit, fitDistance, position, projectPoint, rotate, TURN, turnToward, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
+import { clampOrbit, fitDistance, FRAME, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
 import { matchNodes } from "../src/render/match.ts";
@@ -194,6 +194,42 @@ describe("orbit", () => {
 
   it("world per pixel grows with distance", () => {
     expect(worldPerPixel(2, 0.8, 800)).toBeCloseTo(2 * worldPerPixel(1, 0.8, 800));
+  });
+});
+
+describe("framing the machine above the controls (0.9.3)", () => {
+  const fov = (40 * Math.PI) / 180;
+
+  it("with nothing covering the screen the picture is not moved", () => {
+    expect(frameAbove(fov, 390, 844, 0)).toEqual({ shiftPx: 0, distanceScale: 1 });
+    expect(frameAbove(fov, 390, 844, -20)).toEqual({ shiftPx: 0, distanceScale: 1 });
+  });
+
+  it("centres the machine in the part of the screen above the controls", () => {
+    const cover = 376; // a phone with twelve chips in the tray
+    const f = frameAbove(fov, 390, 844, cover);
+    expect(f.shiftPx).toBe(cover / 2);
+    // The orbit target, at the centre of the whole frustum, lands in the middle of the free part of the screen.
+    const p = projectPoint({ azimuth: 0.5, polar: 1.1, distance: 1 }, [0, 0, 0], [0, 0, 0], fov, 390 / 844)!;
+    const viewNdcY = p[1] + (2 * f.shiftPx) / 844;
+    expect(close(((1 - viewNdcY) / 2) * 844, (844 - cover) / 2, 1e-9)).toBe(true);
+    expect(close(unshiftNdcY(viewNdcY, f.shiftPx, 844), p[1], 1e-12)).toBe(true);
+  });
+
+  it("a narrow portrait screen is fitted by its width, so the machine keeps its size", () => {
+    expect(frameAbove(fov, 390, 844, 200).distanceScale).toBeCloseTo(1, 12);
+  });
+
+  it("when the free part is the narrower side, the camera stands back so the machine still fits", () => {
+    const f = frameAbove(fov, 800, 800, 400);
+    const freeFov = 2 * Math.atan(Math.tan(fov / 2) * 0.5);
+    expect(close(f.distanceScale, fitDistance(1, freeFov, 2) / fitDistance(1, fov, 1), 1e-12)).toBe(true);
+    expect(f.distanceScale).toBeGreaterThan(1);
+  });
+
+  it("always leaves the machine a share of the screen, however tall the controls grow", () => {
+    const f = frameAbove(fov, 390, 844, 5000);
+    expect(f.shiftPx).toBeCloseTo((844 * (1 - FRAME.minFreeShare)) / 2);
   });
 });
 
@@ -438,15 +474,37 @@ describe("pinching small parts (plan 0009, ADR 0020)", () => {
 });
 
 describe("deliberate removal: double tap, then carry (plan 0010, ADR 0020)", () => {
-  const tap = (part: string | null, t: number, x = 100, y = 100) => ({ part, t, x, y });
+  /** A tap pressed at `down` and lifted 80 ms later, unless `up` is given. */
+  const tap = (part: string | null, down: number, x = 100, y = 100, under: string[] = part ? [part] : [], up = down + 80) => ({ part, under, down, up, x, y });
 
   it("two taps on the same part, close in time and place, are a double tap", () => {
-    expect(isDoubleTap(tap("spark_plug", 0), tap("spark_plug", DOUBLE_TAP.ms))).toBe(true);
-    expect(isDoubleTap(tap("spark_plug", 0), tap("spark_plug", DOUBLE_TAP.ms + 1))).toBe(false);
-    expect(isDoubleTap(tap("spark_plug", 0), tap("plug_cap", 100))).toBe(false);
-    expect(isDoubleTap(tap("spark_plug", 0), tap("spark_plug", 100, 100 + DOUBLE_TAP.px + 1))).toBe(false);
-    expect(isDoubleTap(tap(null, 0), tap(null, 100))).toBe(false);
-    expect(isDoubleTap(null, tap("spark_plug", 100))).toBe(false);
+    const first = tap("spark_plug", 0); // lifts at 80
+    expect(doubleTapPart(first, tap("spark_plug", 80 + DOUBLE_TAP.ms))).toBe("spark_plug");
+    expect(doubleTapPart(first, tap("spark_plug", 80 + DOUBLE_TAP.ms + 1))).toBeNull();
+    expect(doubleTapPart(first, tap("plug_cap", 200))).toBeNull();
+    expect(doubleTapPart(first, tap("spark_plug", 200, 100 + DOUBLE_TAP.px + 1))).toBeNull();
+    expect(doubleTapPart(tap(null, 0), tap(null, 200))).toBeNull();
+    expect(doubleTapPart(null, tap("spark_plug", 200))).toBeNull();
+  });
+
+  it("the window runs from the first lift to the second press, so a slow second press does not spoil it (0.9.3)", () => {
+    // Before 0.9.3 the window ran lift to lift: two 120 ms presses 120 ms apart already took 240 ms of the 300.
+    const first = tap("muffler", 0, 100, 100, ["muffler"], 120);
+    expect(doubleTapPart(first, tap("muffler", 400, 100, 100, ["muffler"], 520))).toBe("muffler");
+    // A press held down is not a tap.
+    expect(doubleTapPart(first, tap("muffler", 240, 100, 100, ["muffler"], 240 + DOUBLE_TAP.holdMs + 1))).toBeNull();
+    // Out of order time stamps never make a double tap.
+    expect(doubleTapPart(first, tap("muffler", 100))).toBeNull();
+  });
+
+  it("a second tap a few pixels off still counts while the first part is under the finger (0.9.3)", () => {
+    const first = tap("fuel_hose", 0, 100, 100);
+    // The second tap shows the alternator cover, but the hose's finger-sized hit volume is still under it.
+    expect(doubleTapPart(first, tap("alternator_cover", 200, 103, 102, ["alternator_cover", "fuel_hose"]))).toBe("fuel_hose");
+    // Not when the hose is no longer under it.
+    expect(doubleTapPart(first, tap("alternator_cover", 200, 103, 102, ["alternator_cover"]))).toBeNull();
+    // A second tap on the base, with the hose's hit volume under it, also counts.
+    expect(doubleTapPart(first, tap(null, 200, 103, 102, ["fuel_hose"]))).toBe("fuel_hose");
   });
 
   it("only a loose part is carried; every other drag turns the machine, removable or not (ADR 0007)", () => {

@@ -27,3 +27,4 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0019](ADR-0019-visible-fasteners.md) | Visible bolts and screws | superseded (superseded by 0020) |
 | [0020](ADR-0020-the-hand-follows-the-pointer.md) | The hand follows the pointer; loosen a part, then drag it to the tray | accepted |
 | [0021](ADR-0021-the-toolbox.md) | The toolbox, and the hand fetching and returning its tools | accepted |
+| [0022](ADR-0022-saved-score-format.md) | What the game saves in the browser | proposed |
