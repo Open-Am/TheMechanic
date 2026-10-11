@@ -2,6 +2,7 @@
 // It proposes removals to app and listens for what app accepted (ADR 0010). It never imports ui.
 
 import {
+  Box3,
   Color,
   PerspectiveCamera,
   Quaternion,
@@ -18,6 +19,7 @@ import { poseAt, resolveMotion, TIMING, type Pose } from "./motion.ts";
 import { fitDistance, position, rotate, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
+import { type Box, gripShapeFor, HOLD, holdFor, needsRegrip } from "./handpose.ts";
 import type { RenderAssets } from "./model.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
@@ -94,6 +96,56 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const tweens = new Tweens();
   const hand: HandRig | null = assets.hand ? createHandRig(scene, camera, assets.hand, tweens) : null;
 
+  // The base's plate and the removable parts, measured once with every part in place, for the hand to hold the plate
+  // while the view turns, clear of every part (ADR 0016).
+  const plate = measurePlate();
+  const partBoxes: Box[] = [...view.parts.values()].map((pv) => {
+    const b = new Box3().setFromObject(pv.visual);
+    return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] };
+  });
+
+  function measurePlate(): { box: Box; height: number } | null {
+    const base = view.root.getObjectByName("base_frame");
+    if (!base) return null;
+    view.root.updateMatrixWorld(true);
+    const b = new Box3().setFromObject(base);
+    if (b.isEmpty()) return null;
+    // Rays down and up at the middle of each edge find the plate's top and underside (the feet sit at the corners);
+    // the top only confirms that a ray went through the plate.
+    const ray = new Raycaster();
+    const tops: number[] = [];
+    const bottoms: number[] = [];
+    const mid = b.getCenter(new Vector3());
+    const inset = 0.015;
+    for (const [x, z] of [[b.min.x + inset, mid.z], [b.max.x - inset, mid.z], [mid.x, b.min.z + inset], [mid.x, b.max.z - inset]] as const) {
+      ray.set(new Vector3(x, b.min.y - 0.1, z), new Vector3(0, 1, 0));
+      const under = ray.intersectObject(base, true)[0];
+      // From above, the plate's top is the lowest surface facing up: other parts of the base may stand above it.
+      ray.set(new Vector3(x, b.max.y + 0.1, z), new Vector3(0, -1, 0));
+      const facingUp = ray.intersectObject(base, true).filter((h) => h.face && h.face.normal.clone().transformDirection(h.object.matrixWorld).y > 0.5);
+      const top = facingUp[facingUp.length - 1];
+      if (top && under && top.point.y > under.point.y) {
+        tops.push(top.point.y);
+        bottoms.push(under.point.y);
+      }
+    }
+    // The hand holds the plate from underneath (HOLD.under), so the hold height is just below the plate's underside.
+    const height = tops.length ? Math.min(...bottoms) - HOLD.under : b.min.y + 0.03;
+    return { box: { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] }, height };
+  }
+
+  /** The hand takes hold of the plate for a turn of the view, or changes its hold if the view has turned far (ADR 0016). */
+  function holdForTurn(): void {
+    if (!hand || !plate || !game.running) return;
+    if (hand.baseHold && !needsRegrip(hand.baseHold, orbit.azimuth)) return;
+    const h = holdFor(plate.box, plate.height, partBoxes, orbit.azimuth);
+    if (h) hand.holdBase(h);
+  }
+
+  function endTurn(): void {
+    if (hand?.baseHold) hand.release();
+  }
+
   /** A part's centre and rough radius, for the hand to grip. */
   function gripTarget(pv: PartView): { centre: Vector3; radius: number } {
     return { centre: pv.group.position.clone(), radius: Math.max(...pv.size) / 2 };
@@ -137,7 +189,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     let to: Vector3 | null = null;
     // The hand reaches in and grips first, then rides along with the part's motion (plan 0008).
     const g = gripTarget(pv);
-    const reach = hand ? [hand.reach(pv.group, g.centre, g.radius, new Vector3(...part.explode))] : [];
+    const reach = hand ? [hand.reach(pv.group, g.centre, g.radius, new Vector3(...part.explode), gripShapeFor(pv.size))] : [];
     tweens.play(
       id,
       ...reach,
@@ -174,7 +226,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     pv.group.position.copy(start);
     setOpacity(pv, 0);
     // The hand brings the part in from the tray and pushes it home (plan 0008).
-    if (hand) hand.holdAt(pv.group, start.clone(), Math.max(...pv.size) / 2, new Vector3(...part.explode));
+    if (hand) hand.holdAt(pv.group, start.clone(), Math.max(...pv.size) / 2, new Vector3(...part.explode), gripShapeFor(pv.size));
     tweens.play(
       id,
       {
@@ -250,6 +302,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     if (pointers.size === 2) {
       drag = null; // a second finger cancels any pull
       pinch = pinchDistance();
+      endTurn(); // zooming does not bring the hand in
       return;
     }
     if (pointers.size > 2) return;
@@ -274,12 +327,14 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     drag.lastY = e.clientY;
     if (drag.state.kind === "rotate") {
       orbit = rotate(orbit, mdx, mdy, limits);
+      holdForTurn();
       return;
     }
     const next = classify(e.clientX - drag.startX, e.clientY - drag.startY, drag.dir);
     if (next.kind === "rotate") {
       drag.state = next;
       orbit = rotate(orbit, e.clientX - drag.startX, e.clientY - drag.startY, limits);
+      holdForTurn(); // the same hand on the plate whatever the finger started on (ADR 0016, ADR 0007)
     } else if (next.kind === "pull" && drag.part) {
       drag.state = { kind: "done" };
       // A blocked part simply does not come off. Player mode shows nothing more (ADR 0007).
@@ -292,7 +347,10 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   function onUp(e: PointerEvent): void {
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinch = null;
-    if (pointers.size === 0) drag = null;
+    if (pointers.size === 0) {
+      if (drag?.state.kind === "rotate") endTurn();
+      drag = null;
+    }
   }
 
   function onWheel(e: WheelEvent): void {
@@ -325,7 +383,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       }
       return null;
     };
-    (window as unknown as Record<string, unknown>).__openAmDevRender = { probe, busy: () => tweens.size > 0, handGripping: () => hand?.gripping ?? false, hasHand: () => hand !== null, marker: "open-am-dev-hook" };
+    (window as unknown as Record<string, unknown>).__openAmDevRender = { probe, busy: () => tweens.size > 0, handGripping: () => hand?.gripping ?? false, hasHand: () => hand !== null, handShape: () => hand?.shape ?? null, handOnBase: () => (hand?.baseHold ?? null) !== null, handHold: () => ({ hold: hand?.baseHold ?? null, plate, partBoxes: Object.fromEntries([...view.parts.keys()].map((id, i) => [id, partBoxes[i]])) }), marker: "open-am-dev-hook" };
   }
 
   // ---- Loop ----
@@ -339,6 +397,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     camera.position.set(...position(orbit, [target.x, target.y, target.z]));
     camera.lookAt(target);
     camera.updateMatrixWorld();
+    hand?.followCamera();
     renderer.render(scene, camera);
     frame = requestAnimationFrame(tick);
   }

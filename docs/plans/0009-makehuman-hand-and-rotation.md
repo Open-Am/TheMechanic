@@ -1,7 +1,7 @@
 ---
 id: 0009
 title: A MakeHuman hand, and the hand turns the machine
-status: approved
+status: done
 date: 2026-10-11
 adrs: [0007, 0010, 0012, 0013, 0014, 0015, 0016, 0017]
 branch: plan/0009-makehuman-hand
@@ -58,6 +58,20 @@ A Haiku agent read the ADRs and design notes: showing the hand during rotation g
 - `npm test`, `npm run typecheck`, `npm run docs:check`, `npm run build`, `npm run size` pass; `npm run assets` builds and checks the hand within 4,000 triangles and 400 KB.
 - `npm run verify:phone` solves all six faults with no console errors; its screenshots show the hand gripping mid-pull, pinching the spark plug, and holding the frame during a rotation; a tap and a blocked pull show no hand; the hand is gone after a rotation ends.
 - `assets/hand/STATUS.md` records the new hand as `textured`, with match images and what still differs; `assets/hand/LICENCE.md` records every MakeHuman item used. The owner looks on the phone and decides whether the hand is believable enough to approve.
+
+## What changed during the build
+
+- `tools/blender/hand.py` was rewritten in place instead of adding `hand_mh.py`, so the pipeline needed no change.
+- The normal map from a subdivided hand was dropped: MakeHuman's mesh is already smooth, so it added nothing the procedural skin bake does not. Wrinkles and veins remain a known gap.
+- The pinch threshold is the part's longest side, at most 75 mm, not "about 45 mm across": that is what picks exactly the spark plug, plug cap, fuel tap and capacitor.
+- MPFB's `.R` hand came out of the frame as a left hand; the build mirrors it and checks the thumb side.
+- The rotation hold is under the base plate, palm up, fingers slid in 25 mm between the feet, not on its top edge: the plate sits 46 to 58 mm up on its feet and parts sit on or overhang every edge, so a thumb on top would touch them. Clearance from parts is 20 mm. The right side, under the recoil starter, is never used.
+- Hand over hand is measured from how far the view has turned since the hold was taken (70 degrees): measuring from the preferred hold made the hand restart its reach on every move when parts pushed the hold far round.
+- The sleeve runs 550 mm so its open end stays off the screen.
+
+## Results
+
+All checks in "Done when" pass: 235 tests, typecheck, docs check, build, 178.5 KB of JavaScript; `npm run assets` checks the hand at 3,912 triangles and 137.6 KB; `npm run verify:phone` solves all six faults with no console errors, catches the hand gripping mid-pull, pinching the capacitor and holding the base during a turn, shows no hand for a tap or a blocked pull, lets go when the finger lifts, shows the same hand for a turn started on a blocked part, and the forced walk-out still works; 60 fps at 4x CPU throttle in headless Edge. `assets/hand/STATUS.md` records the hand as `textured` after five rounds; the owner decides whether it is believable enough.
 
 ## Release note line
 

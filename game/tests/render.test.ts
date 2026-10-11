@@ -7,7 +7,7 @@ import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/plac
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
-import { approachDirection, basisToQuaternion, entryPoint, gripDuringReach, gripPoint, handBasis, HAND } from "../src/render/handpose.ts";
+import { approachDirection, basisToQuaternion, type Box, distanceToBox, edgeAt, entryPoint, gripDuringReach, gripPoint, gripShapeFor, handBasis, HAND, HOLD, holdApproach, holdBasis, holdFor, needsRegrip, originFor, preferredHoldAngle } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -472,5 +472,83 @@ describe("where the hand comes from (plan 0008)", () => {
   it("for a part that comes off the front, starts in front of it", () => {
     const e = entryPoint([0, 0.1, 0.15], [0, 0, 0.12], [0.5, 0.6, 1.2]);
     expect(e[2]).toBeGreaterThan(0.15);
+  });
+});
+
+describe("pinching small parts (plan 0009, ADR 0016)", () => {
+  it("the spark plug, plug cap, fuel tap and capacitor are pinched; bigger parts are gripped", () => {
+    const shape = (id: string) => gripShapeFor(machine.parts.find((p) => p.id === id)!.placeholder.size);
+    for (const id of ["spark_plug", "plug_cap", "fuel_tap", "capacitor"]) expect(shape(id), id).toBe("pinch");
+    for (const id of ["fuel_tank", "air_filter_cover", "recoil_starter", "muffler", "alternator_cover", "carburetor", "fuel_hose"]) expect(shape(id), id).toBe("grip");
+  });
+
+  it("puts the hand so its pinch point lands on the part", () => {
+    const b = handBasis([0.3, -0.5, -0.8]);
+    const at: Vec3 = [0.1, 0.2, -0.05];
+    const pinch: Vec3 = [-0.04, -0.05, -0.03];
+    const o = originFor(at, pinch, b);
+    const back = [0, 1, 2].map((i) => o[i]! + b.x[i]! * pinch[0] + b.y[i]! * pinch[1] + b.z[i]! * pinch[2]);
+    back.forEach((v, i) => expect(close(v, at[i]!, 1e-12)).toBe(true));
+  });
+});
+
+describe("holding the base while the view turns (ADR 0016)", () => {
+  const box = (p: { size: Vec3; position: Vec3 }): Box => ({
+    min: [p.position[0] - p.size[0] / 2, p.position[1] - p.size[1] / 2, p.position[2] - p.size[2] / 2],
+    max: [p.position[0] + p.size[0] / 2, p.position[1] + p.size[1] / 2, p.position[2] + p.size[2] / 2],
+  });
+  const plate = box(machine.base.find((b) => b.id === "base_frame")!.placeholder);
+  const parts = machine.parts.map((p) => box(p.placeholder));
+  const height = plate.min[1] + 0.03;
+  const azimuths = Array.from({ length: 36 }, (_, i) => (i / 36) * 2 * Math.PI - Math.PI);
+
+  it("finds the edge of the plate in any direction, just inside it, facing out", () => {
+    const front = edgeAt(plate, height, 0);
+    expect(front.outward).toEqual([0, 0, 1]);
+    expect(close(front.point[2], plate.max[2] - HOLD.inset)).toBe(true);
+    const right = edgeAt(plate, height, Math.PI / 2);
+    expect(right.outward).toEqual([1, 0, 0]);
+    expect(close(right.point[0], plate.max[0] - HOLD.inset)).toBe(true);
+  });
+
+  it("never holds within reach of a removable part, from any side", () => {
+    for (const a of azimuths) {
+      const h = holdFor(plate, height, parts, a);
+      if (!h) continue;
+      for (const b of parts) expect(distanceToBox(h.point, b)).toBeGreaterThanOrEqual(HOLD.clearance);
+    }
+  });
+
+  it("finds a hold from most sides of the shipped machine, round to the right of the camera", () => {
+    const found = azimuths.map((a) => holdFor(plate, height, parts, a)).filter((h) => h !== null);
+    expect(found.length).toBeGreaterThanOrEqual(azimuths.length * 0.75);
+    const h = holdFor(plate, height, [], 0)!;
+    expect(h.point[0]).toBeGreaterThan(0); // camera at the front (+Z): the hold is on the right (+X) of the front edge
+  });
+
+  it("the hold depends only on the view, the same whatever the finger started on (ADR 0007)", () => {
+    for (const a of azimuths) expect(holdFor(plate, height, parts, a)).toEqual(holdFor(plate, height, parts, a));
+  });
+
+  it("changes hold hand over hand only after a long turn, even when parts push the hold far round", () => {
+    const crowded = holdFor(plate, height, parts, 0.3)!;
+    expect(needsRegrip(crowded, 0.3)).toBe(false);
+    expect(needsRegrip(crowded, 0.35)).toBe(false);
+    const h = holdFor(plate, height, [], 0.3)!;
+    expect(needsRegrip(h, 0.3)).toBe(false);
+    expect(needsRegrip(h, 0.3 + (60 * Math.PI) / 180)).toBe(false);
+    expect(needsRegrip(h, 0.3 + (100 * Math.PI) / 180)).toBe(true);
+    expect(needsRegrip(h, 0.3 - (100 * Math.PI) / 180)).toBe(true);
+    expect(close(preferredHoldAngle(0), Math.atan(HOLD.rightShare))).toBe(true);
+  });
+
+  it("reaches in under the edge, palm up, with the forearm leaning out towards the camera", () => {
+    const out: Vec3 = [0, 0, 1];
+    const a = holdApproach(out, [0.2, 0.6, 0.77], [1, 0, 0]);
+    expect(a[2]).toBeLessThan(0); // into the machine
+    expect(a[1]).toBe(0); // level with the plate
+    expect(a[0]).toBeLessThan(0); // forearm out to the right of the screen
+    const b = holdBasis(a);
+    expect(b.y[1]).toBeLessThan(0); // the palm (-y) faces up
   });
 });
