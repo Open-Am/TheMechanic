@@ -4,32 +4,17 @@
 
 import type { FaultId } from "../../core/types.ts";
 import type { ScoreStore, StoredResult } from "../interfaces/index.ts";
+import { safeStorage, type StorageLike } from "./storage.ts";
+
+export { safeStorage, type StorageLike };
 
 /** The one key the game saves under (ADR 0022). A format change uses a new key and starts empty. */
 export const SCORES_KEY = "openam.scores.v1";
-
-/** The part of the Web Storage API the store needs. */
-export interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
 
 interface Saved {
   v: 1;
   best: Record<string, StoredResult>;
   daily: Record<string, StoredResult>;
-}
-
-/** The browser's localStorage, or null when touching it throws (blocked cookies, some private modes) or it is absent. */
-export function safeStorage(get: () => StorageLike | null | undefined = () => globalThis.localStorage): StorageLike | null {
-  try {
-    const s = get();
-    if (!s) return null;
-    s.getItem(SCORES_KEY);
-    return s;
-  } catch {
-    return null;
-  }
 }
 
 function isResult(r: unknown): r is StoredResult {
