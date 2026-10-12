@@ -48,3 +48,4 @@ Removal gets the clicks and clunks that make a hand feel it did something, and t
 - 2026-10-11: proposed by Claude, from the owner's choice quoted above.
 - 2026-10-11: accepted by the owner, who wrote "I approve the 3 new adr and plan".
 - 2026-10-11: the owner settled how the licence rule reads, answering "4. A" to the choice between CC0 only and CC0 plus credit-only licences: CC0 (or our own recordings) only.
+- 2026-10-12: ADR 0028 replaces the "Engine starts" row: a catch of 1 to 4 seconds, then a looping running sound for as long as the engine runs, fading out when it is switched off. The rest of this ADR stands.

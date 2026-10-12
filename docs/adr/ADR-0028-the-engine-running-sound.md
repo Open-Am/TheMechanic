@@ -1,7 +1,7 @@
 ---
 id: 0028
 title: The engine's sound runs as long as the engine does
-status: proposed
+status: accepted
 date: 2026-10-12
 supersedes: []
 superseded_by: null
@@ -29,3 +29,4 @@ A fixed round ends with the sound of a generator that works, which is the payoff
 
 - 2026-10-12: proposed by Claude, from the owner's message quoted above.
 - 2026-10-12: revised before acceptance: the catch may run 1 to 4 seconds, because no CC0 recording found settles in under 1.5 seconds and the surge is what makes it sound like a real start; it fits inside ADR 0027 run-alone phase of about 3 seconds.
+- 2026-10-12: accepted by the owner, who wrote "accept adr 28". The owner chose the ElSchorscho Husqvarna 445 recordings (Freesound 871136 for the catch, 871135 for the running loop), writing "Go with the 2 instead".
