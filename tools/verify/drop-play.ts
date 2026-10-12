@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Machine } from "../../game/src/core/types.ts";
+import { SILENT_AUDIO_SOURCE } from "./silent-audio.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const arg = (name: string) => {
@@ -121,7 +122,7 @@ await waitFor("the dev server", async () => (await fetch(`http://localhost:${POR
 const profile = mkdtempSync(join(tmpdir(), "open-am-browser-"));
 const browser = spawn(
   browserPath,
-  ["--headless=new", `--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--enable-unsafe-swiftshader", "--mute-audio", "about:blank"],
+  ["--headless=new", `--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--enable-unsafe-swiftshader", "about:blank"],
   { stdio: "ignore" },
 );
 children.push(browser);
@@ -392,6 +393,8 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
 
 await send("Runtime.enable");
 await send("Page.enable");
+// The real sounds play, through a zero gain, so the machine stays quiet (not --mute-audio: see silent-audio.ts).
+await send("Page.addScriptToEvaluateOnNewDocument", { source: SILENT_AUDIO_SOURCE });
 await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
 
 const SHOTS = new Set([0, 4, 8, 11]);
