@@ -31,6 +31,11 @@ GROUPS = {
     "exterior": (2048, ["fuel_tank", "recoil_starter", "muffler", "alternator_cover", "air_filter_cover", "base_frame", "base_alternator", "base_engine", "base_panel"]),
     "small": (1024, ["carburetor", "fuel_tap", "fuel_hose", "air_filter", "spark_plug", "plug_cap", "capacitor"]),
 }
+# Fasteners (plan 0011) bake with their part's group.
+for _part in common.load_machine()["parts"]:
+    for _group, (_size, _names) in GROUPS.items():
+        if _part["id"] in _names:
+            _names.extend(f["id"] for f in _part.get("fasteners", []))
 TEX_DIR = os.path.join(common.ASSET_DIR, "textures")
 
 # Wear profile per modelling material: (profile, metal under chips or None, dust amount 0..1).
@@ -58,6 +63,16 @@ PROFILES = {
     "skin": ("skin", None, 0.0),
     "nail": ("nail", None, 0.15),
     "cloth": ("cloth", None, 0.15),
+    # The spanner and screwdriver (plan 0011): worn chrome and a grubby plastic handle.
+    "chrome": ("metal", None, 0.2),
+    "handle_yellow": ("plastic", None, 0.3),
+    "handle_black": ("plastic", None, 0.3),
+    # The toolbox (plan 0012): red paint chipped to bare steel and rust, with grease; a rag, a wooden brush handle.
+    "toolbox_red": ("toolpaint", "#5d5953", 0.35),
+    "rag_cloth": ("cloth", None, 0.25),
+    "wood": ("plain", None, 0.3),
+    "wire": ("metal", None, 0.2),
+    "ground": ("plain", None, 0.0),
 }
 GREASE = (0.012, 0.010, 0.009)
 DUST = (0.36, 0.31, 0.25)  # Lagos laterite dust, linear-ish, reddish brown
@@ -73,7 +88,7 @@ def srgb_to_linear(hex_colour):
 
 # ---- Step 1: atlas UVs ----
 
-def layout_uvs(objects):
+def layout_uvs(objects, margin=0.004):
     bpy.ops.object.mode_set(mode="OBJECT") if bpy.context.object and bpy.context.object.mode != "OBJECT" else None
     bpy.ops.object.select_all(action="DESELECT")
     for o in objects:
@@ -83,8 +98,8 @@ def layout_uvs(objects):
     bpy.context.view_layer.objects.active = objects[0]
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.004, scale_to_bounds=False)
-    bpy.ops.uv.pack_islands(margin=0.004, rotate=True)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=margin, scale_to_bounds=False)
+    bpy.ops.uv.pack_islands(margin=margin, rotate=True)
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
@@ -180,13 +195,21 @@ def authoring(base_name, group, image):
     metal_out = metallic
     rough_out = rough
 
-    if profile == "paint":
+    if profile in ("paint", "toolpaint"):
         chips = math_node("MULTIPLY", edge, ramp(big, 0.45, 0.6))
         chips = math_node("GREATER_THAN", chips, 0.35)
         colour = mix_rgb(chips, colour, srgb_to_linear(under))
         rusty = math_node("MULTIPLY", chips, ramp(noise(25.0), 0.5, 0.7))
         colour = mix_rgb(rusty, colour, RUST)
         rough_out = math_node("ADD", math_node("MULTIPLY", chips, 0.35), rough)
+        if profile == "toolpaint":
+            # A toolbox is handled with greasy hands: dark smears in the corners and along the edges, and the paint
+            # worn through to rust in patches, not only at the edges.
+            patches = math_node("MULTIPLY", ramp(noise(9.0, 5.0), 0.58, 0.72), ramp(fine, 0.4, 0.6))
+            colour = mix_rgb(math_node("MULTIPLY", patches, 0.8), colour, RUST)
+            grease = math_node("MULTIPLY", math_node("ADD", math_node("MULTIPLY", crevice, 1.4), math_node("MULTIPLY", edge, 0.6)), ramp(noise(14.0, 6.0), 0.45, 0.7))
+            colour = mix_rgb(math_node("MULTIPLY", grease, 0.75), colour, GREASE)
+            rough_out = math_node("SUBTRACT", rough_out, math_node("MULTIPLY", grease, 0.2))
     elif profile == "plastic":
         scuff = math_node("MULTIPLY", edge, ramp(big, 0.4, 0.7))
         colour = mix_rgb(math_node("MULTIPLY", scuff, 0.5), colour, tuple(min(1, c + 0.08) for c in base))
@@ -371,13 +394,13 @@ def final_material(group, base_img, orm_img, normal_img):
     return m
 
 
-def bake_groups(groups, tex_dir, author=None, layout=None):
+def bake_groups(groups, tex_dir, orm_filter=None, author=None, layout=None):
     """Bakes each group {name: (size, [object names])} to its own texture set in tex_dir. Used by main(), hand.py and
-    customer.py. `author(base_name, group, image)` and `layout(objects)` replace authoring() and layout_uvs() for models
-    with their own materials (the customers, plan 0015); they must keep authoring()'s contract: a Principled BSDF on
-    the output, reroutes named BASECOLOR and METALLIC, and an image node named BAKE_TARGET."""
+    customer.py. `orm_filter`, if given, is applied to the packed occlusion-roughness-metallic array before it is saved.
+    `author(base_name, group, image)` and `layout(objects)` replace authoring() and layout_uvs() for models with their
+    own materials (the customers, plan 0015); they must keep authoring()'s contract: a Principled BSDF on the output,
+    reroutes named BASECOLOR and METALLIC, and an image node named BAKE_TARGET."""
     author = author or authoring
-    layout = layout or layout_uvs
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
@@ -390,7 +413,11 @@ def bake_groups(groups, tex_dir, author=None, layout=None):
             if any(s.material and s.material.name.startswith("baked_") for s in o.material_slots):
                 common.fail(f"'{o.name}' is already textured. Run model.py (or block.py) first to rebuild it.")
         print(f"[{group}] {len(objects)} objects, {size} px")
-        layout(objects)
+        if layout:
+            layout(objects)
+        else:
+            # Islands keep apart by more than the bake margin, or colour bleeds between them (plan 0011: the tools at 512 px).
+            layout_uvs(objects, max(0.004, 1.5 * scene.render.bake.margin / size))
 
         target = new_image(f"{group}_target", size, False)
         made = {}
@@ -416,6 +443,8 @@ def bake_groups(groups, tex_dir, author=None, layout=None):
         orm[:, :, 0] = pixels(ao_img)[:, :, 0]
         orm[:, :, 1] = pixels(rough_img)[:, :, 0]
         orm[:, :, 2] = pixels(metal_img)[:, :, 0]
+        if orm_filter:
+            orm = orm_filter(orm)
         orm_img = new_image(f"{group}_orm", size, True)
         orm_img.pixels = orm.ravel().tolist()
 

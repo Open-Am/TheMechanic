@@ -1,5 +1,5 @@
 {
-  "_source": "ADR 0014 budgets and the triangle allocation in docs/design/modelling-brief.md. Read by tools/blender/common.py and tools/pipeline/check.ts.",
+  "_source": "ADR 0014 budgets (with ADR 0018's 250 KB of sound) and the triangle allocation in docs/design/modelling-brief.md. Read by tools/blender/common.py and tools/pipeline/check.ts.",
   "glbBytes": 5000000,
   "glbAimBytes": 3000000,
   "triangles": 60000,
@@ -8,6 +8,7 @@
   "atlasCount": 1,
   "environmentBytes": 400000,
   "groundBytes": 64000,
+  "audioBytes": 250000,
   "allocation": {
     "fuel_tank": 5000,
     "recoil_starter": 4500,
@@ -24,12 +25,25 @@
     "base_frame": 6000,
     "base_engine": 9000,
     "base_alternator": 3000,
-    "base_panel": 2000
+    "base_panel": 2000,
+    "fasteners": 3000
   },
   "hand": {
     "_source": "ADR 0015: the hand with its animation",
     "triangles": 4000,
     "bytes": 400000,
+    "texturePx": 1024
+  },
+  "tools": {
+    "_source": "ADR 0020: the spanner and screwdriver in the hand",
+    "triangles": 2000,
+    "bytes": 100000,
+    "texturePx": 512
+  },
+  "toolbox": {
+    "_source": "ADR 0021: the toolbox beside the generator, scenery only",
+    "triangles": 3000,
+    "bytes": 200000,
     "texturePx": 1024
   },
   "customers": {

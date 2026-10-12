@@ -75,3 +75,4 @@ On acceptance: ADR 0006 becomes `superseded` with `superseded_by: 0014`, and ADR
 
 - 2026-10-10: proposed by Claude, from the owner's instruction to "create a detailed ADR bringing that in, because we want that realism to make sense".
 - 2026-10-10: accepted by the owner, who wrote "I accept ADR 14". ADR 0006 is superseded and ADR 0002 limit 1 is narrowed.
+- 2026-10-12: ADR 0025 (the workbench) moves the baked contact shadow from the ground to the bench top, under the same budget. The rest of this ADR stands.

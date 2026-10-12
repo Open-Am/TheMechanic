@@ -25,6 +25,21 @@ Statuses: `placeholder`, `blocked`, `modelled`, `textured`, `approved` (brief se
 
 Total: 22,306 triangles of 60,000. The compressed model is 1.01 MB of 5 MB.
 
+## Fasteners (plan 0011, ADR 0020)
+
+Updated 2026-10-11. Each fastener is its own object, built by `model.py` from `machine.json`, parented to its part and baked with its part's atlas. Every count, head and position below is a draft and **unverified** until the mechanic checks it (`docs/open-questions.md`). Match images: `part-<id>-fasteners-<n>.png` (local only).
+
+| Part | Fasteners (unverified) | Triangles | What still differs from the references |
+| --- | --- | --- | --- |
+| `alternator_cover` | 4 hex bolts with washers | 320 | The product photo of the outside casting shows no bolt heads on the round face. Its visible fixing points are two ears with holes at the top corners of the square rim and a lug at the side, and the rim and feet are one casting with the cover. The real bolts are probably through the rim, not the face as drawn. |
+| `fuel_tank` | 4 Phillips pan-head screws, two on each side | 656 | The photo shows raised side flanges along the tank's two sides with a hole near each end. The model has no separate flanges: the screws sit in the lower rim and are hard to see. One screw (`screw_3`, z 0.03) is not opposite its pair (z 0.09), unlike the photo's holes near the ends. |
+| `muffler` | 2 nuts on the exhaust studs, 2 bolts through the heat shield | 376 | The two shield bolts sit on the two dimples the photo shows: close. The photo's exhaust flange is an oval plate with two slotted holes; the model's flange is a smaller square plate and the nuts show only from the side. |
+| `carburetor` | 2 nuts on the flange studs | 216 | The photo's oval flange has two holes either side of the bore; the model's flange is smaller and partly behind the body, so the nuts are hard to see from the photo's angle. Spacing follows the listing (about 37 mm, unverified). |
+| `recoil_starter` | 4 hex bolts, one in each ear | 320 | The photo shows ears with holes at the lower edge and the left; the model's bolts sit on the inner face at its ears and only one shows from outside. Sources say three or four ears. |
+| `air_filter_cover` | 2 hex bolts | 160 | The seller photo shows the door with three holes and a grip and no bolt heads. Whether the door is bolted, clipped or both is open. |
+
+Total with the fasteners: 23,658 triangles of 60,000 (fasteners 2,048 of their 3,000 allocation). The compressed model is 1.04 MB of 5 MB.
+
 ## Match images
 
 In `assets/gen950/match/`: the photo on the left, the render from about the same angle on the right. Whole-machine images are `whole-*`; single parts against product photos are `part-*`, numbered by round. They contain third-party photos, so like `assets/gen950/reference/` they stay on the build machine and are not committed (ADR 0013). `tools/blender/match.py` recreates them; `only=<id>` frames one part.

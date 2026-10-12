@@ -1,11 +1,12 @@
 // Loads what the scene needs from the machine folder at startup (plan 0005 step 8): the model, its baked ground shadow,
-// and the shared environment map. Fetched with the machine data, before the game starts; nothing is fetched after
+// and the shared environment map; and the hand, its tools and the toolbox (plans 0008, 0011, 0012). Fetched with the machine data, before the game starts; nothing is fetched after
 // (ADR 0010). Each file is optional: whatever is missing falls back (placeholders, RoomEnvironment, a drawn shadow).
 
 import { DataTexture, EquirectangularReflectionMapping, LinearFilter, type Object3D } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import { type LoadProgress, progressCounter } from "./progress.ts";
 
 export interface RenderAssets {
   /** The GLB scene, or null to use placeholders. */
@@ -16,6 +17,70 @@ export interface RenderAssets {
   ground: ImageBitmap | null;
   /** The mechanic's hand (plan 0008), or null: parts then move on their own. */
   hand: Object3D | null;
+  /** The spanner and screwdriver (plan 0011), or null: the hand then turns fasteners with its fingers. */
+  tools?: Tools | null;
+  /** The toolbox with the tools' slots (plan 0012), or null: the tools then come from just off screen. */
+  toolbox?: Toolbox | null;
+}
+
+export interface Toolbox {
+  object: Object3D;
+  /** Empty nodes under the toolbox: where each tool rests, as the tool's own origin and axes. */
+  slots: { spanner: Object3D; screwdriver: Object3D };
+}
+
+/** Picks the toolbox and its two slots out of toolbox.glb by name. Null if any is missing. */
+export function pickToolbox(scene: Object3D | null): Toolbox | null {
+  if (!scene) return null;
+  const named = (name: string): Object3D | null => {
+    let found: Object3D | null = null;
+    scene.traverse((o) => {
+      if (!found && (o.userData?.["name"] === name || o.name === name)) found = o;
+    });
+    return found;
+  };
+  const object = named("toolbox");
+  const spanner = named("slot_spanner");
+  const screwdriver = named("slot_screwdriver");
+  if (!object || !spanner || !screwdriver) return null;
+  object.removeFromParent();
+  return { object, slots: { spanner, screwdriver } };
+}
+
+/** How many files loadRenderAssets fetches: the model, environment and ground, and each optional file given. */
+export function renderFileCount(...optional: Array<string | null | undefined>): number {
+  return 3 + optional.filter((u) => !!u).length;
+}
+
+export interface Tool {
+  object: Object3D;
+  /** Where the hand closes on it, in the tool's own frame. */
+  grip: [number, number, number];
+}
+
+export interface Tools {
+  spanner: Tool;
+  screwdriver: Tool;
+}
+
+/** Picks the two tools out of tools.glb by name (the loader keeps the original name in userData.name). */
+function pickTools(scene: Object3D | null): Tools | null {
+  if (!scene) return null;
+  const find = (name: string): Tool | null => {
+    let found: Object3D | null = null;
+    scene.traverse((o) => {
+      if (!found && (o.userData?.["name"] === name || o.name === name)) found = o;
+    });
+    if (!found) return null;
+    const obj: Object3D = found;
+    const g = obj.userData?.["grip_point"] as unknown;
+    const grip: [number, number, number] = Array.isArray(g) && g.length === 3 ? [Number(g[0]), Number(g[1]), Number(g[2])] : [0, 0, 0];
+    obj.removeFromParent();
+    return { object: obj, grip };
+  };
+  const spanner = find("spanner");
+  const screwdriver = find("screwdriver");
+  return spanner && screwdriver ? { spanner, screwdriver } : null;
 }
 
 async function fetchOk(url: string): Promise<Response | null> {
@@ -70,13 +135,16 @@ async function loadImage(url: string): Promise<ImageBitmap | null> {
   }
 }
 
-/** `machineBase`, `envUrl` and `handUrl` are URLs relative to the page. Never throws. */
-export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null): Promise<RenderAssets> {
-  const [model, environment, ground, hand] = await Promise.all([
-    loadModel(`${machineBase}model.glb`),
-    loadEnvironment(envUrl),
-    loadImage(`${machineBase}ground.png`),
-    handUrl ? loadModel(handUrl) : Promise.resolve(null),
+/** `machineBase`, `envUrl`, `handUrl`, `toolsUrl` and `toolboxUrl` are URLs relative to the page. Never throws. */
+export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null, toolsUrl: string | null = null, toolboxUrl: string | null = null, onProgress?: LoadProgress): Promise<RenderAssets> {
+  const counted = progressCounter(renderFileCount(handUrl, toolsUrl, toolboxUrl), onProgress);
+  const [model, environment, ground, hand, tools, toolbox] = await Promise.all([
+    counted(loadModel(`${machineBase}model.glb`)),
+    counted(loadEnvironment(envUrl)),
+    counted(loadImage(`${machineBase}ground.png`)),
+    handUrl ? counted(loadModel(handUrl)) : Promise.resolve(null),
+    toolsUrl ? counted(loadModel(toolsUrl)) : Promise.resolve(null),
+    toolboxUrl ? counted(loadModel(toolboxUrl)) : Promise.resolve(null),
   ]);
-  return { model, environment, ground, hand };
+  return { model, environment, ground, hand, tools: pickTools(tools), toolbox: pickToolbox(toolbox) };
 }

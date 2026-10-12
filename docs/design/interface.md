@@ -7,6 +7,7 @@ Design note, first written for Phase 2 (plan 0003). Not a decision: the gestures
 Portrait first. From top to bottom:
 
 - Timer, top centre. `m:ss`. Hidden on the briefing and result screens.
+- Mute button, top right beside the timer: a speaker, slashed when muted, 44 px square, labelled "Sound on" or "Sound off" with `aria-pressed`. Muted means no sound and no vibration. The choice is kept in the browser under `openam.muted`, with a memory fallback when storage is blocked. Sound starts on (plan 0013, ADR 0018).
 - The machine, centred in the space above the pull cord and tray. The canvas sits behind everything else and runs to the bottom of the screen, so a carried part and the hand stay drawn over the controls; only the framing moves. As the tray wraps onto more rows the machine glides up to stay clear of them (since 0.9.3), and if the free space gets too short for it the camera stands back. It always keeps at least 40 percent of the screen's height.
 - "Pull cord" button, full width, above the tray. Enabled only when the tray is empty.
 - The tray, chips along the bottom, wrapping onto more rows as parts come off. It does not scroll: chips take every drag for putting parts back, so a scrolling tray could not be scrolled by touch.
@@ -15,9 +16,11 @@ Landscape works but is not tuned. Safe-area insets are respected (`viewport-fit=
 
 ## Screens
 
-- **Briefing.** The customer's complaint in quotes, then the symptom text, then "Start". The machine loads behind it. The timer starts when "Start" is pressed.
+- **Loading.** Before any script runs, the page shows a thin pulsing bar with no words. It is replaced by the start screen as soon as `machine.json`, `faults.json` and `customers.json` arrive (plan 0014).
+- **Start.** "Open Am", then "Today's fault · Day N" and "Free play". Once today's scored attempt is used the daily button reads "Today's fault · practice", and the screen shows today's result ("Day N: score 52 ★★☆", "Day N: the customer walked", or "Day N: Not finished" for a daily left mid-round, ADR 0024). "Next customer" on the result screen comes back here (plan 0014).
+- **Briefing.** For today's fault, "Today's fault · Day N", or "Practice, not scored". Then the customer's complaint in quotes, the symptom text, and "Start". The model, environment and hand load behind it: until they are in, a progress bar (files arrived out of files requested) sits above "Start", which is disabled. The timer starts when "Start" is pressed; for a scored daily that also uses up the day's attempt (ADR 0024).
 - **Working.** The layout above.
-- **Result.** "It starts!", the time, wrong parts and failed pulls, the total score and the stars, then "Next customer".
+- **Result.** "It starts!", the time, wrong parts and failed pulls, the total score and the stars, then "Best" (the lowest fixed total for this fault, kept in the browser) and "New best" when this round set it. Practice shows "Not scored" and no best. A scored daily that ended with the engine running shows "Share": the phone's share sheet, otherwise the clipboard ("Copied"), otherwise the text in a box to copy by hand. Then "Next customer".
 - **Cannot run.** A plain message when WebGL is missing or the data is invalid. No retry loop.
 
 ## Gestures

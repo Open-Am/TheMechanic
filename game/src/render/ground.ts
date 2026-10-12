@@ -49,3 +49,27 @@ export function createGround(size: Vec3, baked: CanvasImageSource | null = null)
   mesh.renderOrder = -1;
   return mesh;
 }
+
+/**
+ * A soft contact shadow for something standing on the ground beside the machine (the toolbox, plan 0012): a blurred
+ * rectangle of `width` by `depth` metres, in the object's own frame, lying just above the ground.
+ */
+export function createContactShadow(width: number, depth: number): Mesh {
+  const px = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = px;
+  const ctx = canvas.getContext("2d")!;
+  // The rectangle fills 60 percent of the image; the rest is room for the blur.
+  ctx.filter = `blur(${Math.round(px * 0.08)}px)`;
+  ctx.fillStyle = `rgba(0, 0, 0, ${GROUND.shadowAlpha})`;
+  ctx.fillRect(px * 0.2, px * 0.2, px * 0.6, px * 0.6);
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  const material = new MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false });
+  const mesh = new Mesh(new PlaneGeometry(width / 0.6, depth / 0.6), material);
+  mesh.name = "contact_shadow";
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.001;
+  mesh.renderOrder = -1;
+  return mesh;
+}

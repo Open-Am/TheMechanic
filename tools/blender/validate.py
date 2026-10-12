@@ -66,6 +66,34 @@ for obj in objects:
         if off > 0.02:
             warnings.append(f"'{n}' is {off * 100:.1f} cm from its placeholder position in machine.json.")
 
+# Fasteners (plan 0011, ADR 0020): one object per fastener in machine.json, named by its id, parented to its part,
+# its origin at its head (its position in the data), within the fasteners' own allocation.
+specs = {f["id"]: (p["id"], f) for p in machine["parts"] for f in p.get("fasteners", [])}
+fcol = bpy.data.collections.get("fasteners")
+fobjs = list(fcol.objects) if fcol else []
+present = {o.name for o in fobjs}
+for fid in specs:
+    if fid not in present:
+        errors.append(f"Fastener '{fid}' is missing from 'fasteners'. Run model.py for its part.")
+ftotal = 0
+for o in fobjs:
+    if o.name not in specs:
+        errors.append(f"'{o.name}' in 'fasteners' is not a fastener in machine.json.")
+        continue
+    pid, f = specs[o.name]
+    if o.parent is None or o.parent.name != pid:
+        errors.append(f"Fastener '{o.name}' must be parented to '{pid}'.")
+    loc = o.matrix_world.translation
+    off = (Vector((loc.x, loc.z, -loc.y)) - Vector(f["position"])).length
+    if off > 0.001:
+        errors.append(f"Fastener '{o.name}' origin is {off * 1000:.1f} mm from its position in machine.json.")
+    if not o.data.materials or any(m is None for m in o.data.materials):
+        errors.append(f"Fastener '{o.name}' has a missing material.")
+    ftotal += common.triangle_count(o)
+total += ftotal
+if ftotal > common.ALLOCATION.get("fasteners", ftotal):
+    errors.append(f"The fasteners have {ftotal} triangles, over their allocation of {common.ALLOCATION['fasteners']}.")
+
 if total > common.TRIANGLE_BUDGET:
     errors.append(f"The model has {total} triangles, over the budget of {common.TRIANGLE_BUDGET} (ADR 0014).")
 

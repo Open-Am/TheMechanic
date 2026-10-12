@@ -31,7 +31,14 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 
 - Fasteners on each part of the real machine: how many, what heads (hex bolt, Phillips screw, nut on a stud), and what size spanner. Unknown for every part. Likely candidates: alternator cover, recoil starter (often three bolts), muffler (nuts on studs plus a bolt), carburettor (two nuts on studs), fuel tank (screws, per the Benco video), air filter door. Drafts go in machine.json marked unverified; the mechanic checks them.
 - Whether any fastener is captive (stays in the cover) rather than coming out loose.
-- Sounds: until the owner records the real machine, the cord pull, the failed start and the engine are stand-ins from CC0 recordings, not a TG950.
+- Plan 0011 drafted these fasteners in machine.json, all unverified: fuel tank 4 screws on the side flanges; recoil starter 4 bolts, one per ear; muffler 2 nuts on the exhaust studs and 2 bolts through the heat shield; carburettor 2 nuts on the flange studs; alternator cover 4 bolts; air filter cover 2 bolts (it also rocks off a clip). Counts, heads, sizes and positions all need the mechanic. The capacitor's mounting (a strap screw?) is unknown, so it has none.
+- Air filter cover: the model shows two bolts on the lower door, but its motion is `unclip`. Bolted, clipped, or both?
+- Alternator cover: the product photo shows no bolt heads on the round face, only ears with holes on the square rim. Are the cover's bolts through the rim (as the photo suggests) rather than the face (as drafted)? (Plan 0011 match images, 2026-10-11.)
+- Fuel tank: the listing photo shows a side flange along each side with a hole near each end. Are the four screws there, and is one really off-centre as drafted (`fuel_tank.screw_3`)?
+- Sounds: until the owner records the real machine, the cord pull, the failed start and the engine are stand-ins from CC0 recordings, not a TG950. As of 2026-10-11 no file is chosen yet: `game/public/audio/` is empty and the game is silent. Candidates are in `docs/reference/sound-shortlist.md`; status in `assets/audio/STATUS.md`.
+- Safari before about iOS 17 cannot decode Ogg Opus, so those players hear nothing (ADR 0018 allows it). Which iOS versions the players have is unknown.
+- The fuel tap turns one turn in `machine.json`, and loosening does 75 percent of the turns, so it makes no click while loosening, only one going back in. Is one turn right for the real tap? (Plan 0013.)
+- With no sound files, a static host that answers 404 will likely make the browser print its own "Failed to load resource" line for each of the ten requests. The game itself stays silent and logs nothing. Not seen on 2026-10-12: the dev server and `vite preview` answer a missing file with the page, and a production build in `vite preview` showed no console error. Not tested on a real host. It goes away once the ten files ship.
 
 ## Owner decisions pending
 

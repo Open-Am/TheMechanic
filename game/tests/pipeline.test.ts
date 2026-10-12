@@ -1,8 +1,10 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CUSTOMER_CLIPS, checkCustomer, checkFileSize, checkHand, checkModel, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { MOMENTS } from "../src/platform/interfaces/index.ts";
+import { checkAudio, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
+import { CUSTOMER_CLIPS, checkCustomer, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -130,6 +132,21 @@ describe("the model contract and budgets (ADR 0014)", () => {
     expect(r.errors.join(" ")).toMatch(/4096 x 4096, over 2048 px/);
     expect(r.errors.join(" ")).toMatch(/2 materials use images larger than 1024 px \(exterior, second\)/);
     expect(r.errors.join(" ")).toMatch(/external file \(outside.png\)/);
+  });
+
+  it("textures: a material without a baked base colour texture is an error (an unbaked model)", () => {
+    // Plan 0011 found an export from an unbaked .blend (model.py rerun, texture.py not) passing with 0 errors.
+    const json = {
+      ...modelJson(all),
+      images: [{ bufferView: 0, mimeType: "image/png" }],
+      bufferViews: [{ byteOffset: 0, byteLength: 32 }],
+      textures: [{ source: 0 }],
+      materials: [{ name: "baked_exterior", pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }, { name: "tank_paint", pbrMetallicRoughness: { baseColorFactor: [0.1, 0.3, 0.7, 1] } }],
+    };
+    const r = checkModel(readGlb(makeGlb(json, new Uint8Array(32))), ids, budgets);
+    expect(r.errors.join(" ")).toMatch(/"tank_paint" has no base colour texture/);
+    const baked = { ...json, materials: [json.materials[0]] };
+    expect(checkModel(readGlb(makeGlb(baked, new Uint8Array(32))), ids, budgets).errors).toEqual([]);
   });
 });
 
@@ -295,5 +312,233 @@ describe("the mechanic's hand (ADRs 0015 and 0020)", () => {
     const big = { ...readGlb(makeGlb(handJson("mechanic_hand", 100, true))), byteLength: 400_001 };
     expect(checkHand(big, budgets).errors.join(" ")).toMatch(/over its 400 KB budget/);
     expect(checkHand(readGlb(makeGlb(handJson("mechanic_hand", 100, true))), budgets).errors).toEqual([]);
+  });
+});
+
+describe("fasteners in the model (ADR 0020, plan 0011)", () => {
+  /** Parts and base as roots; each fastener a child of its part, drawing `tris` triangles. */
+  const withFasteners = (fasteners: Record<string, string[]>, tris = 10, parentOf?: (part: string) => string) => {
+    const names = [...ids.parts, ...ids.base];
+    const nodes: Array<{ name: string; mesh: number; children?: number[] }> = names.map((name, i) => ({ name, mesh: i }));
+    const meshes = names.map((_, i) => ({ primitives: [{ attributes: { POSITION: i * 2 }, indices: i * 2 + 1 }] }));
+    const accessors = names.flatMap(() => [{ count: 30 }, { count: 30 }]);
+    for (const [part, list] of Object.entries(fasteners)) {
+      for (const id of list) {
+        const m = meshes.length;
+        meshes.push({ primitives: [{ attributes: { POSITION: accessors.length }, indices: accessors.length + 1 }] });
+        accessors.push({ count: tris * 3 }, { count: tris * 3 });
+        nodes.push({ name: id, mesh: m });
+        const parent = nodes.find((n) => n.name === (parentOf ? parentOf(part) : part))!;
+        parent.children = [...(parent.children ?? []), nodes.length - 1];
+      }
+    }
+    return readGlb(makeGlb({ scene: 0, scenes: [{ nodes: names.map((_, i) => i) }], nodes, meshes, accessors }));
+  };
+  const fasteners = Object.fromEntries(machine.parts.filter((p) => p.fasteners?.length).map((p) => [p.id, p.fasteners!.map((f) => f.id)]));
+  const all = { ...ids, fasteners };
+
+  it("accepts every fastener as a node under its part", () => {
+    expect(checkModel(withFasteners(fasteners), all, budgets).errors).toEqual([]);
+  });
+
+  it("reports a missing fastener node, and one that is not under its part", () => {
+    const missing = { ...fasteners, alternator_cover: fasteners["alternator_cover"]!.slice(1) };
+    expect(checkModel(withFasteners(missing), all, budgets).errors.join(" ")).toMatch(/No node named "alternator_cover.bolt_1"/);
+    const elsewhere = checkModel(withFasteners(fasteners, 10, (part) => (part === "muffler" ? "fuel_tank" : part)), all, budgets).errors.join(" ");
+    expect(elsewhere).toMatch(/"muffler.nut_1" must be a node under "muffler"/);
+  });
+
+  it("counts fasteners against their own allocation, not their part's", () => {
+    const many = Object.values(fasteners).flat().length;
+    const per = Math.floor(budgets.allocation["fasteners"]! / many) + 1;
+    expect(checkModel(withFasteners(fasteners, per), all, budgets).errors.join(" ")).toMatch(/fasteners have \d+ triangles, over their allocation/);
+  });
+});
+
+describe("the tools (ADR 0020, plan 0011)", () => {
+  const toolsJson = (names: string[], extras = true, tris = 100) => ({
+    scene: 0,
+    scenes: [{ nodes: names.map((_, i) => i) }],
+    nodes: names.map((name, i) => ({ name, mesh: i, ...(extras ? { extras: { grip_point: [0.08, 0, 0] } } : {}) })),
+    meshes: names.map((_, i) => ({ primitives: [{ attributes: { POSITION: i * 2 }, indices: i * 2 + 1 }] })),
+    accessors: names.flatMap(() => [{ count: tris * 3 }, { count: tris * 3 }]),
+  });
+
+  it("the shipped tools pass: a spanner and a screwdriver with grip points, within budget", () => {
+    const glb = readGlb(new Uint8Array(readFileSync(join(root, "game", "public", "hand", "tools.glb"))));
+    expect(checkTools(glb, budgets).errors).toEqual([]);
+  });
+
+  it("rejects a missing tool, a stray node, a missing grip point, and too many triangles", () => {
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner"]))), budgets).errors.join(" ")).toMatch(/No root node named "screwdriver"/);
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver", "hammer"]))), budgets).errors.join(" ")).toMatch(/"hammer" is not a tool/);
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], false))), budgets).errors.join(" ")).toMatch(/no grip_point/);
+    expect(checkTools(readGlb(makeGlb(toolsJson(["spanner", "screwdriver"], true, 1001))), budgets).errors.join(" ")).toMatch(/over their budget of 2000/);
+  });
+});
+
+
+describe("sounds (ADR 0018, plan 0013 step 4)", () => {
+  /** One Ogg page holding `body` (under 255 bytes), on logical stream `serial`. The checksum is not checked. */
+  function page(serial: number, body: Uint8Array, bos = false): Uint8Array {
+    const out = new Uint8Array(28 + body.length);
+    out.set([0x4f, 0x67, 0x67, 0x53, 0, bos ? 2 : 0]);
+    new DataView(out.buffer).setUint32(14, serial, true);
+    out[26] = 1;
+    out[27] = body.length;
+    out.set(body, 28);
+    return out;
+  }
+  const cat = (...parts: Uint8Array[]) => {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  };
+  const text = (s: string) => new TextEncoder().encode(s);
+  const opusHeadBody = (channels: number) => cat(text("OpusHead"), new Uint8Array([1, channels, 0x38, 1, 0x80, 0xbb, 0, 0, 0, 0, 0]));
+  /** A small Ogg Opus file: its head, its tags and one packet. */
+  const opus = (channels = 1, serial = 7) => cat(page(serial, opusHeadBody(channels), true), page(serial, text("OpusTags........")), page(serial, new Uint8Array(40).fill(9)));
+  const theora = (serial = 3) => cat(page(serial, cat(new Uint8Array([0x80]), text("theora"), new Uint8Array([3, 2, 1])), true), page(serial, new Uint8Array(30).fill(1)));
+  const names = () => MOMENTS.map((m) => `${m}.ogg`);
+  const all = (): Array<{ name: string; bytes: Uint8Array }> => MOMENTS.map((m) => ({ name: `${m}.ogg`, bytes: opus() }));
+  const cc0 = (files = names()) =>
+    ["| File | Source | Author | Licence | Fetched | Trim |", "| --- | --- | --- | --- | --- | --- |", ...files.map((n) => `| ${n} | https://freesound.org/x | someone | CC0 1.0 | 2026-10-11 | 0–1 s |`)].join("\n");
+  const check = (files = all(), licence: string | null = cc0(), budget = budgets.audioBytes, required = true) => checkAudio(files, licence, MOMENTS, budget, required);
+
+  it("the shipped folder passes; until the owner adds the files, each missing one is a warning, not an error", () => {
+    const dir = join(root, "game", "public", "audio");
+    const files = existsSync(dir) ? readdirSync(dir).filter((n) => n !== "LICENCE.md").map((name) => ({ name, bytes: new Uint8Array(readFileSync(join(dir, name))) })) : [];
+    const licence = existsSync(join(dir, "LICENCE.md")) ? readFileSync(join(dir, "LICENCE.md"), "utf8") : null;
+    // Once any file ships, every file is required, as in npm run audio.
+    const result = checkAudio(files, licence, MOMENTS, budgets.audioBytes, files.length > 0);
+    expect(result.errors).toEqual([]);
+    if (files.length === 0) expect(result.warnings).toEqual([`10 of 10 sound files are missing: ${names().join(", ")}. Until they are added, those moments are silent.`]);
+    expect(budgets.audioBytes).toBe(250_000);
+  });
+
+  it("a full set of mono Ogg Opus files, CC0 or our own, within budget, passes", () => {
+    expect(check()).toEqual({ errors: [], warnings: [], bytes: all().reduce((n, f) => n + f.bytes.length, 0) });
+    const own = cc0().replace("| turn.ogg | https://freesound.org/x | someone | CC0 1.0 |", "| turn.ogg | the workshop | the owner | own recording |");
+    expect(check(all(), own).errors).toEqual([]);
+  });
+
+  it("fails a stereo file", () => {
+    const files = all();
+    files[0] = { name: "turn.ogg", bytes: opus(2) };
+    expect(check(files).errors).toEqual(["turn.ogg has 2 channels: sounds are mono (ADR 0018)."]);
+  });
+
+  it("fails a file that is not Opus, or not Ogg", () => {
+    const files = all();
+    files[1] = { name: "give-unbolt.ogg", bytes: page(1, cat(new Uint8Array([1]), text("vorbis"), new Uint8Array([0, 0, 0, 0, 1])), true) };
+    files[2] = { name: "give-unclip.ogg", bytes: text("RIFF....WAVEfmt ") };
+    expect(check(files).errors).toEqual(["give-unbolt.ogg has no Opus stream: sounds are Ogg Opus (ADR 0018).", "give-unclip.ogg is not an Ogg file."]);
+  });
+
+  it("fails a file with another stream beside the sound", () => {
+    const files = all();
+    files[3] = { name: "give-pull.ogg", bytes: cat(theora(), opus()) };
+    expect(check(files).errors).toEqual(["give-pull.ogg holds another stream beside the sound (Blender's video stream?): run it through opusOnly."]);
+  });
+
+  it("fails over the budget", () => {
+    const bytes = all().reduce((n, f) => n + f.bytes.length, 0);
+    expect(check(all(), cc0(), bytes - 1).errors).toEqual([`The sounds are ${(bytes / 1000).toFixed(1)} KB, over the ${(bytes - 1) / 1000} KB budget (ADR 0018).`]);
+    expect(check(all(), cc0(), bytes).errors).toEqual([]);
+  });
+
+  it("fails a missing licence row, a missing LICENCE.md, and any licence but CC0 1.0 or our own recording", () => {
+    expect(check(all(), cc0(names().filter((n) => n !== "seat.ogg"))).errors).toEqual(["seat.ogg has no row in LICENCE.md."]);
+    expect(check(all(), null).errors).toEqual(["LICENCE.md is missing: every sound file is listed there with its source and licence (ADR 0018)."]);
+    const by = cc0().replace("| land.ogg | https://freesound.org/x | someone | CC0 1.0 |", "| land.ogg | https://freesound.org/x | someone | CC BY 4.0 |");
+    expect(check(all(), by).errors).toEqual(['land.ogg is listed as "CC BY 4.0" in LICENCE.md: only CC0 1.0 or own recording is allowed (ADR 0018).']);
+  });
+
+  it("fails an extra file", () => {
+    const files = [...all(), { name: "remove.ogg", bytes: opus() }];
+    expect(check(files, cc0([...names(), "remove.ogg"])).errors).toEqual([`remove.ogg is not one of the moments' files (${names().join(", ")}): remove it.`]);
+  });
+
+  it("fails a missing moment in the release check, and only warns in the game's own tests", () => {
+    const files = all().filter((f) => f.name !== "cord.ogg");
+    const missing = "1 of 10 sound files are missing: cord.ogg. Until they are added, those moments are silent.";
+    expect(check(files).errors).toEqual([missing]);
+    const relaxed = check(files, cc0(), budgets.audioBytes, false);
+    expect(relaxed.errors).toEqual([]);
+    expect(relaxed.warnings).toEqual([missing]);
+  });
+
+  it("opusOnly drops Blender's video stream and keeps every Opus page byte for byte", () => {
+    const sound = opus(1, 9);
+    const head = page(9, opusHeadBody(1), true);
+    const mixed = cat(theora().subarray(0, 38), head, theora().subarray(38), sound.subarray(head.length));
+    const only = opusOnly(mixed)!;
+    expect(only).toEqual(sound);
+    expect(oggPages(only)!.every((p) => p.serial === 9)).toBe(true);
+    expect(opusHead(only, oggPages(only)!)).toEqual({ serial: 9, channels: 1 });
+    expect(opusOnly(sound)).toBe(sound); // nothing to drop
+    expect(opusOnly(theora())).toBeNull();
+    expect(opusOnly(new Uint8Array([1, 2, 3]))).toBeNull();
+  });
+
+  it("oggPages refuses a page that runs past the end, and an empty file", () => {
+    const f = opus();
+    expect(oggPages(f.subarray(0, f.length - 1))).toBeNull();
+    expect(oggPages(new Uint8Array())).toBeNull();
+  });
+
+  it("LICENCE.md written from sounds.json reads back and passes", () => {
+    const row: SoundSource = { source: "a.wav", url: "https://freesound.org/people/x/sounds/1/", author: "x", licence: "CC0 1.0", fetched: "2026-10-11", start: 0.1, end: 0.4, fadeIn: 0, fadeOut: 0.05, gainDb: 0 };
+    const sounds = Object.fromEntries(MOMENTS.map((m) => [m, row]));
+    const written = licenceText(sounds, MOMENTS);
+    expect(licenceRows(written).get("turn.ogg")).toBe("CC0 1.0");
+    expect(written).toContain("| turn.ogg | https://freesound.org/people/x/sounds/1/ | x | CC0 1.0 | 2026-10-11 | 0.10–0.40 s |");
+    expect(check(all(), written).errors).toEqual([]);
+  });
+
+  it("assets/audio/sounds.json has a row for every moment, and only CC0 or our own licences", () => {
+    const file = JSON.parse(readFileSync(join(root, "assets", "audio", "sounds.json"), "utf8")) as { sounds: Record<string, SoundSource> };
+    expect(Object.keys(file.sounds).sort()).toEqual([...MOMENTS].sort());
+    for (const [m, s] of Object.entries(file.sounds)) {
+      if (s.licence !== null) expect(["CC0 1.0", "own recording"], m).toContain(s.licence);
+      if (s.source !== null) expect(s.end, m).toBeGreaterThan(s.start);
+    }
+  });
+});
+
+describe("the toolbox (ADR 0021, plan 0012)", () => {
+  /** A toolbox JSON: one root node with `slots` as its children (or as roots, if `slotsAsRoots`), drawing `tris`. */
+  const toolboxJson = (name = "toolbox", slots = ["slot_spanner", "slot_screwdriver"], tris = 100, slotsAsRoots = false) => ({
+    scene: 0,
+    scenes: [{ nodes: slotsAsRoots ? [0, ...slots.map((_, i) => i + 1)] : [0] }],
+    nodes: [{ name, mesh: 0, ...(slotsAsRoots ? {} : { children: slots.map((_, i) => i + 1) }) }, ...slots.map((n) => ({ name: n }))],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+    accessors: [{ count: tris * 3 }, { count: tris * 3 }],
+  });
+
+  it("has its own budget: 3,000 triangles, 200 KB, one 1024 px texture set", () => {
+    expect(budgets.toolbox).toEqual({ _source: expect.any(String), triangles: 3000, bytes: 200000, texturePx: 1024 });
+  });
+
+  it("passes one toolbox node with both slots under it, within budget", () => {
+    const r = checkToolbox(readGlb(makeGlb(toolboxJson())), budgets);
+    expect(r.errors).toEqual([]);
+    expect(r.triangles).toBe(100);
+  });
+
+  it("rejects a wrong root name, a missing slot, a slot outside the toolbox, and too many triangles", () => {
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("crate"))), budgets).errors.join(" ")).toMatch(/one root node named "toolbox"; found crate/);
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("toolbox", ["slot_spanner"]))), budgets).errors.join(" ")).toMatch(/No node named "slot_screwdriver"/);
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("toolbox", ["slot_spanner", "slot_screwdriver"], 100, true))), budgets).errors.join(" ")).toMatch(/"slot_spanner" must be a node under "toolbox"/);
+    expect(checkToolbox(readGlb(makeGlb(toolboxJson("toolbox", undefined, 3001))), budgets).errors.join(" ")).toMatch(/3001 triangles, over its budget of 3000/);
+  });
+
+  it("rejects a file over 200 KB", () => {
+    const big = readGlb(makeGlb(toolboxJson(), new Uint8Array(200_001)));
+    expect(checkToolbox(big, budgets).errors.join(" ")).toMatch(/over its 200 KB budget/);
   });
 });

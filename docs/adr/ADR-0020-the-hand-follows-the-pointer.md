@@ -90,3 +90,4 @@ Work this creates, for plans: the pointer hand, turning, loosening by motion typ
 - 2026-10-11: proposed by Claude, from the owner's message quoted above.
 - 2026-10-11: revised before acceptance, from the owner's second message quoted above: removal is two deliberate steps (loosen with a double tap, double click or G; then drag to the tray), loosening plays the unfastening animation, and ADR 0019 is superseded too.
 - 2026-10-11: accepted by the owner, who wrote "I accept ADR 20 and approve plan 0010".
+- 2026-10-12: ADR 0025 (the workbench) decides what "every other drag turns the machine" means on the bench: a sideways drag turns the generator about its upright axis and an up-and-down drag raises or lowers the camera; the camera no longer goes round the machine. The rest of this ADR stands.

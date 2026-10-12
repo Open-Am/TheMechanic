@@ -148,3 +148,24 @@ export function turnToward(s: OrbitState, l: OrbitLimits, target: Vec3, point: V
   const dp = cap((-j10 * ex + j00 * ey) / det);
   return clampOrbit({ ...s, azimuth: s.azimuth + da, polar: s.polar + dp }, l);
 }
+
+// ---- Things standing on the ground beside the machine (plan 0012, release 0.11.1) ----
+
+/** Where the camera starts: the default view. */
+export const DEFAULT_ORBIT = { azimuth: 0.55, polar: 1.12 } as const;
+
+/**
+ * Where the toolbox stands, in machine radii from the machine's centre, as seen from the default camera: `ahead` towards
+ * the camera, `left` to its left; `turn` radians from facing the camera. Since 0.11.1 it stands to the left of the
+ * machine, level with its front, so the left screen edge cuts it and only its open back tray and the tools show,
+ * beside the machine (the owner's choice on 2026-10-12). Before, it stood 1.85 radii in front, where it looked bigger
+ * than the generator.
+ */
+export const TOOLBOX_PLACE = { ahead: 0.6, left: 1.3, turn: -1.2 } as const;
+
+/** A spot on the ground `ahead` and `left` machine radii from the centre as a camera at `azimuth` sees it, and its turn. */
+export function groundPlace(azimuth: number, radius: number, place: { ahead: number; left: number; turn: number }): { x: number; z: number; rotationY: number } {
+  const s = Math.sin(azimuth);
+  const c = Math.cos(azimuth);
+  return { x: (s * place.ahead - c * place.left) * radius, z: (c * place.ahead + s * place.left) * radius, rotationY: azimuth + place.turn };
+}

@@ -3,7 +3,7 @@
     node tools/run-blender.mjs tools/blender/match.py --blend assets/gen950/blend/gen950.blend -- \
         <reference image> <out.png> <azimuth> <polar> <fov_deg> [<target height in m> | only=<object id> [key=<shape key>:<value>]]
 
-With only=<id>, every other object is hidden and the camera frames that one object, for matching a single part
+With only=<id>, every other object except the part's children (its fasteners) is hidden and the camera frames them, for matching a single part
 against a product photo. The azimuth and polar are then measured around the part.
 
 Angles are in radians, measured like the game camera: azimuth 0 looks at the front (+Z), positive turns towards the
@@ -42,14 +42,16 @@ if only:
     obj = bpy.data.objects.get(only)
     if obj is None:
         common.fail(f"No object named {only}")
+    # The part's children (its fasteners, plan 0011) stay in the picture with it.
+    kept = [obj, *obj.children_recursive]
     for o in bpy.data.objects:
-        if o.type == "MESH" and o is not obj and not o.hide_render:
+        if o.type == "MESH" and o not in kept and not o.hide_render:
             o.hide_render = True
             hidden.append(o)
     if key and obj.data.shape_keys:
         kname, kval = key.split(":")
         obj.data.shape_keys.key_blocks[kname].value = float(kval)
-    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    corners = [k.matrix_world @ Vector(c) for k in kept if k.type == "MESH" for c in k.bound_box]
     lo = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
     hi = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
     mid = (lo + hi) / 2

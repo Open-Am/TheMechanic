@@ -103,9 +103,63 @@ export function originFor(at: Vec3, handPoint: Vec3, b: { x: Vec3; y: Vec3; z: V
 
 // ---- The hand as the pointer (plan 0010, ADR 0020) ----
 
-/** Where the forearm comes from: in front of the camera, low and to the right, so it runs off the bottom right. */
-export function armAnchor(camera: Vec3, right: Vec3, up: Vec3, forward: Vec3): Vec3 {
-  return add(add(add(camera, scale(right, HAND.anchorRight)), scale(up, -HAND.anchorDown)), scale(forward, HAND.anchorForward));
+/**
+ * Where the forearm comes from: in front of the camera, low and to the right, so it runs off the bottom right. `side`
+ * moves it across: 1 is the lower right, -1 the mirror place at the lower left (on a trip to a toolbox on the left of
+ * the screen), still below the bottom edge.
+ */
+export function armAnchor(camera: Vec3, right: Vec3, up: Vec3, forward: Vec3, side = 1): Vec3 {
+  return add(add(add(camera, scale(right, HAND.anchorRight * side)), scale(up, -HAND.anchorDown)), scale(forward, HAND.anchorForward));
+}
+
+// ---- The arm on the toolbox trip (release 0.11.1 follow-up) ----
+
+/**
+ * On a trip to the toolbox the arm comes from the toolbox's side of the screen, so the forearm rises from the bottom
+ * edge below the toolbox instead of lying across the machine; at the fasteners it comes from the lower right again.
+ */
+export const ARM_REACH = {
+  /** The toolbox this far from the middle of the screen (normalised device x) or more puts the arm fully on its side. */
+  sideNdc: 0.5,
+  /** Half-life, seconds, of the easing that moves the arm's root from one side to the other, so it never jumps. */
+  halfLife: 0.08,
+  /** Share of a leg over which the arm's root crosses: it arrives early on legs to the toolbox and leaves late on legs
+   *  from it, so the forearm already comes from below the toolbox as the hand gets there. */
+  crossShare: 0.7,
+} as const;
+
+/** Which side the arm comes from at the toolbox, from the toolbox's x on screen (-1 left to 1 right): -1 to 1. */
+export function toolboxArmSide(ndcX: number): number {
+  if (!Number.isFinite(ndcX)) return 1;
+  return Math.max(-1, Math.min(1, ndcX / ARM_REACH.sideNdc));
+}
+
+const smooth = (p: number): number => {
+  const t = Math.max(0, Math.min(1, Number.isFinite(p) ? p : 0));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The arm's side (as `armAnchor` takes it) at progress `p` of a trip step, with the toolbox's side `box`: it glides
+ * to the toolbox's side on the legs to the toolbox, stays there while a tool is taken or laid back, and glides back to
+ * the right (1) on the legs to the fasteners and home. Each step starts where the one before it ends.
+ */
+export function armSideOnTrip(kind: "toToolbox" | "pick" | "toFastener" | "fasten" | "free" | "toSlot" | "putBack" | "home", p: number, box: number): number {
+  const k = ARM_REACH.crossShare;
+  const at = (from: number, to: number, t: number) => from + (to - from) * smooth(t);
+  switch (kind) {
+    case "toToolbox":
+    case "toSlot":
+      return at(1, box, p / k);
+    case "pick":
+    case "putBack":
+      return box;
+    case "toFastener":
+    case "home":
+      return at(box, 1, (p - (1 - k)) / k);
+    default:
+      return 1;
+  }
 }
 
 /** What the hand is doing at the pointer: resting open, gripping, or pinching. */
@@ -149,4 +203,55 @@ export function followShare(dt: number, halfLife: number = HAND.followHalfLife):
   if (!(dt > 0)) return 0;
   if (!(halfLife > 0)) return 1;
   return 1 - Math.pow(0.5, dt / halfLife);
+}
+
+// ---- Tools on fasteners (plan 0011, ADR 0020) ----
+
+/** Which tool a fastener needs: a screwdriver for screws, a spanner for bolts and nuts. */
+export function toolFor(kind: "bolt" | "screw" | "nut"): "spanner" | "screwdriver" {
+  return kind === "screw" ? "screwdriver" : "spanner";
+}
+
+/**
+ * How a tool sits on a fastener, as a basis (its local x, y, z in world space), the same for both tools. The tool's local z lies along the
+ * fastener's axis (out of the hole). A screwdriver turns with the screw by `angle`. A spanner lies across the bolt with
+ * its handle (local x) towards the lower right of the screen, so the hand holding it stays in view, swung about the
+ * bolt's axis by `angle`.
+ */
+export function toolBasis(axis: Vec3, screenRight: Vec3, screenUp: Vec3, angle: number): { x: Vec3; y: Vec3; z: Vec3 } {
+  const z = normalize(axis);
+  const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const flat = (v: Vec3): Vec3 => sub(v, scale(z, dot(v, z)));
+  // The handle's direction before the swing: towards the lower right of the screen, in the plane across the axis.
+  let x = flat(sub(screenRight, screenUp));
+  if (Math.hypot(...x) < 1e-6) x = flat(screenRight);
+  if (Math.hypot(...x) < 1e-6) x = flat([1, 0, 0]);
+  x = normalize(x);
+  const y0 = cross(z, x);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const xr = add(scale(x, c), scale(y0, s));
+  const yr = cross(z, xr);
+  return { x: xr, y: yr, z };
+}
+
+// ---- Where the spanner's handle lies (plan 0012 follow-up) ----
+
+/**
+ * How many turns of the spanner about its bolt are tried when choosing where its handle lies. The handle towards the
+ * lower right of the screen (turn 0) can put the hand holding it behind the machine, for a bolt under the tank's
+ * overhang: the hand would have to come forward further than HAND.maxPush to show. One of the other turns shows it.
+ */
+export const SPANNER_TURNS = 12;
+
+/** The angle about the bolt of turn `k`, radians. */
+export function spannerTurn(k: number): number {
+  return (2 * Math.PI * k) / SPANNER_TURNS;
+}
+
+/** The index of the cheapest option, or the first within `tie` of it: the turn that hides the hand least. */
+export function cheapest(costs: readonly number[], tie = 0.001): number {
+  if (costs.length === 0) return 0;
+  const best = Math.min(...costs);
+  return Math.max(0, costs.findIndex((c) => c <= best + tie));
 }

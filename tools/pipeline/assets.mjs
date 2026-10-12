@@ -13,6 +13,12 @@ const handBlend = join(root, "assets", "hand", "blend", "hand.blend");
 const blender = (script, file = blend, ...args) => [join(root, "tools", "run-blender.mjs"), join(root, "tools", "blender", script), "--blend", file, ...(args.length ? ["--", ...args] : [])];
 const handGlb = join(root, "assets", "hand", "export", "hand.glb");
 const handOpt = join(root, "assets", "hand", "export", "hand.optimised.glb");
+const toolsBlend = join(root, "assets", "tools", "blend", "tools.blend");
+const toolsGlb = join(root, "assets", "tools", "export", "tools.glb");
+const toolsOpt = join(root, "assets", "tools", "export", "tools.optimised.glb");
+const toolboxBlend = join(root, "assets", "toolbox", "blend", "toolbox.blend");
+const toolboxGlb = join(root, "assets", "toolbox", "export", "toolbox.glb");
+const toolboxOpt = join(root, "assets", "toolbox", "export", "toolbox.optimised.glb");
 
 const steps = [
   ["Validate the model", blender("validate.py")],
@@ -23,6 +29,12 @@ const steps = [
   ["Validate and export the hand", blender("hand.py", handBlend, "export")],
   ["Optimise the hand", [join(root, "tools", "pipeline", "optimise.mjs"), handGlb, handOpt]],
   ["Check and copy the hand", [join(root, "tools", "pipeline", "check.ts"), "--hand"]],
+  ["Validate and export the tools", blender("tools.py", toolsBlend, "export")],
+  ["Optimise the tools", [join(root, "tools", "pipeline", "optimise.mjs"), toolsGlb, toolsOpt]],
+  ["Check and copy the tools", [join(root, "tools", "pipeline", "check.ts"), "--tools"]],
+  ["Validate and export the toolbox", blender("toolbox.py", toolboxBlend, "export")],
+  ["Optimise the toolbox", [join(root, "tools", "pipeline", "optimise.mjs"), toolboxGlb, toolboxOpt, "--keep-empty"]],
+  ["Check and copy the toolbox", [join(root, "tools", "pipeline", "check.ts"), "--toolbox"]],
 ];
 
 // The customers, one file per look (plan 0015, ADR 0023): each look's .blend is exported, optimised with 1024 px
