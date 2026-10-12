@@ -867,7 +867,14 @@ try {
   await load(url.replace("?diag", "?diag&patience=600"));
   await toBriefing();
   await beginRound();
-  await solveRound();
+  // Watch the customer pay and leave rather than skip it (solveRound skips by default): a skip would cut the engine
+  // at once, as ADR 0028 says, and the run would never be heard.
+  watchEnding = true;
+  try {
+    await solveRound();
+  } finally {
+    watchEnding = false;
+  }
   await sleep(1000);
   h = await heardNow();
   v = await vibrationsNow();
@@ -897,7 +904,7 @@ try {
   sound(
     !!runStart && runStart.audible === soundFiles > 0 && atResult.includes("run") && !!runStop && ranFor > 4.6 && (await loopingNow()).length === 0,
     `the winning pull plays start, then run loops (still running as the result shows) and winds down by itself ${ranFor.toFixed(1)} s after the cord`,
-    `the engine run: started ${JSON.stringify(runStart)}, at the result looping ${JSON.stringify(atResult)}, stopped ${JSON.stringify(runStop)} ${ranFor.toFixed(1)} s after the cord, looping now ${JSON.stringify(await loopingNow())}`,
+    `the engine run: started ${JSON.stringify(runStart)}, all ${JSON.stringify(runs)}, at the result looping ${JSON.stringify(atResult)}, stopped ${JSON.stringify(runStop)} ${ranFor.toFixed(1)} s after the cord, looping now ${JSON.stringify(await loopingNow())}`,
   );
   await tapSelector(".result .primary");
   await atStart();
