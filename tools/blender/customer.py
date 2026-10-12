@@ -74,6 +74,8 @@ LOOKS = {
         "top": {"kind": "blouse", "sleeve": ("upperarm", 0.95), "neck": 0.055, "thickness": 0.01, "loose": 0.008, "hem": "hip", "taper": -0.05, "sleeve_flare": 0.35},
         "bottom": None,
         "skirt": {"top": "waist", "bottom": "ankle", "flare": 0.015, "margin": 0.018, "material": "wrapper"},
+        # Round 10: the blouse's neckline and sleeve ends redrawn after decimation, with a turned hem (clean_hems).
+        "hems": True,
         "head": "headtie",
         "hair": None,
         "feet": "slippers",
@@ -296,7 +298,9 @@ def classify(body, lm, spec, dom):
             if top:
                 front = max(0.0, min(1.0, (lm.neck_y - p.y) / 0.07))
                 neckline = lm.z_neck + 0.015 - (top["neck"] + 0.015) * front
-                if d in TORSO and p.z < neckline and (d != "pelvis" or p.z > hem_top):
+                if spec.get("hems") and (d in TORSO or d == "neck_01"):
+                    in_top = not neck_open(lm, top, p.x, p.y, p.z) and (d != "pelvis" or p.z > hem_top)
+                elif d in TORSO and p.z < neckline and (d != "pelvis" or p.z > hem_top):
                     in_top = True
                 elif base in ARM:
                     rank = ARM[base]
@@ -1679,6 +1683,159 @@ def lift(body, rig, height):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+# ---- Clean hems (round 10, 2026-10-12) ----
+
+HEM_TRIS = 1200
+
+
+NECK_REACH = 0.13  # beyond this far from the neck the shoulders and chest are always cloth
+
+
+def neck_lowest(lm, top, theta):
+    """How low the neck opening reaches in direction theta round the neck (0 is the person's left, -pi/2 the front):
+    the base of the neck at the back and sides, a scoop at the front."""
+    fr = max(0.0, -math.sin(theta)) ** 1.5
+    return lm.z_neck + 0.012 - (top["neck"] + 0.015) * fr
+
+
+def neck_open(lm, top, x, y, z):
+    """True where the skin shows at the neck: above the opening's line, near the neck."""
+    dy = y - lm.neck_y
+    return math.hypot(x, dy) < NECK_REACH and z > neck_lowest(lm, top, math.atan2(dy, x))
+
+
+def clean_hems(body, lm, spec, bone_names):
+    """After decimation the edge between the blouse and the skin follows whatever triangles were left, so it is
+    ragged and skin-coloured triangles reach onto the cloth. Each face near the neckline and the sleeve ends is given
+    the blouse or the skin by where its centre lies against the neckline and the sleeve's end, and a turned hem, a
+    soft rolled band of the same cloth, is laid along each edge to cover what is left of the steps."""
+    top = spec["top"]
+    me = body.data
+    mats = [m.name.split("@")[0] for m in me.materials]
+    i_skin, i_top = mats.index("skin"), mats.index("top")
+    co = np.array([v.co[:] for v in me.vertices])
+    sleeve_bone, sleeve_t = top["sleeve"]
+    arms = {}
+    for side in ("l", "r"):
+        a = np.array(lm.head(f"upperarm_{side}")[:])
+        b = np.array(lm.tail(f"upperarm_{side}")[:]) if sleeve_bone == "upperarm" else np.array(lm.tail(f"lowerarm_{side}")[:])
+        if sleeve_bone == "lowerarm":
+            a = np.array(lm.head(f"lowerarm_{side}")[:])
+        arms[side] = (a, b)
+    changed = 0
+    for poly in me.polygons:
+        if poly.material_index not in (i_skin, i_top):
+            continue
+        c = np.array(poly.center[:])
+        want = None
+        if c[2] > lm.z_neck - 0.13 and c[2] < lm.z_neck + 0.05 and math.hypot(c[0], c[1] - lm.neck_y) < 0.16:
+            want = i_skin if neck_open(lm, top, c[0], c[1], c[2]) else i_top
+        for side, (a, b) in arms.items():
+            ab = b - a
+            t = float((c - a) @ ab / (ab @ ab))
+            dist = float(np.linalg.norm(c - (a + ab * t)))
+            if 0.55 < t < 1.25 and dist < 0.11:
+                want = i_top if t < sleeve_t else i_skin
+        if want is not None and poly.material_index != want:
+            poly.material_index = want
+            changed += 1
+    weights = body_weights(body, bone_names)
+    objs = []
+    # The neckline: a ring round the neck axis at the neckline's height in each direction, on the cloth's surface.
+    seg = 48
+    theta = np.linspace(-math.pi, math.pi, seg, endpoint=False)
+    rel = co[:, :2] - np.array([0.0, lm.neck_y])
+    ang = np.arctan2(rel[:, 1], rel[:, 0])
+    rad = np.linalg.norm(rel, axis=1)
+    cloth = np.zeros(len(me.vertices), dtype=bool)
+    for poly in me.polygons:
+        if poly.material_index == i_top:
+            cloth[list(poly.vertices)] = True
+    pts = []
+    for th in theta:
+        d_ang = np.abs((ang - th + math.pi) % (2 * math.pi) - math.pi)
+        z_edge = neck_lowest(lm, top, float(th))
+        # The ring lies on the cloth where it begins: the innermost cloth at the opening's height, so it hugs the
+        # neck at the sides and back and lies on the chest at the front.
+        sel = (d_ang < 0.12) & (np.abs(co[:, 2] - z_edge) < 0.012) & (rad < NECK_REACH + 0.02) & cloth
+        if not sel.any():
+            sel = (d_ang < 0.12) & (np.abs(co[:, 2] - z_edge) < 0.012) & (rad < NECK_REACH + 0.02)
+        r = float(np.percentile(rad[sel], 20)) if sel.any() else 0.07
+        pts.append((r, z_edge))
+    r_arr = np.array([p_[0] for p_ in pts])
+    z_arr = np.array([p_[1] for p_ in pts])
+    for _ in range(3):
+        r_arr = (np.roll(r_arr, 1) + 2 * r_arr + np.roll(r_arr, -1)) / 4
+    curve = [np.array([r_arr[j] * math.cos(theta[j]), lm.neck_y + r_arr[j] * math.sin(theta[j]), z_arr[j]]) for j in range(seg)]
+    outward = [np.array([math.cos(t_), math.sin(t_), 0.0]) for t_ in theta]
+    objs.append(hem_band(curve, outward, "hem_neck", closed=True))
+    # The sleeve ends: a ring round the arm at the sleeve's end, as wide as the sleeve there.
+    for side, (a, b) in arms.items():
+        ab = b - a
+        L = float(np.linalg.norm(ab))
+        D = ab / L
+        P = a + ab * sleeve_t
+        relp = co - P
+        along_ = relp @ D
+        radial = relp - np.outer(along_, D)
+        rr = np.linalg.norm(radial, axis=1)
+        near = (np.abs(along_) < 0.012) & (rr < 0.11)
+        ref = np.array([0.0, 1.0, 0.0])
+        u = ref - (ref @ D) * D
+        u /= np.linalg.norm(u)
+        v = np.cross(D, u)
+        segs = 24
+        ring_r = []
+        for j in range(segs):
+            t_ = 2 * math.pi * j / segs
+            dirv = math.cos(t_) * u + math.sin(t_) * v
+            sel = near & ((radial @ dirv) > rr * 0.93)
+            ring_r.append(float(rr[sel].max()) if sel.any() else (float(rr[near].max()) if near.any() else 0.05))
+        ring_r = np.array(ring_r)
+        for _ in range(3):
+            ring_r = (np.roll(ring_r, 1) + 2 * ring_r + np.roll(ring_r, -1)) / 4
+        curve = [P + ring_r[j] * (math.cos(2 * math.pi * j / segs) * u + math.sin(2 * math.pi * j / segs) * v) for j in range(segs)]
+        outward = [(math.cos(2 * math.pi * j / segs) * u + math.sin(2 * math.pi * j / segs) * v) for j in range(segs)]
+        objs.append(hem_band(curve, outward, f"hem_sleeve_{side}", closed=True))
+    source = np.zeros(len(me.vertices), dtype=bool)
+    for poly in me.polygons:
+        if poly.material_index == i_top:
+            source[list(poly.vertices)] = True
+    for o in objs:
+        apply_weights(o, copied_weights([v_.co[:] for v_ in o.data.vertices], body, source, weights, k=6))
+    print(f"Hems: {changed} faces given to the blouse or the skin by the neckline and sleeve ends; {sum(common.triangle_count(o) for o in objs)} triangles of hem")
+    return objs
+
+
+def hem_band(curve, outward, name, closed=True, width=0.016, thick=0.004, lift=0.003):
+    """A soft rolled hem along a curve on the cloth: a flattened tube lying on the surface, its outer face a little
+    proud of the cloth, so a ragged edge underneath does not show."""
+    n = len(curve)
+    prof = 6
+    bm = bmesh.new()
+    rings = []
+    for i in range(n):
+        P = np.array(curve[i])
+        T = np.array(curve[(i + 1) % n]) - np.array(curve[i - 1])
+        T /= np.linalg.norm(T)
+        N_ = np.array(outward[i], dtype=float)
+        N_ = N_ - (N_ @ T) * T
+        N_ /= np.linalg.norm(N_)
+        B = np.cross(T, N_)
+        ring = []
+        for k in range(prof):
+            ph = 2 * math.pi * k / prof
+            q = P + N_ * (lift + thick * (0.5 + 0.5 * math.cos(ph))) + B * (width / 2 * math.sin(ph))
+            ring.append(bm.verts.new(q.tolist()))
+        rings.append(ring)
+    pairs = list(zip(rings, rings[1:])) + ([(rings[-1], rings[0])] if closed else [])
+    for ra, rb_ in pairs:
+        for k in range(prof):
+            bm.faces.new((ra[k], ra[(k + 1) % prof], rb_[(k + 1) % prof], rb_[k]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return mesh_object(bm, name, "top")
+
+
 # ---- Assembling a person ----
 
 MATERIAL_ORDER = ("skin", "feet", "lips", "nail", "eye", "top", "bottom", "wrapper", "headwear", "shoe", "sole")
@@ -1754,7 +1911,11 @@ def build_person(look, preview=False):
     body.data.attributes.remove(body.data.attributes["zone"])
 
     protected_tris = sum(common.triangle_count(o) for o in protected)
-    decimate(body, lm, TRI_TARGET - protected_tris if protected else None)
+    reserve = HEM_TRIS if spec.get("hems") else 0
+    decimate(body, lm, TRI_TARGET - protected_tris - reserve if protected or reserve else None)
+    if spec.get("hems"):
+        protected += clean_hems(body, lm, spec, bone_names)
+        protected_tris = sum(common.triangle_count(o) for o in protected)
     if protected:
         for o in protected:
             o.data.materials.append(bpy.data.materials[o["zone"]])
@@ -2341,6 +2502,8 @@ def renders(look, rig, body, out_dir, tag):
         "face-front": None,
         "face-three-quarter": None,
         "feet": None,
+        "neckline": None,
+        "upper-body": None,
     }
     head = rig.matrix_world @ rig.pose.bones[f"{look}_head"].head
     close = {
@@ -2348,6 +2511,8 @@ def renders(look, rig, body, out_dir, tag):
         "face": (V((0.35, -1.35, 0.02)), 0.07, 85),
         "face-front": (V((0.0, -1.1, 0.0)), 0.06, 85),
         "face-three-quarter": (V((0.8, -0.8, 0.05)), 0.06, 85),
+        "neckline": (V((0.0, -1.0, 0.05)), -0.17, 85),
+        "upper-body": (V((0.0, -2.2, 0.0)), -0.2, 70),
     }
     for view, pair in views.items():
         at, target = pair if pair else (None, None)
