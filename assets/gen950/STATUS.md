@@ -7,7 +7,7 @@ Statuses: `placeholder`, `blocked`, `modelled`, `textured`, `approved` (brief se
 | Object | Status | Triangles | Matched against | What still differs from the references |
 | --- | --- | --- | --- | --- |
 | `fuel_tank` | textured | 3,314 | whole-front-right, whole-back, part-fuel_tank | The real lid's pressed panels are bolder than these thin grooves. Wear is light next to the Lagos photo, which shows heavy chipping and rust along the edges. |
-| `recoil_starter` | textured | 3,554 | whole-front-right, part-recoil_starter | Bolt ears less pronounced; the new part is glossy, this one dusty and matte (deliberate: a used machine). |
+| `recoil_starter` | textured | 3,490 (4,022 with its handle and rope) | whole-front-right, part-recoil_starter, part-recoil_starter-handle | Bolt ears less pronounced; the new part is glossy, this one dusty and matte (deliberate: a used machine). |
 | `muffler` | textured | 2,178 | whole-back, part-muffler | Louvres, pipe and spout match. The logo and bolt dimples on the shield are simplified; the Lagos photo shows far more rust and burn. |
 | `alternator_cover` | textured | 1,398 | part-alternator_cover, whole-front-left | Close. The real casting has a square rim with feet in one piece with the cover. |
 | `air_filter_cover` | textured | 512 | part-air_filter_cover | Outline, bolts and holes from one seller photo; whether this door is the filter cover is unconfirmed. |
@@ -21,7 +21,7 @@ Statuses: `placeholder`, `blocked`, `modelled`, `textured`, `approved` (brief se
 | `base_frame` | textured | 1,432 | whole-front-right | Feet, base tray and the cast post at the front right. The real base is the cast crankcase and alternator feet on rubber mounts. |
 | `base_engine` | textured | 1,036 | whole-back | Shroud with plug notch, finned cylinder, crankcase. No ports or detailed studs. |
 | `base_alternator` | textured | 1,628 | whole-front-left | Ribs and rim; the real casting has more ribbing. |
-| `base_panel` | textured | 1,226 | whole-front-right | Follows the Tiger TG950. The label carries lines in place of text, with no brand. |
+| `base_panel` | textured | 1,118 (1,238 with its switch) | whole-front-right | Follows the Tiger TG950. The label carries lines in place of text, with no brand. |
 
 Total: 22,306 triangles of 60,000. The compressed model is 1.01 MB of 5 MB.
 
@@ -51,3 +51,20 @@ One 2048 px atlas for the exterior, one 1024 px atlas for the small parts, each 
 ## Lighting
 
 Look-development uses the game's environment, key light direction, exposure and Khronos PBR Neutral (`tools/blender/lookdev.py`). Faces turned away from the key light, such as the back, render dark in both Blender and the game.
+
+## The nodes the pull moves (plan 0018 step 1, ADR 0027)
+
+Updated 2026-10-12. Listed in `tools/pipeline/child-nodes.json`; built by `model.py`, checked by `validate.py` and `tools/pipeline/check.ts`, baked with their part's atlas. Each is an **empty node** named by its id under its part's node, at the point the game moves it about, with no rotation or scale. A node with a shape has it as one child mesh `<id>.mesh` at the empty's origin. The shape hangs below an empty because mesh compression (KHR_mesh_quantization in `optimise.mjs`) rewrites a mesh node's own translation and scale; the empty keeps its transform, so the game can read its position and move, turn or stretch it. The machine is now optimised with `--keep-empty` so the outlet survives.
+
+| Node | Origin, machine axes (m) | Axis and use | Triangles |
+| --- | --- | --- | --- |
+| `recoil_starter.handle` | (0.186, 0.13, 0.135), where the rope ends inside the stem | The T-grip: a round stem and a 72 mm crossbar with grip ribs. The game moves it out along +X (the starter's face looks along +X) and back. | 504 |
+| `recoil_starter.rope` | (0.1665, 0.13, 0.135), the outlet of the rope guide on the housing | A 4.4 mm rope running along the node's **+X** from its origin, 19.5 mm long at rest, to the handle's origin. The game scales the node along X to the outlet-to-handle distance and turns it towards the handle. | 28 |
+| `muffler.outlet` | (-0.164, 0.078, -0.118), the open end of the spout | Empty, no shape. The exhaust leaves along **-X**. | 0 |
+| `base_panel.switch` | (0.065, 0.215, 0.157), the rocker's hinge on its frame | The red rocker, modelled ON (tilted 8 degrees about +X, top end out), with a pale bar on the OFF end. The game flips it by turning the node about **X** by -16 degrees. | 120 |
+
+The recoil starter's own mesh lost its old cord and box grip and gained a small rope guide with a dark hole. Its placeholder in `machine.json` still describes the part with its handle (the handle comes off with it), so it was not changed; the mesh's own centre moved 1.25 cm inwards, under the 2 cm warning.
+
+Match image: `part-recoil_starter-handle-1.png` (local only), against `et950-recoil-cover-side-handle-amazon.jpg`. What still differs: the photo's T-handle stands further out on a longer, angled stem and its crossbar is longer and slimmer, embossed "START" (no text here, deliberately). The photo is of the other hand (mirrored), so the handle is at the opposite side of the vent ring. The rope guide is a plain boss, not the photo's moulded collar.
+
+Total with the fasteners and these nodes: 24,218 triangles of 60,000. The compressed model is 1.06 MB of 5 MB.
