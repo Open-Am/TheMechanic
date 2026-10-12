@@ -126,7 +126,7 @@ async function start(): Promise<void> {
     muted.get(),
   );
   const game = createGame({ ...data, clock, audio, random: Math.random, scores, ...(customers ? { customers } : {}) });
-  // Browsers start audio only inside a gesture. Start unlocks it: "started" is sent from inside its tap (ADR 0018). If
+  // Browsers start audio only inside a gesture. Start unlocks it: "arriving" is sent from inside its tap (ADR 0018). If
   // the browser still holds it back, every later tap or key tries again until the context runs. Nothing before Start.
   const unlock = (): void => {
     if (audio.contextState() === "running") {
@@ -136,8 +136,9 @@ async function start(): Promise<void> {
     }
     audio.unlock();
   };
-  // The files download once, after the first Start (ADR 0023): never before, and not again on later rounds.
-  const stopLoading = game.events.on("started", () => {
+  // The files download once, after the first Start (ADR 0023): never before, and not again on later rounds. Start's tap
+  // sends "arriving" (plan 0017), so audio is unlocked inside the gesture.
+  const stopLoading = game.events.on("arriving", () => {
     stopLoading();
     audio.unlock();
     window.addEventListener("click", unlock, true);
@@ -163,6 +164,7 @@ async function start(): Promise<void> {
     carry: { move: (id, x, y) => view?.carryChip(id, x, y), end: (id) => view?.endChipCarry(id), busy: () => view?.busy() ?? false },
     daily: () => dailyStatus(daily, scores),
     share: { send: (text) => share.share(text), sheet: hasShareSheet(navigator), url: shareUrl(location.href, import.meta.env.BASE_URL) },
+    ending: () => view?.ending() ?? Promise.resolve(),
     sound: {
       muted: muted.get(),
       setMuted: (m) => {
@@ -186,6 +188,8 @@ async function start(): Promise<void> {
   view.setTrayTest(mounted.overTray);
   view.onCarry(mounted.setDropState);
   view.onMoment((m) => playMoment(audio, m));
+  // Start pressed: the customer brings the generator; the clock starts when it lands (plan 0017 reading 1).
+  game.events.on("arriving", () => (view ? view.playArrival(() => game.begin()) : game.begin()));
   mounted.onCover(view.setBottomCover);
 
   if (import.meta.env.DEV && new URLSearchParams(location.search).has("diag")) {
