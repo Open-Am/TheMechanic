@@ -36,3 +36,4 @@ The round has a beginning and an end that read as a real roadside job, and the c
 ## History
 
 - 2026-10-12: proposed by Claude, from the owner's message quoted above.
+- 2026-10-12: the owner confirmed the two readings put to them (parts snap back on so the customer carries off a whole generator; the timer starts when the generator lands), writing "both decisions are correct". Still proposed until accepted in writing.
