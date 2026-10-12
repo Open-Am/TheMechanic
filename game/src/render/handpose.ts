@@ -103,9 +103,63 @@ export function originFor(at: Vec3, handPoint: Vec3, b: { x: Vec3; y: Vec3; z: V
 
 // ---- The hand as the pointer (plan 0010, ADR 0020) ----
 
-/** Where the forearm comes from: in front of the camera, low and to the right, so it runs off the bottom right. */
-export function armAnchor(camera: Vec3, right: Vec3, up: Vec3, forward: Vec3): Vec3 {
-  return add(add(add(camera, scale(right, HAND.anchorRight)), scale(up, -HAND.anchorDown)), scale(forward, HAND.anchorForward));
+/**
+ * Where the forearm comes from: in front of the camera, low and to the right, so it runs off the bottom right. `side`
+ * moves it across: 1 is the lower right, -1 the mirror place at the lower left (on a trip to a toolbox on the left of
+ * the screen), still below the bottom edge.
+ */
+export function armAnchor(camera: Vec3, right: Vec3, up: Vec3, forward: Vec3, side = 1): Vec3 {
+  return add(add(add(camera, scale(right, HAND.anchorRight * side)), scale(up, -HAND.anchorDown)), scale(forward, HAND.anchorForward));
+}
+
+// ---- The arm on the toolbox trip (release 0.11.1 follow-up) ----
+
+/**
+ * On a trip to the toolbox the arm comes from the toolbox's side of the screen, so the forearm rises from the bottom
+ * edge below the toolbox instead of lying across the machine; at the fasteners it comes from the lower right again.
+ */
+export const ARM_REACH = {
+  /** The toolbox this far from the middle of the screen (normalised device x) or more puts the arm fully on its side. */
+  sideNdc: 0.5,
+  /** Half-life, seconds, of the easing that moves the arm's root from one side to the other, so it never jumps. */
+  halfLife: 0.08,
+  /** Share of a leg over which the arm's root crosses: it arrives early on legs to the toolbox and leaves late on legs
+   *  from it, so the forearm already comes from below the toolbox as the hand gets there. */
+  crossShare: 0.7,
+} as const;
+
+/** Which side the arm comes from at the toolbox, from the toolbox's x on screen (-1 left to 1 right): -1 to 1. */
+export function toolboxArmSide(ndcX: number): number {
+  if (!Number.isFinite(ndcX)) return 1;
+  return Math.max(-1, Math.min(1, ndcX / ARM_REACH.sideNdc));
+}
+
+const smooth = (p: number): number => {
+  const t = Math.max(0, Math.min(1, Number.isFinite(p) ? p : 0));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The arm's side (as `armAnchor` takes it) at progress `p` of a trip step, with the toolbox's side `box`: it glides
+ * to the toolbox's side on the legs to the toolbox, stays there while a tool is taken or laid back, and glides back to
+ * the right (1) on the legs to the fasteners and home. Each step starts where the one before it ends.
+ */
+export function armSideOnTrip(kind: "toToolbox" | "pick" | "toFastener" | "fasten" | "free" | "toSlot" | "putBack" | "home", p: number, box: number): number {
+  const k = ARM_REACH.crossShare;
+  const at = (from: number, to: number, t: number) => from + (to - from) * smooth(t);
+  switch (kind) {
+    case "toToolbox":
+    case "toSlot":
+      return at(1, box, p / k);
+    case "pick":
+    case "putBack":
+      return box;
+    case "toFastener":
+    case "home":
+      return at(box, 1, (p - (1 - k)) / k);
+    default:
+      return 1;
+  }
 }
 
 /** What the hand is doing at the pointer: resting open, gripping, or pinching. */
