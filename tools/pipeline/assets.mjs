@@ -46,7 +46,7 @@ for (const { look } of customers) {
   const file = join(root, "assets", "customers", "blend", `${look}.blend`);
   steps.push(
     [`Validate and export ${look}`, blender("customer.py", file, "export", look)],
-    [`Optimise ${look}`, [join(root, "tools", "pipeline", "optimise.mjs"), glb, opt, "1024"]],
+    [`Optimise ${look}`, [join(root, "tools", "pipeline", "optimise.mjs"), glb, opt, "1024", "--keep-empty"]],
     [`Check and copy ${look}`, [join(root, "tools", "pipeline", "check.ts"), "--customer", look]],
   );
 }

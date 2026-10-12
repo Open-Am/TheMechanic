@@ -288,8 +288,16 @@ export function checkHand(glb: Glb, budgets: Budgets): CheckResult {
   return { errors, warnings: [], triangles };
 }
 
-/** The clips every customer carries, named <look>.<clip> in the file (plan 0015 reading 5). */
-export const CUSTOMER_CLIPS = ["idle", "arrive", "waiting", "annoyed", "annoyed_idle", "failed_pull", "pleased", "leaving"] as const;
+/** The clips every customer carries, named <look>.<clip> in the file (plan 0015 reading 5; pay_leave and storm_off,
+ * and arrive as bringing the generator, from ADR 0026 and plan 0017). */
+export const CUSTOMER_CLIPS = ["idle", "arrive", "waiting", "annoyed", "annoyed_idle", "failed_pull", "pleased", "leaving", "pay_leave", "storm_off"] as const;
+
+/** Nodes every customer carries under its root, named <look>_<node> (plan 0017 step 1): the right and left hands' grip
+ * points, which the generator and the notes hang from, and the folded naira notes. */
+export const CUSTOMER_NODES = ["grip_r", "grip_l", "notes"] as const;
+
+/** Most triangles the notes prop may have (ADR 0026). */
+export const NOTES_TRIANGLES = 300;
 
 /**
  * One customer's file (ADRs 0015 and 0023, plan 0015 step 4): one root node customer_<look> for a look in
@@ -316,6 +324,24 @@ export function checkCustomer(glb: Glb, look: string, looks: readonly string[], 
   for (const clip of CUSTOMER_CLIPS) if (!clips.has(`${look}.${clip}`)) errors.push(`${look} has no clip "${look}.${clip}".`);
   const known = new Set(CUSTOMER_CLIPS.map((c) => `${look}.${c}`));
   for (const c of clips) if (!known.has(c)) warnings.push(`${look} has a clip "${c}" that nothing plays.`);
+  const nodes = glb.json.nodes ?? [];
+  const under = new Set<number>();
+  const top = roots.find((r) => r.name === name);
+  const stack = top ? [...(nodes[top.index]?.children ?? [])] : [];
+  while (stack.length) {
+    const i = stack.pop()!;
+    under.add(i);
+    stack.push(...(nodes[i]?.children ?? []));
+  }
+  for (const n of CUSTOMER_NODES) {
+    const index = nodes.findIndex((x) => x.name === `${look}_${n}`);
+    if (index < 0) errors.push(`${look} has no node "${look}_${n}".`);
+    else if (!under.has(index)) errors.push(`"${look}_${n}" must be under "${name}", so it moves with the skeleton.`);
+    else if (n === "notes") {
+      const t = nodeTriangles(glb.json, index);
+      if (t > NOTES_TRIANGLES) errors.push(`${look}'s notes have ${t} triangles, over ${NOTES_TRIANGLES}.`);
+    }
+  }
   for (const [i, img] of (glb.json.images ?? []).entries()) {
     if (img.uri) {
       errors.push(`Image ${i} is an external file (${img.uri}); everything must be inside the GLB.`);

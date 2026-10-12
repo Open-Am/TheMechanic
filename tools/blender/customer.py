@@ -4,6 +4,7 @@
     node tools/run-blender.mjs tools/blender/customer.py -- preview <dir> [look ...]   # the same without baking, renders front, three-quarter, game view and clip strips
     node tools/run-blender.mjs tools/blender/customer.py -- render <dir> [look ...]    # renders the baked .blend files the same way, for match images
     node tools/run-blender.mjs tools/blender/customer.py -- export [look ...]          # validates and exports assets/customers/export/<look>.glb
+    node tools/run-blender.mjs tools/blender/customer.py -- clips <dir> [look ...]     # strips of arrive, pay_leave and storm_off at a stand-in bench, from the .blend files
 
 The looks come from game/public/customers.json; with no look named, every look there is built.
 
@@ -133,7 +134,7 @@ LOOKS = {
     },
 }
 
-CLIPS = ("idle", "arrive", "waiting", "annoyed", "annoyed_idle", "failed_pull", "pleased", "leaving")
+CLIPS = ("idle", "arrive", "waiting", "annoyed", "annoyed_idle", "failed_pull", "pleased", "leaving", "pay_leave", "storm_off")
 BASE_BONES = ("Root", "pelvis", "spine_01", "spine_02", "spine_03", "neck_01", "head")
 
 
@@ -2220,6 +2221,7 @@ def build_person(look, preview=False):
     remove_unused_slots(body)
 
     Clips(rig, look, lm, spec).make_all()
+    add_grips_and_notes(rig, look, lm)
     return body, rig, lm, author
 
 
@@ -2290,6 +2292,98 @@ def clean_weights(body, bone_names):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+# ---- Hand grips and the notes (plan 0017 step 1, ADR 0026) ----
+
+# How far the grip point sits along the hand from the wrist (the palm's centre, under the knuckles).
+GRIP_REACH = 0.075
+# The workbench (ADR 0025) in the customer's own space at their standing spot (they face -Y, the mechanic): its far
+# edge 0.35 m in front of them, 0.65 m deep, its top 0.78 m high; the generator on its near half, its handle on top.
+BENCH = {"far": 0.35, "depth": 0.65, "top": 0.78, "width": 1.15}
+GEN_SIZE = (0.367, 0.312, 0.375)  # Blender x, y, z of the generator (machine.json size)
+GEN_AT = (0.0, -(BENCH["far"] + BENCH["depth"] - 0.07 - GEN_SIZE[1] / 2), BENCH["top"])  # its base centre on the bench
+# The handle's grip in the generator's own frame (model.py: a loop on the tank's top, 18 cm wide): each hand takes it
+# 5 cm either side of the middle; the right hand's point is where the generator hangs from grip_r.
+HANDLE = (0.0, 0.03, 0.374)
+HAND_SPREAD = 0.05
+# When the generator and the notes change hands in each clip (seconds); the game reads these from STATUS.md.
+CLIP_TIMES = {
+    "arrive": {"generator_released": 2.5},
+    "pay_leave": {"notes_shown": 0.55, "notes_released": 1.45, "generator_taken": 2.0},
+    "storm_off": {"generator_taken": 0.85},
+}
+
+
+def handle_point(side, gen_at=GEN_AT, yaw=0.0):
+    """Where a hand grips the generator's handle when it stands at gen_at turned by yaw (character space)."""
+    x = HANDLE[0] + (-HAND_SPREAD if side == "r" else HAND_SPREAD)
+    c, s_ = math.cos(yaw), math.sin(yaw)
+    lx, ly = x * c - HANDLE[1] * s_, x * s_ + HANDLE[1] * c
+    return (gen_at[0] + lx, gen_at[1] + ly, gen_at[2] + HANDLE[2] + 0.012)
+
+
+def add_grips_and_notes(rig, look, lm):
+    """Empties at each hand's grip point, parented to the hand bones (<look>_grip_r, <look>_grip_l), and the folded
+    naira notes (<look>_notes) held in the right hand. The game hangs the generator from grip_r by its handle and shows
+    the notes during pay_leave; the notes are hidden in the game otherwise. The notes are our own design: three folded
+    notes in plain colours, no printing."""
+    bpy.context.view_layer.objects.active = rig
+    rig.data.pose_position = "REST"
+    bpy.context.view_layer.update()
+    out = {}
+    for side in ("r", "l"):
+        hb = rig.data.bones[f"{look}_hand_{side}"]
+        wrist = rig.matrix_world @ hb.head_local
+        mid = rig.matrix_world @ rig.data.bones[f"{look}_middle_01_{side}"].head_local
+        along = (mid - wrist).normalized()
+        grip_at = wrist + along * GRIP_REACH
+        e = bpy.data.objects.new(f"{look}_grip_{side}", None)
+        e.empty_display_type = "SPHERE"
+        e.empty_display_size = 0.02
+        bpy.context.scene.collection.objects.link(e)
+        e.parent = rig
+        e.parent_type = "BONE"
+        e.parent_bone = hb.name
+        bpy.context.view_layer.update()
+        e.matrix_world = Matrix.Translation(grip_at)
+        out[side] = e
+    # The notes: three notes, each folded once, fanned a little, about 8 by 7 cm folded.
+    bm = bmesh.new()
+    for k, (dz, ang) in enumerate(((0.0, -8.0), (0.003, 0.0), (0.006, 9.0))):
+        w, h, fold = 0.075, 0.068, 0.012
+        rot = Matrix.Rotation(math.radians(ang), 4, "Y")
+        pts = [(-w / 2, 0, 0), (w / 2, 0, 0), (w / 2, fold, h * 0.5), (-w / 2, fold, h * 0.5), (w / 2, 0, h), (-w / 2, 0, h)]
+        vs = [bm.verts.new((rot @ V((x_, y_ + dz, z_ - h / 2))).to_tuple()) for x_, y_, z_ in pts]
+        f1 = bm.faces.new((vs[0], vs[1], vs[2], vs[3]))
+        f2 = bm.faces.new((vs[3], vs[2], vs[4], vs[5]))
+        f1.material_index = f2.material_index = k
+    me = bpy.data.meshes.new(f"{look}_notes")
+    bm.to_mesh(me)
+    bm.free()
+    for k, hexc in enumerate(("#8a6f9e", "#5f9a83", "#6c84a8")):
+        m = bpy.data.materials.new(f"notes_{k}")
+        m.use_nodes = True
+        bsdf = m.node_tree.nodes["Principled BSDF"]
+        bsdf.inputs["Base Color"].default_value = (*lin(hexc), 1)
+        bsdf.inputs["Roughness"].default_value = 0.7
+        m.use_backface_culling = False
+        me.materials.append(m)
+    notes = bpy.data.objects.new(f"{look}_notes", me)
+    bpy.context.scene.collection.objects.link(notes)
+    hb = rig.data.bones[f"{look}_hand_r"]
+    notes.parent = rig
+    notes.parent_type = "BONE"
+    notes.parent_bone = hb.name
+    bpy.context.view_layer.update()
+    g = out["r"].matrix_world.translation
+    wrist = rig.matrix_world @ hb.head_local
+    along = (g - wrist).normalized()
+    notes.matrix_world = Matrix.Translation(g + along * 0.02) @ along.to_track_quat("Z", "Y").to_matrix().to_4x4()
+    rig.data.pose_position = "POSE"
+    tris = sum(len(p_.vertices) - 2 for p_ in me.polygons)
+    print(f"{look}: grips {look}_grip_r and {look}_grip_l, notes {tris} triangles")
+    return out, notes
+
+
 # ---- Clips (plan 0015 reading 5) ----
 
 def n3(x, y, z):
@@ -2334,17 +2428,28 @@ class Poser:
             self.palm[side] = n
 
     def solve(self, pose):
-        posed, basis = {}, {}
+        """Each bone's local rotation for a pose. A pose may also hold "ik_l" / "ik_r": [(target, pole)], a point in
+        character space for that hand's grip point and a direction the elbow bends towards; the arm is then aimed by
+        two-bone IK (ik_arm) after everything above it is posed."""
+        posed, basis, at = {}, {}, {}
+        forced = {}
         for name in self.order:
             b = self.bones[name]
             short = name[len(self.prefix):]
             R_rest = self.rest[name]
             if b.parent:
                 P = posed[b.parent.name] @ self.rest[b.parent.name].inverted() @ R_rest
+                pn = b.parent.name
+                at[name] = at[pn] + posed[pn] @ self.rest[pn].inverted() @ (b.head_local - self.bones[pn].head_local)
             else:
                 P = R_rest.copy()
+                at[name] = b.head_local.copy()
             R = P.copy()
-            for op in pose.get(short, ()):
+            if short.startswith("upperarm_") and pose.get(f"ik_{short[-1]}"):
+                target, pole = pose[f"ik_{short[-1]}"][-1]
+                forced.update(self.ik_arm(short[-1], at[name], V(target), V(pole)))
+            ops = forced.get(short, pose.get(short, ()))
+            for op in ops:
                 if op[0] == "aim":
                     d = V(op[1]).normalized()
                     cur = (R @ V((0, 1, 0))).normalized()
@@ -2362,6 +2467,32 @@ class Poser:
             posed[name] = R
             basis[name] = (P.inverted() @ R).to_quaternion()
         return basis
+
+    def ik_arm(self, side, shoulder, grip, pole):
+        """Aims for the upper arm, forearm and hand so the hand's grip point reaches `grip` (or as near as the arm
+        allows), the elbow bending towards `pole`."""
+        bn = lambda n: self.bones[self.prefix + n]  # noqa: E731
+        L1 = (bn(f"lowerarm_{side}").head_local - bn(f"upperarm_{side}").head_local).length
+        L2 = (bn(f"hand_{side}").head_local - bn(f"lowerarm_{side}").head_local).length
+        reach = GRIP_REACH
+        wrist = grip.copy()
+        for _ in range(3):
+            d_vec = wrist - shoulder
+            d = max(abs(L1 - L2) + 1e-3, min(L1 + L2 - 1e-3, d_vec.length))
+            u = d_vec.normalized()
+            a = (L1 * L1 - L2 * L2 + d * d) / (2 * d)
+            h = math.sqrt(max(0.0, L1 * L1 - a * a))
+            pp = pole - u * pole.dot(u)
+            pp = pp.normalized() if pp.length > 1e-6 else V((0, 0, -1))
+            elbow = shoulder + u * a + pp * h
+            w = shoulder + u * d
+            fore = (w - elbow).normalized()
+            wrist = grip - fore * reach
+        return {
+            f"upperarm_{side}": [("aim", tuple(elbow - shoulder))],
+            f"lowerarm_{side}": [("aim", tuple(fore))],
+            f"hand_{side}": [("aim", tuple(fore))],
+        }
 
 
 def mirror(d):
@@ -2483,14 +2614,6 @@ class Clips:
         ], loop=True)
 
         nod = {"head": [("rot", X, 12)], "neck_01": [("rot", X, 4)]}
-        wave_up = merge(R, legs_straight, {"upperarm_r": [("aim", n3(-0.55, -0.45, -0.25))], "lowerarm_r": [("aim", n3(-0.15, -0.35, 1), -60)], "hand_r": [("aim", n3(-0.1, -0.25, 1))]})
-        self.clip("arrive", [
-            (0.0, base),
-            (0.3, merge(wave_up, nod)),
-            (0.55, wave_up),
-            (0.8, merge(base, {"head": [("rot", X, 4)]})),
-            (1.0, base),
-        ])
 
         look_down = {"head": [("rot", X, 22), ("rot", Z, 10)], "neck_01": [("rot", X, 8)]}
         wrist = merge(R, legs_straight, {"upperarm_l": [("aim", n3(0.22, -0.3, -0.93))], "lowerarm_l": [("aim", n3(-0.5, -0.72, 0.48), 70)], "hand_l": [("aim", n3(-0.55, -0.7, 0.45))]})
@@ -2578,7 +2701,99 @@ class Clips:
         if keys[-1][0] < 1.6:
             keys.append((1.6, merge(R, legs_straight), (turn, (x, 0, 0))))
         self.clip("leaving", keys)
+        self.bench_clips(base, legs_straight, step, nod)
         print(f"{self.look}: clips {', '.join(CLIPS)}")
+
+    def bench_clips(self, base, legs_straight, step, nod):
+        """ADR 0026: arrive (brings the generator to the bench), pay_leave (pays with the notes, takes the generator,
+        walks off pleased), storm_off (shakes the head, snatches the generator, walks off). Hands reach the handle by
+        two-bone IK; the generator hangs from grip_r while carried (times in CLIP_TIMES)."""
+        R = RELAXED
+        pole = {"r": (-1.0, 0.6, -0.6), "l": (1.0, 0.6, -0.6)}
+
+        def hands(points, extra=None):
+            """Both hands on the handle at points[side] (character space at the root)."""
+            p_ = {f"ik_{sd}": [(points[sd], pole[sd])] for sd in ("l", "r")}
+            p_.update(fingers(55))
+            return merge(p_, extra or {})
+
+        def carry(root_y=0.0, z=0.86, y=-0.33):
+            """Carried in front by the handle, the hands at about belt height."""
+            return {sd: (HAND_SPREAD * (1 if sd == "l" else -1), y, z) for sd in ("l", "r")}
+
+        def on_bench(root_y):
+            return {sd: tuple(V(handle_point(sd)) - V((0, root_y, 0))) for sd in ("l", "r")}
+
+        lean = lambda deg: {"spine_01": [("rot", X, deg * 0.4)], "spine_02": [("rot", X, deg * 0.6)]}  # noqa: E731
+        smile = {"head": [("rot", X, 6)]}
+        carry_pose = merge(R, legs_straight, hands(carry()), lean(-3))
+        a = math.radians(self.spec["stride"])
+        speed = 1.1
+
+        def walk(keys, t0, t1, x0, x1, y, turn, carry_it=True, sp=speed, extra=None):
+            """Walking steps from x0 to x1 (character space) between t0 and t1, facing `turn`."""
+            n = max(2, round(abs(x1 - x0) / (sp * 0.36)))
+            lead = "l"
+            for k in range(n + 1):
+                t = t0 + (t1 - t0) * k / n
+                x = x0 + (x1 - x0) * k / n
+                pose = step(lead, 0)
+                if carry_it:
+                    pose = merge({kk: v for kk, v in pose.items() if not kk.startswith(("upperarm", "lowerarm"))}, hands(carry()), lean(-3))
+                if extra:
+                    pose = merge(pose, extra)
+                keys.append((t, pose, (turn, (x, y, 0)), (0, 0, -0.012 if k % 2 == 0 else 0.0)))
+                lead = "r" if lead == "l" else "l"
+
+        # Arrive: from off to the customer's left (screen right as the mechanic sees it), to the bench, set it down,
+        # step back to the standing spot. About 3 s; the generator lands at 2.4 s.
+        # The approach runs behind the standing spot, so the generator, carried low, clears the bench as they turn; it
+        # is lifted above the bench top before they step in.
+        y_near, y_back = -0.2, 0.12
+        keys = []
+        walk(keys, 0.0, 1.4, 1.6, 0.0, y_back, -90.0)
+        keys.append((1.65, carry_pose, (0.0, (0, y_back, 0))))
+        lift = {sd: (HAND_SPREAD * (1 if sd == "l" else -1), -0.4, 1.24) for sd in ("l", "r")}
+        keys.append((1.95, merge(R, legs_straight, hands(lift), lean(4)), (0.0, (0, y_back, 0))))
+        keys.append((2.2, merge(R, legs_straight, hands(lift), lean(6)), (0.0, (0, y_near, 0))))
+        keys.append((2.5, merge(R, legs_straight, hands(on_bench(y_near)), lean(16)), (0.0, (0, y_near, 0))))
+        keys.append((2.75, merge(base, lean(5)), (0.0, (0, y_near * 0.6, 0))))
+        keys.append((3.1, base, (0.0, (0, 0, 0))))
+        self.clip("arrive", keys)
+
+        # Pay and leave: a nod and smile, notes from the right pocket held out across the bench at the mechanic's hand
+        # height and let go, both hands take the handle, lift, turn to the customer's left and walk off pleased.
+        pocket = merge(R, legs_straight, {"ik_r": [((-0.17, -0.06, 0.92), pole["r"])]}, fingers(40))
+        # Held out beside the generator (on the customer's right, the mechanic's left), at the mechanic's hand height.
+        offer = merge(R, legs_straight, {"ik_r": [((-0.32, -0.6, 1.04), (-1.0, 0.3, -0.8))]}, fingers(30), lean(10), smile, {"spine_02": [("rot", Z, -8)]})
+        keys = [
+            (0.0, base),
+            (0.3, merge(base, nod)),
+            (0.55, pocket),
+            (1.0, offer, (0.0, (0, -0.12, 0))),
+            (1.45, offer, (0.0, (0, -0.12, 0))),
+            (1.7, merge(base, smile), (0.0, (0, -0.15, 0))),
+            (2.0, merge(R, legs_straight, hands(on_bench(y_near)), lean(16)), (0.0, (0, y_near, 0))),
+            (2.3, merge(R, legs_straight, hands(lift), lean(4), smile), (0.0, (0, y_near, 0))),
+            (2.55, carry_pose, (60.0, (0.05, y_near, 0))),
+        ]
+        walk(keys, 2.7, 3.6, 0.15, 1.35, y_near, 90.0, extra=smile)
+        self.clip("pay_leave", keys)
+
+        # Storm off: head shakes, a quick step in, both hands snatch the handle, a sharp turn and a fast walk off.
+        shake = lambda d: merge(base, {"head": [("rot", Z, d), ("rot", X, -3)]}, {"spine_02": [("rot", Z, d * 0.15)]})  # noqa: E731
+        keys = [
+            (0.0, base),
+            (0.15, shake(18)),
+            (0.32, shake(-18)),
+            (0.48, shake(14)),
+            (0.6, shake(0)),
+            (0.85, merge(R, legs_straight, hands(on_bench(y_near)), lean(18)), (0.0, (0, y_near, 0))),
+            (1.05, merge(R, legs_straight, hands(lift), lean(2)), (0.0, (0, y_near, 0))),
+            (1.25, carry_pose, (90.0, (0.05, y_near, 0))),
+        ]
+        walk(keys, 1.4, 2.5, 0.15, 1.6, y_near, 90.0, sp=1.5)
+        self.clip("storm_off", keys)
 
 
 # ---- Scene and renders ----
@@ -2856,12 +3071,95 @@ def renders(look, rig, body, out_dir, tag):
     print(f"{look}: renders in {out_dir}")
 
 
+# ---- Bench clip strips (plan 0017 step 1) ----
+
+def bench_scene():
+    """A plain stand-in workbench (ADR 0025's size) in front of the customer's standing spot, and the generator."""
+    m = bpy.data.materials.new("bench")
+    m.use_nodes = True
+    m.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (*lin("#6e543b"), 1)
+    m.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.8
+    near, far = -(BENCH["far"] + BENCH["depth"]), -BENCH["far"]
+    cy = (near + far) / 2
+
+    def box(name, size, loc):
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=loc)
+        o = bpy.context.active_object
+        o.name = name
+        o.scale = size
+        o.data.materials.append(m)
+        return o
+
+    box("bench_top", (BENCH["width"], BENCH["depth"], 0.04), (0, cy, BENCH["top"] - 0.02))
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            box("bench_leg", (0.06, 0.06, BENCH["top"] - 0.04), (sx * (BENCH["width"] / 2 - 0.07), cy + sy * (BENCH["depth"] / 2 - 0.06), (BENCH["top"] - 0.04) / 2))
+    parts = append_machine()
+    gen = bpy.data.objects.new("generator", None)
+    bpy.context.scene.collection.objects.link(gen)
+    for o in parts:
+        if o.parent is None:
+            o.parent = gen
+    return gen
+
+
+def place_generator(gen, look, clip, t):
+    """On the bench, or hanging from grip_r by the handle while carried (CLIP_TIMES), turned with the hands."""
+    times = CLIP_TIMES.get(clip, {})
+    carried = (clip == "arrive" and t < times["generator_released"]) or (clip in ("pay_leave", "storm_off") and t >= times["generator_taken"])
+    if not carried:
+        gen.matrix_world = Matrix.Translation(V(GEN_AT))
+        return
+    gr = bpy.data.objects[f"{look}_grip_r"].matrix_world.translation
+    gl_ = bpy.data.objects[f"{look}_grip_l"].matrix_world.translation
+    d = gl_ - gr
+    yaw = math.atan2(d.y, d.x)
+    rot = Matrix.Rotation(yaw, 4, "Z")
+    hp = V((HANDLE[0] - HAND_SPREAD, HANDLE[1], HANDLE[2] + 0.012))
+    gen.matrix_world = Matrix.Translation(gr - (rot @ hp)) @ rot
+
+
+def bench_strips(look, out_dir, frames=6):
+    os.makedirs(out_dir, exist_ok=True)
+    scene = bpy.context.scene
+    scene.eevee.taa_render_samples = 24
+    lookdev(flat_background="#1b1c1e")
+    ground()
+    gen = bench_scene()
+    cam = camera()
+    cam.data.lens = 28
+    # From the mechanic's side of the bench, a little to the right, at about eye height (ADR 0025's view, pulled back).
+    aim_camera(cam, V((1.15, -3.1, 1.6)), V((0.35, -0.45, 0.95)))
+    rig = bpy.data.objects[f"customer_{look}"]
+    notes = bpy.data.objects[f"{look}_notes"]
+    for clip in ("arrive", "pay_leave", "storm_off"):
+        action = bpy.data.actions[f"{look}.{clip}"]
+        start, end = int(action.frame_range[0]), int(action.frame_range[1])
+        paths = []
+        for k in range(frames):
+            f = round(start + (end - start) * k / (frames - 1))
+            set_clip(rig, look, clip, f)
+            t = f / FPS
+            ct = CLIP_TIMES.get(clip, {})
+            notes.hide_render = not (clip == "pay_leave" and ct["notes_shown"] <= t < ct["notes_released"])
+            bpy.context.view_layer.update()
+            place_generator(gen, look, clip, t)
+            path = os.path.join(out_dir, f"_{look}-{clip}-{f}.png")
+            render_to(path, 360, 420)
+            paths.append(path)
+        strip(paths, os.path.join(out_dir, f"{look}-{clip}.png"))
+        print(f"{look}: {clip} {end / FPS:.2f} s, strip in {out_dir}")
+
+
 # ---- Modes ----
 
 def build(looks, preview_dir=None):
     for look in looks:
         body, rig, lm, author = build_person(look, preview=bool(preview_dir))
         if preview_dir:
+            if os.environ.get("CUSTOMER_BENCH"):  # the bench clip strips only, unbaked, for quick checks
+                bench_strips(look, preview_dir)
+                continue
             renders(look, rig, body, preview_dir, "")
             continue
         import texture  # noqa: E402
@@ -2931,6 +3229,10 @@ def validate(look):
     for clip in CLIPS:
         if bpy.data.actions.get(f"{look}.{clip}") is None:
             errors.append(f"{look} has no clip {look}.{clip}.")
+    for n in ("grip_r", "grip_l", "notes"):
+        o = bpy.data.objects.get(f"{look}_{n}")
+        if o is None or o.parent != rig:
+            errors.append(f"{look} has no {look}_{n} on its skeleton; run customer.py -- build {look}.")
     for img in bpy.data.images:
         if img.size[0] > BUDGET["texturePx"] or img.size[1] > BUDGET["texturePx"]:
             errors.append(f"Image {img.name} is {img.size[0]} x {img.size[1]}, over {BUDGET['texturePx']} px.")
@@ -2950,8 +3252,9 @@ def export(looks):
         rig = bpy.data.objects[f"customer_{look}"]
         body = bpy.data.objects[f"{look}_body"]
         rig.animation_data.action = None
+        props = [bpy.data.objects.get(f"{look}_{n}") for n in ("grip_r", "grip_l", "notes")]
         for o in bpy.data.objects:
-            o.select_set(o in (rig, body))
+            o.select_set(o in (rig, body, *props))
         bpy.context.view_layer.objects.active = rig
         out = export_path(look)
         os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -2997,8 +3300,13 @@ def main():
         render_baked(a[2:] or looks_from_json(), out)
     elif mode == "export":
         export(a[1:] or looks_from_json())
+    elif mode == "clips":
+        out = a[1] if len(a) > 1 else os.path.join(DIR, "match", "clips")
+        for look in a[2:] or looks_from_json():
+            bpy.ops.wm.open_mainfile(filepath=blend_path(look))
+            bench_strips(look, out)
     else:
-        common.fail(f"Unknown mode {mode}: use build, preview, render or export.")
+        common.fail(f"Unknown mode {mode}: use build, preview, render, clips or export.")
 
 
 main()

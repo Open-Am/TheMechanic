@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MOMENTS } from "../src/platform/interfaces/index.ts";
 import { checkAudio, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
-import { CUSTOMER_CLIPS, checkCustomer, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { CUSTOMER_CLIPS, CUSTOMER_NODES, checkCustomer, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -214,14 +214,21 @@ describe("the customers' budgets (ADR 0015, plan 0015)", () => {
 describe("a customer's file (ADRs 0015 and 0023, plan 0015 step 4)", () => {
   const looks = (JSON.parse(readFileSync(join(root, "game", "public", "customers.json"), "utf8")) as { customers: Array<{ look: string }> }).customers.map((c) => c.look);
   const look = "man_young";
-  const customerJson = (opts: { roots?: string[]; tris?: number; joints?: number; clips?: string[]; images?: Array<[number, number]> } = {}) => {
+  const customerJson = (opts: { roots?: string[]; tris?: number; joints?: number; clips?: string[]; images?: Array<[number, number]>; extra?: string[]; loose?: string[] } = {}) => {
     const roots = opts.roots ?? [`customer_${look}`];
     const joints = opts.joints ?? 53;
     const images = opts.images ?? [];
+    const extra = opts.extra ?? CUSTOMER_NODES.map((n) => `${look}_${n}`);
+    const under = [roots.length, ...extra.map((_, i) => roots.length + 1 + i)];
     return {
       scene: 0,
-      scenes: [{ nodes: roots.map((_, i) => i) }],
-      nodes: [...roots.map((name, i) => ({ name, ...(i === 0 ? { children: [roots.length] } : {}) })), { name: `${look}_body`, mesh: 0, skin: 0 }],
+      scenes: [{ nodes: [...roots.map((_, i) => i), ...(opts.loose ?? []).map((_, i) => roots.length + 1 + extra.length + i)] }],
+      nodes: [
+        ...roots.map((name, i) => ({ name, ...(i === 0 ? { children: under } : {}) })),
+        { name: `${look}_body`, mesh: 0, skin: 0 },
+        ...extra.map((name) => ({ name })),
+        ...(opts.loose ?? []).map((name) => ({ name })),
+      ],
       meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
       accessors: [{ count: (opts.tris ?? 100) * 3 }, { count: (opts.tris ?? 100) * 3 }],
       skins: [{ joints: Array.from({ length: joints }, (_, i) => i) }],
@@ -238,6 +245,16 @@ describe("a customer's file (ADRs 0015 and 0023, plan 0015 step 4)", () => {
     return b;
   };
   const check = (json: object, bin?: Uint8Array, name = look) => checkCustomer(readGlb(makeGlb(json, bin)), name, looks, budgets).errors.join(" ");
+
+  it("needs both hands' grip points and the notes under the root (plan 0017 step 1)", () => {
+    expect(CUSTOMER_CLIPS).toContain("pay_leave");
+    expect(CUSTOMER_CLIPS).toContain("storm_off");
+    expect(check(customerJson({ clips: CUSTOMER_CLIPS.filter((c) => c !== "storm_off").map((c) => `${look}.${c}`) }))).toMatch(/no clip "man_young.storm_off"/);
+    expect(check(customerJson({ clips: CUSTOMER_CLIPS.filter((c) => c !== "pay_leave").map((c) => `${look}.${c}`) }))).toMatch(/no clip "man_young.pay_leave"/);
+    expect(check(customerJson({ extra: [`${look}_grip_l`, `${look}_notes`] }))).toMatch(/no node "man_young_grip_r"/);
+    expect(check(customerJson({ extra: [`${look}_grip_r`, `${look}_grip_l`] }))).toMatch(/no node "man_young_notes"/);
+    expect(check(customerJson({ extra: [`${look}_grip_r`, `${look}_notes`], loose: [`${look}_grip_l`] }))).toMatch(/"man_young_grip_l" must be under "customer_man_young"/);
+  });
 
   it("every look in customers.json has a name the check accepts, and a good file passes", () => {
     expect(looks).toEqual(["woman_market", "man_kaftan", "man_young"]);
