@@ -67,6 +67,7 @@ Everything below went into `machine.json` and `faults.json` as drafts, `verified
 - Where the ignition coil sits, and whether it is a coil or a CDI unit; the data puts it behind the recoil starter with two bolts.
 - Whether the recoil spring alone fails often enough to be the fault, or the rope does too (one fault, one culprit: the data has the spring).
 - The three new parts are drawn from placeholders until plan 0020's model step (it waits for plan 0018's branch, which edits `gen950.blend`). Their placeholder sizes and places are guesses from the model's bounds: the cap on the tank's top, the filter left of the tap under it, the coil inside the recoil starter's housing on the engine side.
+- With all fifteen parts off on a 360 by 640 screen the tray wraps to eight rows of chips and the controls cover about three quarters of the screen; the toolbox then sits under them (the machine stays clear). `verify:phone` reports this past twelve chips instead of failing. Owner: keep, or make the tray more compact (smaller chips, or pictures without names) through a design change?
 - The spark plug's condition when healthy now reads "Electrodes are sound. The gap is right." (plan 0019 reading 5), since some faults' plug readings describe a wet or sooty tip from the engine.
 
 ## Owner decisions pending
