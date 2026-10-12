@@ -27,7 +27,7 @@
       "does": "Catches dirt in the fuel on its way from the tap to the hose.",
       "requires": ["fuel_hose"],
       "inspectOk": "Clear inside. Fuel passes freely.",
-      "placeholder": { "shape": "cylinder", "axis": "y", "size": [0.018, 0.032, 0.018], "position": [-0.192, 0.178, 0.118], "color": "#d9c48a" },
+      "placeholder": { "shape": "cylinder", "axis": "y", "size": [0.018, 0.032, 0.018], "position": [-0.192, 0.178, 0.092], "color": "#d9c48a" },
       "explode": [-0.08, -0.02, 0.04],
       "motion": { "type": "pull" }
     },
