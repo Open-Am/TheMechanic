@@ -211,6 +211,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   function reset(pv: PartView): void {
     tweens.cancel(pv.id);
+    seating.delete(pv.id);
     for (const f of pv.fasteners) applyFastener(f, 0);
     pv.group.visible = true;
     pv.group.position.set(...pv.home);
@@ -233,6 +234,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   // sees nothing until a part is dropped on the tray.
   const loose = new Set<PartId>();
   const loosening = new Set<PartId>();
+  /** Parts put back and still on their way home: they have not seated yet (plan 0013 reading 2). */
+  const seating = new Set<PartId>();
 
   /** Where the finger's moments go (plan 0013 step 5). Set by main.ts; nothing is told until then. */
   let momentFn: ((m: Moment) => void) | null = null;
@@ -726,16 +729,31 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     hand?.firm(false);
   }
 
-  /** Before the cord is pulled, the hand presses every loose part home. No rule changes (ADR 0020). */
+  /**
+   * Before the cord is pulled, the hand presses every loose part home. No rule changes (ADR 0020). It runs on
+   * "pulled", which app tells before it plays the cord: a part still going back seats now, with its `seat`, so the
+   * order is always seat, cord, then start or fail. Pressing home a part that was never put back stays silent.
+   */
   function pressHome(): void {
     const doingUp = sequence?.mode === "do-up" ? sequence.id : null;
+    const seated = [...seating];
+    seating.clear();
     // A part stopped half undone, or half done up, leaves no tool behind in the hand (plans 0011, 0012).
     if (sequence || toolInHand) {
       abortSequence();
       hand?.detach();
       hand?.open();
+    } else if (seated.length) {
+      hand?.detach();
+      hand?.withdraw();
     }
-    for (const id of new Set([...loose, ...loosening, ...(doingUp ? [doingUp] : [])])) {
+    for (const id of seated) {
+      tweens.cancel(id); // not finish: that would click its remaining turns and seat it a second time
+      const pv = view.parts.get(id);
+      if (pv) setOpacity(pv, 1);
+      moment("seat");
+    }
+    for (const id of new Set([...loose, ...loosening, ...seated, ...(doingUp ? [doingUp] : [])])) {
       const pv = view.parts.get(id);
       if (!pv) continue;
       tweens.cancel(`loosen:${id}`);
@@ -903,6 +921,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const screwIn = turnCounter(m.type === "unscrew" ? m.turns : 0, () => moment("turn"));
     // The part is home; its fasteners go back in, the hand fetching the tool from the toolbox (ADRs 0020, 0021).
     if (pv.fasteners.length) sequence = { id, channel: id, mode: "do-up" };
+    seating.add(id);
     let doUp: TweenSpec[] = [];
     const endInstall = (): void => {
       sequence = null;
@@ -929,6 +948,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           applyPose(pv, poseAt(m, part.explode, 1 - p));
         },
         done: () => {
+          seating.delete(id);
           moment("seat"); // home, before its fasteners go in (plan 0013 reading 2)
           if (!pv.fasteners.length) return;
           hand?.detach();
@@ -957,6 +977,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       hand?.hide();
       loose.clear();
       loosening.clear();
+      seating.clear();
       carry = null;
       chip = null;
       for (const pv of view.parts.values()) reset(pv);

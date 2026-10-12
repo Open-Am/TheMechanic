@@ -171,6 +171,29 @@ describe("game", () => {
     expect(game.elapsed()).toBe(7000);
   });
 
+  it("tells 'pulled' before the cord plays, so a part still going back seats before the cord (plan 0013)", () => {
+    const clock = fakeClock();
+    const { audio, sounds, vibrations } = recorder();
+    const index = faults.faults.findIndex((f) => f.id === "fouled_plug");
+    const game = createGame({ machine, faults, clock, audio, random: () => (index + 0.5) / faults.faults.length });
+    // What render does on "pulled": a part caught mid put-back is pressed home and seats.
+    game.events.on("pulled", () => playMoment(audio, "seat"));
+    game.newRound();
+    game.begin();
+    clock.advance(1000);
+    game.propose({ type: "pull" });
+    expect(sounds).toEqual(["seat", "cord", "fail"]);
+    expect(vibrations).toEqual([[VIBRATION.seat, 0], [40, CORD_SECONDS]]);
+    for (const [type, partId] of [["remove", "plug_cap"], ["remove", "spark_plug"], ["fix", "spark_plug"], ["install", "spark_plug"], ["install", "plug_cap"]] as const) {
+      clock.advance(1000);
+      game.propose({ type, partId });
+    }
+    sounds.length = 0;
+    clock.advance(1000);
+    game.propose({ type: "pull" });
+    expect(sounds).toEqual(["seat", "cord", "start"]);
+  });
+
   it("every fault plays to completion through the game", () => {
     for (const fault of faults.faults) {
       const { game, clock } = setup(fault.id);

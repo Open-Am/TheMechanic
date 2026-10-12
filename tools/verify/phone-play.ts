@@ -771,6 +771,26 @@ try {
   v = await vibrationsNow();
   sound(JSON.stringify(moments(h)) === '["cord","fail"]' && JSON.stringify(v) === "[40]", "a failed pull plays the cord then fail (40 ms)", `a failed pull logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`);
 
+  // The cord pulled while a part with no fasteners is still going back: it seats first, then the cord, then fail.
+  await pullOff("plug_cap");
+  await idle();
+  await clearSound();
+  await putBack("plug_cap");
+  await tapSelector(".pull");
+  await sleep(1500);
+  h = await heardNow();
+  v = await vibrationsNow();
+  const capHome = await evaluate<boolean>(`!document.querySelector('.tray [data-part="plug_cap"]')`);
+  // Seat and cord within 50 ms of each other: the pull caught the plug cap on its way back (its put-back takes about
+  // 0.85 s), so this is the press home seating it, not the put-back ending by itself before the tap.
+  const at = await evaluate<number[]>("(window.__openAmDevAudio?.log() ?? []).map((x) => x.at)");
+  const caught = at.length >= 2 && Math.abs(at[1]! - at[0]!) <= 50;
+  sound(
+    JSON.stringify(moments(h)) === '["seat","cord","fail"]' && JSON.stringify(v) === "[15,40]" && capHome && caught,
+    "the cord pulled while the plug cap is still going back: it seats (15 ms) before the cord, then fail (40 ms)",
+    `the cord pulled mid put-back logged ${JSON.stringify(moments(h))} at ${JSON.stringify(at)} ms and vibrated ${JSON.stringify(v)}${capHome ? "" : "; the plug cap is still in the tray"}${caught ? "" : "; the seat was not caught by the pull"}`,
+  );
+
   // Mute, then reload: the button stays muted, and every moment is silent with no vibration.
   await tapSelector(".hud .mute");
   const pressed = await evaluate<string | null>("document.querySelector('.hud .mute').getAttribute('aria-pressed')");
