@@ -34,7 +34,7 @@ export interface Budgets {
 interface GltfJson {
   scene?: number;
   scenes?: Array<{ nodes?: number[] }>;
-  nodes?: Array<{ name?: string; mesh?: number; children?: number[]; extras?: Record<string, unknown> }>;
+  nodes?: Array<{ name?: string; mesh?: number; children?: number[]; extras?: Record<string, unknown>; translation?: number[]; rotation?: number[]; scale?: number[]; matrix?: number[] }>;
   meshes?: Array<{ primitives: Array<{ mode?: number; indices?: number; attributes: Record<string, number>; targets?: unknown[] }>; extras?: { targetNames?: string[] } }>;
   accessors?: Array<{ count: number }>;
   images?: Array<{ bufferView?: number; mimeType?: string; uri?: string }>;
@@ -130,6 +130,17 @@ export interface MachineIds {
   base: string[];
   /** Fastener ids by part (ADR 0020): each must be a node under its part's node. */
   fasteners?: Record<string, string[]>;
+  /** The nodes the pull moves, by part (ADR 0027, tools/pipeline/child-nodes.json). */
+  childNodes?: ChildNodes;
+}
+
+/** {part: {node id: "mesh" | "empty"}}: each node is an empty under its part; a "mesh" one draws its shape below it. */
+export type ChildNodes = Record<string, Record<string, "mesh" | "empty">>;
+
+/** Reads tools/pipeline/child-nodes.json, without its "_source" note. */
+export function readChildNodes(text: string): ChildNodes {
+  const raw = JSON.parse(text) as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith("_"))) as ChildNodes;
 }
 
 /** The model contract (brief section 8) and the ADR 0014 budgets. */
@@ -177,6 +188,29 @@ export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckRe
       allFastenerTris += tris;
     }
   }
+  // The nodes the pull moves (ADR 0027, plan 0018): an empty under its part, named by its id, that the game moves, turns
+  // and stretches, so it carries no mesh (mesh compression would rescale it), no rotation and no scale; a "mesh" node
+  // draws its shape through its children, an "empty" one draws nothing. Their triangles count towards their part.
+  for (const [part, list] of Object.entries(ids.childNodes ?? {})) {
+    const root = roots.find((r) => r.name === part);
+    for (const [id, kind] of Object.entries(list)) {
+      const index = nodes.findIndex((n) => n.name === id);
+      if (index < 0) {
+        errors.push(`No node named "${id}" (moved by the pull, under "${part}").`);
+        continue;
+      }
+      if (root && !under(root.index, index)) errors.push(`"${id}" must be a node under "${part}", so it moves with it.`);
+      const node = nodes[index]!;
+      if (node.mesh !== undefined) errors.push(`"${id}" must be an empty node with its shape below it, not a mesh node.`);
+      const turned = node.rotation && node.rotation.some((v, i) => Math.abs(v - (i === 3 ? 1 : 0)) > 1e-5);
+      const scaled = node.scale && node.scale.some((v) => Math.abs(v - 1) > 1e-5);
+      if (turned || scaled || node.matrix) errors.push(`"${id}" must have no rotation or scale; the game turns and stretches it.`);
+      const tris = nodeTriangles(glb.json, index);
+      if (kind === "mesh" && tris === 0) errors.push(`"${id}" draws nothing; its shape is missing.`);
+      if (kind === "empty" && tris > 0) errors.push(`"${id}" is a point and must draw nothing.`);
+    }
+  }
+
   const fastenerAllowance = budgets.allocation["fasteners"];
   if (fastenerAllowance !== undefined && allFastenerTris > fastenerAllowance) errors.push(`The fasteners have ${allFastenerTris} triangles, over their allocation of ${fastenerAllowance}.`);
 
@@ -813,7 +847,8 @@ function main(): void {
   }
   const glb = readGlb(new Uint8Array(readFileSync(input)));
   const fasteners = Object.fromEntries(machine.parts.filter((p) => p.fasteners?.length).map((p) => [p.id, p.fasteners!.map((f) => f.id)]));
-  const result = checkModel(glb, { parts: machine.parts.map((p) => p.id), base: machine.base.map((b) => b.id), fasteners }, budgets);
+  const childNodes = readChildNodes(readFileSync(join(root, "tools", "pipeline", "child-nodes.json"), "utf8"));
+  const result = checkModel(glb, { parts: machine.parts.map((p) => p.id), base: machine.base.map((b) => b.id), fasteners, childNodes }, budgets);
   const size = (p: string) => (existsSync(p) ? statSync(p).size : null);
   result.errors.push(...checkFileSize("The environment map", size(envPath), budgets.environmentBytes, true));
   result.errors.push(...checkFileSize("The ground shadow", size(groundIn), budgets.groundBytes, false));

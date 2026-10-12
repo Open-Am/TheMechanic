@@ -3,7 +3,8 @@
     node tools/run-blender.mjs tools/blender/export.py --blend assets/gen950/blend/gen950.blend
 
 Each part and base object becomes a root node named exactly its ID; each fastener (plan 0011) a child node of its
-part, named by its id. Y up, modifiers applied, no cameras or lights.
+part, named by its id; each node the pull moves (plan 0018, the "details" collection) an empty under its part, with
+its shape as a child mesh. Y up, modifiers applied, no cameras or lights.
 Compression and texture resizing happen afterwards in tools/pipeline/optimise.mjs.
 """
 
@@ -21,9 +22,9 @@ os.makedirs(common.EXPORT_DIR, exist_ok=True)
 
 bpy.ops.object.select_all(action="DESELECT")
 count = 0
-for name in ("parts", "base", "fasteners"):
+for name in ("parts", "base", "fasteners", common.DETAILS):
     if name not in bpy.data.collections:
-        continue  # a model made before plan 0011 has no fasteners
+        continue  # a model made before plan 0011 has no fasteners, before plan 0018 no details
     for obj in bpy.data.collections[name].objects:
         obj.select_set(True)
         count += 1

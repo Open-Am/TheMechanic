@@ -8,8 +8,8 @@
 // Flattening, joining, instancing, palettes and simplification are all turned off: they would merge or rename the
 // one-node-per-part structure the game relies on (brief section 8), and triangle counts are the modeller's job.
 // Flags checked against `gltf-transform help optimize` for 4.5.0.
-// --keep-empty turns pruning off: it would drop empty nodes, and the toolbox's tool slots (plan 0012) and the customers'
-// hand grips (plan 0017) are empty nodes.
+// --keep-empty turns pruning off: it would drop empty nodes, and the toolbox's tool slots (plan 0012), the customers'
+// hand grips (plan 0017) and the machine's muffler outlet (plan 0018) are empty nodes.
 // A fresh Blender export of selected objects carries nothing unused, so there is nothing for pruning to remove.
 
 import { spawnSync } from "node:child_process";

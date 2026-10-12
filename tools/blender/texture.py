@@ -36,6 +36,11 @@ for _part in common.load_machine()["parts"]:
     for _group, (_size, _names) in GROUPS.items():
         if _part["id"] in _names:
             _names.extend(f["id"] for f in _part.get("fasteners", []))
+# The shapes of the nodes the pull moves (plan 0018) bake with their part's group; empties have nothing to bake.
+for _pid, _nodes in common.CHILD_NODES.items():
+    for _group, (_size, _names) in GROUPS.items():
+        if _pid in _names:
+            _names.extend(f"{n}.mesh" for n, kind in _nodes.items() if kind == "mesh")
 TEX_DIR = os.path.join(common.ASSET_DIR, "textures")
 
 # Wear profile per modelling material: (profile, metal under chips or None, dust amount 0..1).
@@ -59,6 +64,7 @@ PROFILES = {
     "switch_red": ("plastic", None, 0.3),
     "reel_plastic": ("plastic", None, 0.3),
     "earth_wire": ("plain", None, 0.2),
+    "starter_rope": ("plain", None, 0.5),
     # The mechanic's hand (plan 0008).
     "skin": ("skin", None, 0.0),
     "nail": ("nail", None, 0.15),

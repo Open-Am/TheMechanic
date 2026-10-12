@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MOMENTS } from "../src/platform/interfaces/index.ts";
 import { checkAudio, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
-import { CUSTOMER_CLIPS, CUSTOMER_NODES, checkBench, checkCustomer, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { CUSTOMER_CLIPS, CUSTOMER_NODES, checkBench, checkCustomer, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readChildNodes, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -600,5 +600,98 @@ describe("the workbench (ADR 0025, plan 0016)", () => {
     const r = checkBench(readGlb(new Uint8Array(readFileSync(file))), budgets);
     expect(r.errors).toEqual([]);
     expect(r.triangles).toBeGreaterThan(0);
+  });
+});
+
+describe("the nodes the pull moves (ADR 0027, plan 0018 step 1)", () => {
+  const childNodes = readChildNodes(readFileSync(join(root, "tools", "pipeline", "child-nodes.json"), "utf8"));
+  const fasteners = Object.fromEntries(machine.parts.filter((p) => p.fasteners?.length).map((p) => [p.id, p.fasteners!.map((f) => f.id)]));
+
+  type Node = { name: string; mesh?: number; children?: number[]; rotation?: number[]; scale?: number[] };
+  /** Parts and base as roots; each pull node an empty under `parentOf(part)`, a "mesh" one with a shape below it. */
+  const withNodes = (opts: { skip?: string; parentOf?: (part: string) => string; meshOnNode?: string; shapeless?: string; shapeOn?: string; turned?: string } = {}) => {
+    const names = [...ids.parts, ...ids.base];
+    const nodes: Node[] = names.map((name, i) => ({ name, mesh: i }));
+    const meshes = names.map((_, i) => ({ primitives: [{ attributes: { POSITION: i * 2 }, indices: i * 2 + 1 }] }));
+    const accessors = names.flatMap(() => [{ count: 30 }, { count: 30 }]);
+    const shape = (): number => {
+      meshes.push({ primitives: [{ attributes: { POSITION: accessors.length }, indices: accessors.length + 1 }] });
+      accessors.push({ count: 30 }, { count: 30 });
+      return meshes.length - 1;
+    };
+    for (const [part, list] of Object.entries(childNodes)) {
+      for (const [id, kind] of Object.entries(list)) {
+        if (id === opts.skip) continue;
+        const node: Node = { name: id };
+        if (id === opts.meshOnNode) node.mesh = shape();
+        if (id === opts.turned) node.rotation = [0.2588, 0, 0, 0.9659];
+        nodes.push(node);
+        const index = nodes.length - 1;
+        if ((kind === "mesh" && id !== opts.shapeless && id !== opts.meshOnNode) || id === opts.shapeOn) {
+          nodes.push({ name: `${id}.mesh`, mesh: shape() });
+          node.children = [nodes.length - 1];
+        }
+        const parent = nodes.find((n) => n.name === (opts.parentOf ? opts.parentOf(part) : part))!;
+        parent.children = [...(parent.children ?? []), index];
+      }
+    }
+    return readGlb(makeGlb({ scene: 0, scenes: [{ nodes: names.map((_, i) => i) }], nodes, meshes, accessors }));
+  };
+  const all = { ...ids, childNodes };
+
+  it("names the handle and rope under the recoil starter, the outlet under the muffler and the switch under the panel", () => {
+    expect(childNodes).toEqual({
+      recoil_starter: { "recoil_starter.handle": "mesh", "recoil_starter.rope": "mesh" },
+      muffler: { "muffler.outlet": "empty" },
+      base_panel: { "base_panel.switch": "mesh" },
+    });
+    for (const part of Object.keys(childNodes)) expect([...ids.parts, ...ids.base]).toContain(part);
+  });
+
+  it("accepts each as an empty under its part, drawing its shape through a child", () => {
+    expect(checkModel(withNodes(), all, budgets).errors).toEqual([]);
+  });
+
+  it("reports a missing node and one that is not under its part", () => {
+    expect(checkModel(withNodes({ skip: "muffler.outlet" }), all, budgets).errors.join(" ")).toMatch(/No node named "muffler.outlet"/);
+    const elsewhere = checkModel(withNodes({ parentOf: (p) => (p === "recoil_starter" ? "fuel_tank" : p) }), all, budgets).errors.join(" ");
+    expect(elsewhere).toMatch(/"recoil_starter.handle" must be a node under "recoil_starter"/);
+    expect(elsewhere).toMatch(/"recoil_starter.rope" must be a node under "recoil_starter"/);
+  });
+
+  it("reports a node that is itself a mesh (compression would rescale it) or is turned", () => {
+    expect(checkModel(withNodes({ meshOnNode: "recoil_starter.rope" }), all, budgets).errors.join(" ")).toMatch(/"recoil_starter.rope" must be an empty node/);
+    expect(checkModel(withNodes({ turned: "base_panel.switch" }), all, budgets).errors.join(" ")).toMatch(/"base_panel.switch" must have no rotation or scale/);
+  });
+
+  it("reports a handle without its shape, and an outlet that draws something", () => {
+    expect(checkModel(withNodes({ shapeless: "recoil_starter.handle" }), all, budgets).errors.join(" ")).toMatch(/"recoil_starter.handle" draws nothing/);
+    expect(checkModel(withNodes({ shapeOn: "muffler.outlet" }), all, budgets).errors.join(" ")).toMatch(/"muffler.outlet" is a point/);
+  });
+
+  it("counts the handle, rope and switch against their part's allocation", () => {
+    const glb = withNodes();
+    const r = checkModel(glb, all, { ...budgets, allocation: { ...budgets.allocation, recoil_starter: 10 + 10 + 10 - 1 } });
+    expect(r.errors.join(" ")).toMatch(/"recoil_starter" has 30 triangles, over its allocation of 29/);
+  });
+
+  it("the shipped model passes with its fasteners and these nodes, within the machine's budget", () => {
+    const glb = readGlb(new Uint8Array(readFileSync(join(root, "game", "public", "machines", "gen950", "model.glb"))));
+    const r = checkModel(glb, { ...ids, fasteners, childNodes }, budgets);
+    expect(r.errors).toEqual([]);
+    expect(r.triangles).toBeLessThanOrEqual(budgets.triangles);
+    expect(glb.byteLength).toBeLessThanOrEqual(budgets.glbBytes);
+  });
+
+  it("in the shipped model the rope runs along +X from the starter's outlet to the handle", () => {
+    const glb = readGlb(new Uint8Array(readFileSync(join(root, "game", "public", "machines", "gen950", "model.glb"))));
+    const nodes = glb.json.nodes ?? [];
+    const at = (name: string) => nodes.find((n) => n.name === name)?.translation ?? [0, 0, 0];
+    const rope = at("recoil_starter.rope");
+    const handle = at("recoil_starter.handle");
+    // Both are in the recoil starter's frame (its node sits at the part's centre, unrotated).
+    expect(handle[0]! - rope[0]!).toBeGreaterThan(0.01);
+    expect(Math.abs(handle[1]! - rope[1]!)).toBeLessThan(1e-4);
+    expect(Math.abs(handle[2]! - rope[2]!)).toBeLessThan(1e-4);
   });
 });

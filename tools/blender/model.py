@@ -70,11 +70,56 @@ def recoil_starter(M):
     # The four bolt ears; their bolts are fasteners in machine.json, built by fasteners() (plan 0011).
     for z, y in ((-0.13, 0.205), (-0.13, 0.077), (0.115, 0.232), (0.06, 0.045)):
         pieces.append(box((0.004, 0.022, 0.022), (0.124, y, z), M["black_steel"], bevel=0.003))
-    # T-handle on its cord, just in front of the vent ring.
-    pieces.append(cyl(0.0035, 0.03, (0.172, 0.13, 0.135), "x", M["rubber"], verts=8))
-    grip = bevelled(box((0.022, 0.07, 0.018), (0.19, 0.13, 0.142), M["black_plastic"]), 0.006, 3)
-    pieces.append(grip)
+    # The rope guide at the rim of the vent ring: a short boss with a dark hole the rope comes out of. The T-handle and
+    # the rope are their own nodes (plan 0018): starter_handle() and starter_rope() below.
+    guide_x = (0.158 + STARTER_OUTLET[0]) / 2
+    pieces.append(disc(0.0068, STARTER_OUTLET[0] - 0.158, (guide_x, STARTER_OUTLET[1], STARTER_OUTLET[2]), "x", M["black_steel"], verts=16, bevel=0.0015))
+    pieces.append(cyl(0.0032, 0.001, (STARTER_OUTLET[0] + 0.0004, STARTER_OUTLET[1], STARTER_OUTLET[2]), "x", M["slot"], verts=12))
     return pieces
+
+
+# ---- The nodes the pull moves (plan 0018, ADR 0027) ----
+# Points in glTF machine coordinates. The recoil starter's face looks along +X, so the rope pays out along +X.
+STARTER_OUTLET = (0.1665, 0.13, 0.135)  # where the rope leaves the guide: the rope node's origin
+STARTER_GRIP = (0.186, 0.13, 0.135)  # where the rope ends inside the handle's stem: the handle node's origin
+MUFFLER_OUTLET = (-0.164, 0.078, -0.118)  # the open end of the spout; the exhaust leaves along -X
+SWITCH_HINGE = (0.065, 0.215, 0.157)  # the rocker's pivot, on the switch frame; it rocks about X
+SWITCH_TILT = 8.0  # degrees about +X: the rocker is modelled in the ON position, its top end out
+
+
+def starter_handle(M):
+    # The T-grip from recoil_starter/et950-recoil-cover-side-handle: a round stem out of the guide and a flat
+    # crossbar with grip ribs, black plastic. About 72 mm across.
+    x0 = STARTER_OUTLET[0] + 0.004
+    stem = disc(0.0062, 0.022, ((x0 + 0.198) / 2, STARTER_GRIP[1], STARTER_GRIP[2]), "x", M["black_plastic"], verts=12, bevel=0.0015)
+    bar = bevelled(box((0.016, 0.072, 0.022), (0.2, STARTER_GRIP[1], STARTER_GRIP[2]), M["black_plastic"]), 0.005, 3)
+    ribs = [bevelled(box((0.0016, 0.004, 0.018), (0.2085, STARTER_GRIP[1] + dy, STARTER_GRIP[2]), M["black_plastic"]), 0.0006, 1) for dy in (-0.026, -0.02, 0.02, 0.026)]
+    return [stem, bar, *ribs]
+
+
+def starter_rope(M):
+    # The rope from the guide to the stem, along +X from its origin. The game scales the rope node along X.
+    length = STARTER_GRIP[0] - STARTER_OUTLET[0]
+    return [cyl(0.0022, length, (STARTER_OUTLET[0] + length / 2, STARTER_OUTLET[1], STARTER_OUTLET[2]), "x", mat("starter_rope", "#cfc6b3", 0.0, 0.8), verts=8)]
+
+
+def panel_switch(M):
+    rocker = bevelled(box((0.014, 0.022, 0.006), (SWITCH_HINGE[0], SWITCH_HINGE[1], 0.159), M["switch_red"]), 0.002)
+    # A raised bar on the OFF end, the "O" side the mechanic presses.
+    mark = box((0.008, 0.0018, 0.0008), (SWITCH_HINGE[0], SWITCH_HINGE[1] - 0.007, 0.1622), M["label"])
+    pieces = [rocker, mark]
+    for p in pieces:
+        rotate_about(p, "x", SWITCH_TILT, SWITCH_HINGE)
+    return pieces
+
+
+# Node id -> (origin, builder or None for an empty). The ids and kinds are in tools/pipeline/child-nodes.json.
+DETAIL_BUILDERS = {
+    "recoil_starter.handle": (STARTER_GRIP, starter_handle),
+    "recoil_starter.rope": (STARTER_OUTLET, starter_rope),
+    "muffler.outlet": (MUFFLER_OUTLET, None),
+    "base_panel.switch": (SWITCH_HINGE, panel_switch),
+}
 
 
 # ---- Fuel tank ----
@@ -350,10 +395,10 @@ def base_panel(M):
     label = box((0.075, 0.06, 0.0015), (-0.025, 0.205, 0.1555), M["label"])
     breaker = disc(0.005, 0.005, (-0.05, 0.168, 0.157), "z", M["switch_red"], verts=16, bevel=0.0015)
     switch_frame = bevelled(box((0.022, 0.03, 0.004), (0.065, 0.215, 0.1565), M["black_steel"]), 0.002)
-    rocker = bevelled(box((0.014, 0.022, 0.006), (0.065, 0.215, 0.159), M["switch_red"]), 0.002)
+    # The red rocker in this frame is its own node, base_panel.switch (plan 0018): panel_switch().
     choke = box((0.04, 0.008, 0.003), (0.065, 0.175, 0.1565), M["slot"])
     choke_lever = bevelled(box((0.008, 0.012, 0.01), (0.075, 0.175, 0.16), M["zinc"]), 0.002)
-    return [upper, *walls, socket, label, breaker, switch_frame, rocker, choke, choke_lever]
+    return [upper, *walls, socket, label, breaker, switch_frame, choke, choke_lever]
 
 
 BUILDERS.update({
@@ -424,6 +469,36 @@ def build_fasteners(part_name, machine, M):
     return made
 
 
+def build_details(part_name, M):
+    """(Re)builds a part's child nodes for the pull (plan 0018): an empty per node at its origin, parented to the part,
+    with its shape (if any) as a child mesh "<id>.mesh" whose own origin is the empty's. Returns the mesh objects."""
+    col = common.ensure_collection(common.DETAILS)
+    for o in list(col.objects):
+        if o.name.startswith(part_name + "."):
+            bpy.data.objects.remove(o, do_unlink=True)
+    parent = bpy.data.objects.get(part_name)
+    made = []
+    for node_id, kind in common.CHILD_NODES.get(part_name, {}).items():
+        origin, builder = DETAIL_BUILDERS[node_id]
+        if (builder is None) != (kind == "empty"):
+            common.fail(f"'{node_id}' is a {kind} in child-nodes.json but model.py builds it differently.")
+        point = Vector(common.gl(*origin))
+        empty = bpy.data.objects.new(node_id, None)
+        empty.empty_display_type = "ARROWS"
+        empty.empty_display_size = 0.02
+        col.objects.link(empty)
+        empty.parent = parent
+        empty.location = point - parent.matrix_world.translation if parent else point
+        if builder:
+            obj = join(builder(M), f"{node_id}.mesh", col)
+            obj.data.transform(Matrix.Translation(obj.location - point))
+            obj.parent = empty
+            obj.location = (0.0, 0.0, 0.0)
+            made.append(obj)
+    bpy.context.view_layer.update()
+    return made
+
+
 def main():
     wanted = common.args() or list(BUILDERS)
     unknown = [w for w in wanted if w not in BUILDERS]
@@ -449,6 +524,16 @@ def main():
         made = build_fasteners(name, machine, M)
         if made:
             print(f"  with {len(made)} fasteners: {sum(common.triangle_count(o) for o in made)} triangles")
+        details = build_details(name, M)
+        for node_id in common.CHILD_NODES.get(name, {}):
+            empty = bpy.data.objects[node_id]
+            at = empty.matrix_world.translation
+            mesh = bpy.data.objects.get(f"{node_id}.mesh")
+            tris = common.triangle_count(mesh) if mesh else 0
+            bounds[name]["triangles"] += tris
+            print(f"  node {node_id} at {[round(at.x, 4), round(at.z, 4), round(-at.y, 4)]}: {tris} triangles")
+        if details:
+            print(f"  {name} with its nodes: {bounds[name]['triangles']} triangles (allocation {common.ALLOCATION.get(name)})")
     for obj in list(bpy.context.scene.collection.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
     bpy.ops.wm.save_mainfile()

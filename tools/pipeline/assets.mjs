@@ -27,7 +27,8 @@ const steps = [
   ["Validate the model", blender("validate.py")],
   ["Export the GLB", blender("export.py")],
   ["Bake the ground shadow", blender("bake_ground.py")],
-  ["Optimise", [join(root, "tools", "pipeline", "optimise.mjs")]],
+  // --keep-empty: the muffler's outlet (plan 0018) is an empty node.
+  ["Optimise", [join(root, "tools", "pipeline", "optimise.mjs"), join(root, "assets", "gen950", "export", "model.glb"), join(root, "assets", "gen950", "export", "model.optimised.glb"), "2048", "--keep-empty"]],
   ["Check and copy into the game", [join(root, "tools", "pipeline", "check.ts")]],
   ["Validate and export the hand", blender("hand.py", handBlend, "export")],
   ["Optimise the hand", [join(root, "tools", "pipeline", "optimise.mjs"), handGlb, handOpt]],

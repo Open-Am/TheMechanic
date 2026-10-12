@@ -30,6 +30,13 @@ with open(os.path.join(ROOT, "tools", "pipeline", "budgets.json"), encoding="utf
 TRIANGLE_BUDGET = BUDGETS["triangles"]
 ALLOCATION = BUDGETS["allocation"]
 
+# The child nodes the pull moves (ADR 0027, plan 0018): {part: {node id: "mesh" | "empty"}}, shared with check.ts.
+# Each is an empty named by its id, parented to its part, in the "details" collection; a "mesh" one has its shape as a
+# child object named "<id>.mesh" in the same collection.
+with open(os.path.join(ROOT, "tools", "pipeline", "child-nodes.json"), encoding="utf-8") as _f:
+    CHILD_NODES = {k: v for k, v in json.load(_f).items() if not k.startswith("_")}
+DETAILS = "details"
+
 # The three-quarter view of the old orbit camera, kept for match renders and the tray pictures (thumbnails.ts). Since
 # plan 0016 the game's camera stands at a mechanic's eye over the workbench (game/src/render/stage.ts) and the machine
 # starts turned to the same three-quarter view (DEFAULT_YAW = -azimuth), seen about 12 degrees down instead of 26.

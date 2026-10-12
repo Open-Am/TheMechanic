@@ -1,0 +1,13 @@
+{
+  "_source": "ADR 0027, plan 0018 step 1: the nodes the pull, the run and the switch-off move. Each is an empty node named by its id under its part's node, at the point the game moves it about; a mesh node's shape hangs under it as a child named <id>.mesh, so mesh compression (which rescales mesh nodes) never moves the empty. Read by tools/blender/common.py and tools/pipeline/check.ts.",
+  "recoil_starter": {
+    "recoil_starter.handle": "mesh",
+    "recoil_starter.rope": "mesh"
+  },
+  "muffler": {
+    "muffler.outlet": "empty"
+  },
+  "base_panel": {
+    "base_panel.switch": "mesh"
+  }
+}
