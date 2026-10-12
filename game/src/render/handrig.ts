@@ -40,6 +40,8 @@ export interface HandRig {
   readonly action: HandAction;
   /** The name of the object the hand rides with, or null. */
   readonly holding: string | null;
+  /** For the browser check: how far the last whole-machine check asked the hand to come forward, and how far it did. */
+  readonly push: { asked: number; applied: number };
   /** For the browser check: the hand's sample points where they are now, in world space. */
   samplePoints(): Vector3[];
 }
@@ -106,6 +108,8 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
 
   let collideFrame = 0;
   let lastMore = 0;
+  /** What the last whole-machine check asked for, before the cap (metres). */
+  let lastAsked = 0;
 
   let action: HandAction = "hover";
   let closed = 0;
@@ -159,7 +163,8 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
       if (attached || firm || collideFrame++ % COLLIDE_FRAMES === 0) {
         const checked: Vector3[] = [];
         for (let i = 0; i < world.length; i += attached || firm ? COLLIDE_EVERY_HOLDING : COLLIDE_EVERY) checked.push(new Vector3(...world[i]!).add(push));
-        lastMore = Math.min(collide(checked), HAND.maxPush);
+        lastAsked = collide(checked);
+        lastMore = Math.min(lastAsked, HAND.maxPush);
       }
       if (lastMore > 0) goalPos.addScaledVector(toward, lastMore);
     }
@@ -273,6 +278,9 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
     },
     get holding() {
       return attached ? attached.name : null;
+    },
+    get push() {
+      return { asked: lastAsked, applied: lastMore };
     },
     samplePoints() {
       root.updateMatrixWorld(true);

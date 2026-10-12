@@ -7,7 +7,7 @@ import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/plac
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
-import { armAnchor, basisToQuaternion, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut, toolBasis, toolFor } from "../src/render/handpose.ts";
+import { armAnchor, basisToQuaternion, cheapest, SPANNER_TURNS, spannerTurn, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut, toolBasis, toolFor } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -929,5 +929,21 @@ describe("the trip's path from a point whose outward direction points in (plan 0
     expect(standOff[2]).toBeGreaterThan(box.max[2]); // out of the front, the way that is nearest
     const before = path.slice(0, -1);
     for (let t = 0; t <= 1; t += 0.005) expect(inside(alongPath(before, t))).toBe(false);
+  });
+});
+
+describe("where the spanner's handle lies on a bolt (plan 0012 follow-up)", () => {
+  it("takes the turn that hides the hand least, the first on a tie", () => {
+    expect(cheapest([0.3, 0.1, 0.1005, 0.2])).toBe(1);
+    expect(cheapest([0.2, 0.1005, 0.1, 0.2])).toBe(1);
+    expect(cheapest([0, 0, 0])).toBe(0);
+    expect(cheapest([0.05, 0, 0.2])).toBe(1);
+    expect(cheapest([])).toBe(0);
+  });
+
+  it("tries the handle all the way round the bolt", () => {
+    expect(SPANNER_TURNS).toBeGreaterThanOrEqual(8);
+    expect(spannerTurn(0)).toBe(0);
+    expect(spannerTurn(SPANNER_TURNS / 2)).toBeCloseTo(Math.PI);
   });
 });

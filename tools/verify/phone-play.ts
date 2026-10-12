@@ -446,7 +446,9 @@ async function noteHidden(where: string): Promise<void> {
   if (process.env.HIDDEN_DEBUG && share > 0.05) {
     const need = await evaluate<number>("window.__openAmDevRender.handNeed()");
     const o = await orbitNow();
-    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; azimuth ${o.azimuth.toFixed(2)} polar ${o.polar.toFixed(2)}`);
+    // The whole-machine check's last ask and what it applied, capped at HAND.maxPush: "needs" is on top of "applied".
+    const push = await evaluate<{ asked: number; applied: number } | null>("window.__openAmDevRender.handPush()");
+    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; asked ${((push?.asked ?? 0) * 100).toFixed(1)} cm, applied ${((push?.applied ?? 0) * 100).toFixed(1)} cm; azimuth ${o.azimuth.toFixed(2)} polar ${o.polar.toFixed(2)}`);
     if (share > HIDDEN_LIMIT) await screenshot(`hidden-${where.replace(/[^a-z0-9]+/gi, "-")}`);
   }
   if (share > worstHidden.share) worstHidden = { share, where };

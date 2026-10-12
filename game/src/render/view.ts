@@ -28,7 +28,7 @@ import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fasten
 import { fitDistance, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
-import { basisToQuaternion, gripShapeFor, type GripShape, HAND, toolBasis, toolFor } from "./handpose.ts";
+import { armAnchor, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolFor } from "./handpose.ts";
 import type { RenderAssets, Tool } from "./model.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
@@ -167,6 +167,10 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     // On its way to or from the toolbox the hand follows a path over the machine (overPath). Away from the machine
     // (at the toolbox, which may be behind it from this view) nothing is pushed; near it, the hand keeps out as always.
     if (tripLeg && !points.some((p) => nearMachine.containsPoint(p))) return 0;
+    return depthBehind(points);
+  };
+  /** How far (metres) the deepest of `points` is behind the machine's surface as the camera sees it, plus the margin. */
+  const depthBehind = (points: readonly Vector3[]): number => {
     let need = 0;
     view.root.updateMatrixWorld();
     for (const p of points) {
@@ -369,6 +373,36 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     return new Quaternion(...basisToQuaternion(toolBasis([axis.x, axis.y, axis.z], sc.right, sc.up, angle)));
   }
 
+  /**
+   * Where the spanner's handle lies on a bolt: the turn about the bolt at which the hand holding it is least hidden
+   * behind the machine, over the whole of its stroke (plan 0012 follow-up). With the handle always towards the lower
+   * right of the screen, a bolt under the tank's overhang put the hand 30 to 40 cm behind the tank, past HAND.maxPush.
+   * Chosen once per bolt per trip, so the spanner does not jump while it works.
+   */
+  const spannerBase = new Map<FastenerView, number>();
+  function baseTurn(pv: PartView, tool: Tool, f: FastenerView): number {
+    if (tool !== tools?.spanner) return 0;
+    const known = spannerBase.get(f);
+    if (known !== undefined) return known;
+    const sc = screen();
+    const anchor = new Vector3(...armAnchor(v3(camera.position), sc.right, sc.up, v3(sc.forward)));
+    const at = fastenerAt(f);
+    const axis = fastenerAxis(pv, f);
+    const costs: number[] = [];
+    for (let k = 0; k < SPANNER_TURNS; k++) {
+      const points: Vector3[] = [];
+      for (const swing of [0, (FASTEN.spannerStroke * Math.PI) / 180]) {
+        const grip = new Vector3(...tool.grip).applyQuaternion(workQuaternion(axis, spannerTurn(k) + swing)).add(at);
+        const toArm = anchor.clone().sub(grip).normalize();
+        points.push(grip, grip.clone().addScaledVector(toArm, 0.06), grip.clone().addScaledVector(toArm, 0.12));
+      }
+      costs.push(depthBehind(points));
+    }
+    const turn = spannerTurn(cheapest(costs));
+    spannerBase.set(f, turn);
+    return turn;
+  }
+
   /** Puts a tool at `at`, turned `q`, out of its slot, and the hand closed on its grip. */
   function holdToolAt(tool: Tool, at: Vector3, q: Quaternion): void {
     tool.object.position.copy(at);
@@ -472,6 +506,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     }
     const kit = tools;
     tripReach = Infinity;
+    spannerBase.clear();
     Object.assign(tripLog, { throughAt: [], planned: 0, phases: [], reach: Infinity, toolAtBolts: Infinity, tools: [], through: [], legHidden: 0 });
     // The pointer's spot rides with the part, so the hand comes back to where the player touched it. A spot off the part
     // (a press on its finger-sized hit volume over empty space lies at the machine's depth, inside it) gives way to
@@ -541,7 +576,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
                 q0 = tool.object.quaternion.clone();
                 return route(tool.object.position.clone(), null, fastenerAt(f), fastenerAxis(pv, f));
               },
-              (at, p) => holdToolAt(tool, at, q0!.clone().slerp(workQuaternion(fastenerAxis(pv, f), 0), p)),
+              (at, p) => holdToolAt(tool, at, q0!.clone().slerp(workQuaternion(fastenerAxis(pv, f), baseTurn(pv, tool, f)), p)),
             ),
           );
           runStart = true;
@@ -567,7 +602,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
               turn(f, q);
               const target = fastenerAt(f);
               const at = hop < 1 && hopFrom >= 0 ? fastenerAt(fasteners[hopFrom]!).lerp(target, ease.inOutCubic(hop)) : target;
-              const angle = tool === kit.screwdriver ? fastenerPose(mode === "undo" ? q : 1 - q).angle : spannerSwing(q);
+              const angle = tool === kit.screwdriver ? fastenerPose(mode === "undo" ? q : 1 - q).angle : baseTurn(pv, tool, f) + spannerSwing(q);
               holdToolAt(tool, at, workQuaternion(fastenerAxis(pv, f), angle));
               toolInHand = tool;
               if (hop >= 1) tripLog.toolAtBolts = Math.min(tripLog.toolAtBolts, tool.object.position.distanceTo(target));
@@ -1357,6 +1392,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         placeCamera();
       },
       /** How far (metres) the whole hand, every sample point, would have to come towards the camera to clear the machine. */
+      handPush: () => (hand ? hand.push : null),
       handNeed: () => (hand && hand.visible ? collide(hand.samplePoints()) : 0),
       marker: "open-am-dev-hook",
     };
