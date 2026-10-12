@@ -219,7 +219,7 @@ Done when, checked on 2026-10-12, after the fix and the new engine start:
 - Pass: `LICENCE.md` lists every file as `CC0 1.0` with its Freesound URL and author.
 - Pass: `STATUS.md` marks every sound a stand-in.
 - Pass: no new dependency.
-- `npm run verify:drop`: exit 1 on both runs, from slow double taps on a fully loaded machine (CPU at 100%, another agent's headless Edge on debug port 9333). Every miss is a loosen double tap whose two taps landed 395–888 ms apart, where about 160 ms is normal (2 misses of 96, then 5). Frame rate held and there were no console errors. The drop check never puts a part back or pulls the cord, so it does not reach the press-home change. It passed (exit 0, 96 of 96) earlier on 2026-10-12, before the change. A rerun on a quiet machine is still to do (not one of this plan's Done-when items).
+- `npm run verify:drop`: exit 0 on two runs back to back on a quiet machine (2026-10-12, after merging main 35e8659 and replacing `--mute-audio`), frame rate held, 96 of 96 first time. Per round: 75 to 120 fps, and 8 to 27 ms touch lag (`main`: 14 to 41 ms). Earlier runs that exited 1 or read about 27 fps with 60 to 100 ms of touch lag were all made with Edge's `--mute-audio` switch, which turned out to cause it (see the 0.12.0 release note) (not one of this plan's Done-when items).
 - **Waiting on the owner:** the phone round with sound on. Hear and feel each moment, check a blocked part is silent, mute holds after a reload, and nothing plays before Start.
 
 Every item an agent can check passes, so the status is `done`. The owner's phone check above is still to come.
