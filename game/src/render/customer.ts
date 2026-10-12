@@ -7,8 +7,8 @@
 // Nothing waits on a file (ADR 0023): a look that is missing, fails or has not arrived plays without a figure, and
 // appears in the pose for the current mood if it arrives during the round.
 
-import { AnimationMixer, Group, LoopOnce, LoopRepeat, type AnimationAction, type AnimationClip, type Camera, type Object3D, type Scene } from "three";
-import { clipFor, customerPlace, moodAfter, restingClip, type ClipPlan, type CustomerClip, type CustomerEvent, type CustomerMood } from "./customerpose.ts";
+import { AnimationMixer, Group, LoopOnce, LoopRepeat, Vector3, type AnimationAction, type AnimationClip, type Camera, type Object3D, type Scene } from "three";
+import { clipFor, customerPlace, moodAfter, type ClipPlan, type CustomerClip, type CustomerEvent, type CustomerMood, type StoryClip } from "./customerpose.ts";
 
 /** The Three.js layer the customer is drawn on: the camera sees it, the ray casts (layer 0) do not. */
 export const CUSTOMER_LAYER = 3;
@@ -33,6 +33,24 @@ export interface CustomerStage {
   update(dt: number): void;
   /** For the browser check (development only). */
   info(): CustomerInfo;
+  /** True if the round's person is downloaded and in the scene. */
+  ready(): boolean;
+  /**
+   * Plays one of plan 0017's clips once (ADR 0026); `then` as for clipFor. It can be held at a moment (`holdAt`) until
+   * release(), and skipped to its end.
+   */
+  story(clip: StoryClip, then: ClipPlan["then"]): void;
+  /** Seconds into the story clip playing, or null if none is. */
+  storyTime(): number | null;
+  /** Stops the story clip at `t` seconds until release() (plan 0018's engine runs then, ADR 0027). */
+  holdAt(t: number | null): void;
+  release(): void;
+  /** Jumps the story clip to its end. */
+  skip(): void;
+  /** World positions of the right and left hands' grip points, or null without a figure. */
+  grips(): { right: Vector3; left: Vector3 } | null;
+  /** Shows or hides the notes in the right hand (ADR 0026). */
+  setNotes(shown: boolean): void;
   /** The group at the customer's spot (for measuring on screen). */
   readonly root: Group;
 }
@@ -72,6 +90,8 @@ export function createCustomerStage(scene: Scene, camera: Camera, load: Customer
   /** What should be playing now, so a late file starts in the right pose. */
   let plan: ClipPlan = { clip: "idle", then: "loop" };
   let hidden = false;
+  let storyClip: StoryClip | null = null;
+  let held: number | null = null;
 
   function request(l: string | null): void {
     if (!l || cache.has(l)) return;
@@ -94,7 +114,7 @@ export function createCustomerStage(scene: Scene, camera: Camera, load: Customer
     file.scene.traverse((o) => {
       o.layers.set(CUSTOMER_LAYER);
       o.frustumCulled = false;
-      // The notes are plan 0017's prop (ADR 0026): never shown by plan 0015.
+      // The notes (ADR 0026) show only while the customer pays.
       if (o.name === `${l}_notes`) o.visible = false;
     });
   }
@@ -142,6 +162,7 @@ export function createCustomerStage(scene: Scene, camera: Camera, load: Customer
     mixer = new AnimationMixer(entry.file.scene);
     mixer.addEventListener("finished", (e) => {
       if ((e as unknown as { action: AnimationAction }).action !== action) return;
+      storyClip = null;
       const then = plan.then;
       if (then === "hide") {
         hidden = true;
@@ -177,11 +198,60 @@ export function createCustomerStage(scene: Scene, camera: Camera, load: Customer
       if (e.type === "started") {
         hidden = false;
         root.visible = true;
+        // The round starts as the generator lands, while they are still stepping back: idle follows the arrival.
+        if (storyClip === "arrive") {
+          plan = { clip: "arrive", then: "idle" };
+          return;
+        }
       }
       start(p);
     },
     update(dt) {
+      if (held !== null && action && storyClip && action.time >= held) {
+        action.time = held;
+        mixer?.update(0);
+        return;
+      }
       mixer?.update(dt);
+    },
+    ready() {
+      return attached !== null && attached === look;
+    },
+    story(clip, then) {
+      hidden = false;
+      root.visible = true;
+      held = null;
+      storyClip = clip;
+      start({ clip, then }, clip === "arrive" ? 0 : FADE);
+      if (playing !== clip) storyClip = null;
+    },
+    storyTime() {
+      return storyClip && action ? action.time : null;
+    },
+    holdAt(t) {
+      held = t;
+    },
+    release() {
+      held = null;
+    },
+    skip() {
+      if (!storyClip || !action) return;
+      held = null;
+      action.time = action.getClip().duration;
+      mixer?.update(0.0001);
+    },
+    grips() {
+      if (!attached || !root.visible) return null;
+      const file = cache.get(attached)?.file;
+      const r = file?.scene.getObjectByName(`${attached}_grip_r`);
+      const l = file?.scene.getObjectByName(`${attached}_grip_l`);
+      if (!r || !l) return null;
+      root.updateMatrixWorld(true);
+      return { right: r.getWorldPosition(new Vector3()), left: l.getWorldPosition(new Vector3()) };
+    },
+    setNotes(shown) {
+      const notes = attached ? cache.get(attached)?.file?.scene.getObjectByName(`${attached}_notes`) : null;
+      if (notes) notes.visible = shown;
     },
     info() {
       return {

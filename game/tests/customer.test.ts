@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { behindBench, clearOfToolbox, clipFor, CUSTOMER_CLIPS, customerPlace, ENDINGS, gapBehindMachine, moodAfter, restingClip, type CustomerEvent, type CustomerMood } from "../src/render/customerpose.ts";
+import { behindBench, carriedYaw, clearOfToolbox, clipFor, CUSTOMER_CLIPS, customerPlace, ENDINGS, gapBehindMachine, generatorIn, HANDLE_RIGHT, moodAfter, notesShown, restingClip, SETTLE, settleShare, STORY, storyOver, type CustomerEvent, type CustomerMood } from "../src/render/customerpose.ts";
 import { DEFAULT_YAW, FRAMING, frameBench, machineToWorld, projectWorld } from "../src/render/stage.ts";
 import type { Vec3 } from "../src/core/types.ts";
 import { loadFaults, loadMachine } from "./helpers.ts";
@@ -92,5 +92,56 @@ describe("which clip plays (plan 0015 reading 5, ADR 0007)", () => {
       }
     }
     for (const c of asked) expect(CUSTOMER_CLIPS as readonly string[]).toContain(c);
+  });
+});
+
+describe("bringing the generator, paying, storming off (plan 0017 step 2, ADR 0026)", () => {
+  it("the generator is carried until it lands, then on the bench", () => {
+    expect(generatorIn("arrive", 0)).toBe("carried");
+    expect(generatorIn("arrive", STORY.arrive.lands - 0.01)).toBe("carried");
+    expect(generatorIn("arrive", STORY.arrive.lands)).toBe("bench");
+    expect(STORY.arrive.lands).toBeLessThan(STORY.arrive.length);
+  });
+
+  it("the endings leave it on the bench until it is lifted, then carry it off", () => {
+    for (const clip of ["pay_leave", "storm_off"] as const) {
+      expect(generatorIn(clip, 0)).toBe("bench");
+      expect(generatorIn(clip, STORY[clip].lifted - 0.01)).toBe("bench");
+      expect(generatorIn(clip, STORY[clip].lifted)).toBe("carried");
+      expect(storyOver(clip, STORY[clip].length)).toBe(true);
+      expect(storyOver(clip, STORY[clip].length - 0.01)).toBe(false);
+    }
+  });
+
+  it("the notes show only while paying, before the hold and before the generator is lifted", () => {
+    const p = STORY.pay_leave;
+    expect(notesShown("pay_leave", p.notesShown - 0.01)).toBe(false);
+    expect(notesShown("pay_leave", p.notesShown)).toBe(true);
+    expect(notesShown("pay_leave", p.notesTaken - 0.01)).toBe(true);
+    expect(notesShown("pay_leave", p.notesTaken)).toBe(false);
+    expect(notesShown("storm_off", 1)).toBe(false);
+    expect(notesShown("arrive", 1)).toBe(false);
+    expect(p.notesTaken).toBeLessThan(p.hold);
+    expect(p.hold).toBeLessThan(p.lifted);
+  });
+
+  it("eases in over SETTLE seconds before it lands or is lifted, and the walk-out's parts snap home within 0.3 s", () => {
+    expect(settleShare("arrive", STORY.arrive.lands - SETTLE - 0.01)).toBe(0);
+    expect(settleShare("arrive", STORY.arrive.lands)).toBeCloseTo(1, 6);
+    expect(settleShare("storm_off", STORY.storm_off.lifted - SETTLE / 2)).toBeCloseTo(0.5, 5);
+    expect(STORY.storm_off.snapBack).toBeLessThanOrEqual(0.3);
+  });
+
+  it("a carried generator turns with the line from the right hand's grip to the left hand's", () => {
+    expect(carriedYaw([0, 1, 0], [0.1, 1, 0])).toBeCloseTo(0, 6);
+    expect(carriedYaw([0, 1, 0], [0, 1, -0.1])).toBeCloseTo(Math.PI / 2, 6);
+    expect(HANDLE_RIGHT[1]).toBeGreaterThan(0.36);
+  });
+
+  it("the endings are the same for every fault: fixed pays and leaves, walked storms off (ADR 0007)", () => {
+    for (const mood of moods) {
+      expect(clipFor({ type: "ended" }, mood)).toEqual({ clip: "pay_leave", then: "hide" });
+      expect(clipFor({ type: "left" }, mood)).toEqual({ clip: "storm_off", then: "hide" });
+    }
   });
 });

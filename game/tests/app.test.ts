@@ -722,3 +722,67 @@ describe("the round's customer look and the next one (plan 0015 step 6, ADR 0023
     expect(game.nextCustomerLook).toBeNull();
   });
 });
+
+describe("the customer brings the generator before the clock starts (plan 0017 step 3, ADR 0026)", () => {
+  const customers = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "public", "customers.json"), "utf8")) as CustomerFile;
+
+  it("arrive() sends arriving once and does not start the clock; begin() starts it when the generator lands", () => {
+    const clock = fakeClock();
+    const game = createGame({ machine, faults, clock, audio: silent, random: () => 0.5, customers });
+    const seen: string[] = [];
+    game.events.on("arriving", () => seen.push("arriving"));
+    game.events.on("started", () => seen.push("started"));
+    game.newRound();
+    game.arrive();
+    game.arrive();
+    expect(seen).toEqual(["arriving"]);
+    expect(game.arriving).toBe(true);
+    expect(game.running).toBe(false);
+    clock.advance(3000);
+    expect(game.elapsed()).toBe(0);
+    expect(game.patience()).toBe(1);
+    expect(game.propose({ type: "pull" })).toBe(false);
+    game.begin();
+    expect(seen).toEqual(["arriving", "started"]);
+    expect(game.arriving).toBe(false);
+    clock.advance(1500);
+    expect(game.elapsed()).toBe(1500);
+    game.arrive();
+    expect(seen).toEqual(["arriving", "started"]);
+  });
+
+  it("a skipped arrival begins at once, and a new round arrives again", () => {
+    const clock = fakeClock();
+    const game = createGame({ machine, faults, clock, audio: silent, random: () => 0.5, customers });
+    let arrivals = 0;
+    game.events.on("arriving", () => arrivals++);
+    game.newRound();
+    game.arrive();
+    game.begin();
+    expect(game.running).toBe(true);
+    game.newRound();
+    expect(game.arriving).toBe(false);
+    game.arrive();
+    expect(arrivals).toBe(2);
+  });
+
+  it("the daily is unchanged: its score counts from the landing, not from Start", () => {
+    const clock = fakeClock();
+    const day = 30;
+    const game = createGame({ machine, faults, clock, audio: silent, random: () => 0.5, customers });
+    game.newRound({ day, faultId: dailyFaultId(faults.faults, day), scored: false });
+    game.arrive();
+    clock.advance(10_000);
+    game.begin();
+    clock.advance(2000);
+    expect(game.elapsed()).toBe(2000);
+  });
+
+  it("a round with no customers begins straight from begin(), as before", () => {
+    const clock = fakeClock();
+    const game = createGame({ machine, faults, clock, audio: silent, random: () => 0.5 });
+    game.newRound();
+    game.begin();
+    expect(game.running).toBe(true);
+  });
+});

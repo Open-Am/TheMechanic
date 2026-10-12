@@ -16,6 +16,11 @@ export interface PartEvent {
 }
 
 export interface GameEvents {
+  /**
+   * Start was pressed (plan 0017, ADR 0026): the customer is bringing the generator. The clock does not run yet; render
+   * plays the arrival and main.ts calls begin() when the generator lands (at once without a figure).
+   */
+  arriving: Record<string, never>;
   started: { t: number };
   removed: PartEvent;
   installed: PartEvent;
@@ -86,7 +91,11 @@ export interface Game {
    * ended. Never rejects.
    */
   readonly recorded: Promise<RoundRecord> | null;
-  /** Starts the timer. */
+  /** Start pressed: sends "arriving" once per round. The clock starts only with begin() (plan 0017 reading 1). */
+  arrive(): void;
+  /** True between arrive() and begin(): the customer is bringing the generator. */
+  readonly arriving: boolean;
+  /** Starts the timer: the generator has landed on the bench. */
   begin(): void;
   /** Proposes an action at the current time. Returns true if the reducer accepted it. */
   propose(p: Proposal): boolean;
@@ -134,6 +143,7 @@ export function createGame(deps: GameDeps): Game {
   let mood: CustomerMoment = "arrive";
   let choice: RoundChoice | null = null;
   let recorded: Promise<RoundRecord> | null = null;
+  let arriving = false;
 
   function mode(): RoundRecord["mode"] {
     return choice === null ? "free" : choice.scored ? "daily" : "practice";
@@ -206,6 +216,7 @@ export function createGame(deps: GameDeps): Game {
       state = initialState(machine);
       log = [];
       startedAt = null;
+      arriving = false;
       walkedAt = null;
       mood = "arrive";
       return {
@@ -216,8 +227,15 @@ export function createGame(deps: GameDeps): Game {
       };
     },
 
+    arrive() {
+      if (!fault || startedAt !== null || arriving) return;
+      arriving = true;
+      events.emit("arriving", {});
+    },
+
     begin() {
       if (!fault || startedAt !== null) return;
+      arriving = false;
       startedAt = clock.now();
       // The next free-play round's customer is chosen now, so its file can download during this round (ADR 0023).
       nextCustomer = deps.customers ? pickCustomer(deps.customers.customers, customer?.id ?? null, random) : null;
@@ -295,6 +313,9 @@ export function createGame(deps: GameDeps): Game {
 
     get state() {
       return state;
+    },
+    get arriving() {
+      return arriving;
     },
     get recorded() {
       return recorded;
