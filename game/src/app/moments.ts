@@ -28,9 +28,11 @@ export const VIBRATION: Record<Moment, number | readonly number[] | null> = {
 /**
  * The engine running (ADR 0028). After the catch (`start`) the running sound loops until the engine stops. It comes in
  * over the catch's last crossfadeSeconds (start.ogg fades out over the same 0.3 s, assets/audio/sounds.json), and
- * fades out over fadeOutSeconds, the wind-down.
+ * fades out over fadeOutSeconds, the wind-down. Until plan 0018 stops it at the switch press, it runs on for
+ * runOnSeconds after the customer's ending is over (main.ts): with the 0.6 s cord and the 4 s catch, about 6 s of engine
+ * from the pull, as ADR 0027 times it.
  */
-export const RUN = { crossfadeSeconds: 0.3, fadeOutSeconds: 0.8 } as const;
+export const RUN = { crossfadeSeconds: 0.3, fadeOutSeconds: 0.8, runOnSeconds: 2 } as const;
 
 /**
  * Where run.ogg repeats, seconds into the file: upward zero crossings checked on the decoded file, 2.249 s apart. The

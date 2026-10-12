@@ -634,6 +634,8 @@ describe("moments (ADR 0018, plan 0013 step 2)", () => {
       ["stop", "run", 0],
     ]);
     expect(RUN.fadeOutSeconds).toBe(0.8);
+    // Until plan 0018 stops it at the switch: it runs on 2 s after the ending, about 6 s from the pull in all (ADR 0027).
+    expect(RUN.runOnSeconds).toBe(2);
     expect(sounds).toEqual(["seat"]);
     expect(vibrations).toEqual([[15, 0]]);
     expect(RUN_LOOP.end - RUN_LOOP.start).toBeGreaterThanOrEqual(1);

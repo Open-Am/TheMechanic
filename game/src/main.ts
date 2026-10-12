@@ -5,7 +5,7 @@
 // the moments of accepted actions and render's moments are passed to playMoment here (ADR 0010).
 
 import { dailyStatus } from "./app/daily.ts";
-import { MOMENTS, type Moment, playCue } from "./app/moments.ts";
+import { MOMENTS, type Moment, RUN, playCue } from "./app/moments.ts";
 import { createGame } from "./app/round.ts";
 import { dailyFaultId, dayNumber, validateAll, validateCustomers, type CustomerFile, type FaultFile, type Machine } from "./core/index.ts";
 import { browserContext, browserVibrate, createAudio, type LocalAudio } from "./platform/local/audio.ts";
@@ -136,6 +136,12 @@ async function start(): Promise<void> {
     muted.get(),
   );
   const game = createGame({ ...data, clock, audio, random: Math.random, scores, ...(customers ? { customers } : {}) });
+  // The engine's wind-down after the ending (ADR 0028); a new round (which cuts the engine) drops a pending one.
+  let runOn: ReturnType<typeof setTimeout> | null = null;
+  game.events.on("arriving", () => {
+    if (runOn) clearTimeout(runOn);
+    runOn = null;
+  });
   // Browsers start audio only inside a gesture. Start unlocks it: "arriving" is sent from inside its tap (ADR 0018). If
   // the browser still holds it back, every later tap or key tries again until the context runs. Nothing before Start.
   const unlock = (): void => {
@@ -177,9 +183,17 @@ async function start(): Promise<void> {
     carry: { move: (id, x, y) => view?.carryChip(id, x, y), end: (id) => view?.endChipCarry(id), busy: () => view?.busy() ?? false },
     daily: () => dailyStatus(daily, scores),
     share: { send: (text) => share.share(text), sheet: hasShareSheet(navigator), url: shareUrl(location.href, import.meta.env.BASE_URL) },
-    // ADR 0028: the engine runs while the customer pays and leaves, and winds down as the ending ends (a skip has
-    // already cut it at once). Plan 0018 moves the stop to the switch press, through the same "run-stop" cue.
-    ending: () => (view?.ending() ?? Promise.resolve()).then(() => playCue(audio, "run-stop")),
+    // ADR 0028: the engine runs while the customer pays and leaves, and on for RUN.runOnSeconds under the result
+    // before it winds down (a skip has already cut it at once). Plan 0018 moves the stop to the switch press, through
+    // the same "run-stop" cue.
+    ending: () => {
+      const over = view?.ending() ?? Promise.resolve();
+      void over.then(() => {
+        if (runOn) clearTimeout(runOn);
+        runOn = setTimeout(() => ((runOn = null), playCue(audio, "run-stop")), RUN.runOnSeconds * 1000);
+      });
+      return over;
+    },
     sound: {
       muted: muted.get(),
       setMuted: (m) => {
