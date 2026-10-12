@@ -9,8 +9,8 @@
 import type { Vec3 } from "../core/index.ts";
 import { BENCH, CUSTOMER_SPOT, TOOLBOX_ON_BENCH } from "./stage.ts";
 
-/** The clips render plays (plan 0015 reading 5). The files also hold plan 0017's arrive, pay_leave and storm_off. */
-export const CUSTOMER_CLIPS = ["idle", "waiting", "annoyed", "annoyed_idle", "failed_pull", "pleased", "leaving"] as const;
+/** The clips render plays: plan 0015 reading 5's, and plan 0017's arrive, pay_leave and storm_off (ADR 0026). */
+export const CUSTOMER_CLIPS = ["idle", "waiting", "annoyed", "annoyed_idle", "failed_pull", "pleased", "leaving", "arrive", "pay_leave", "storm_off"] as const;
 export type CustomerClip = (typeof CUSTOMER_CLIPS)[number];
 
 /** How the customer feels as the round goes, from the patience events (ADR 0015). */
@@ -40,13 +40,65 @@ export function restingClip(mood: CustomerMood): CustomerClip {
 }
 
 /**
- * The round's two endings (ADR 0015 as plan 0015 builds it): the engine starts and they nod and clap; patience runs out
- * and they turn and walk off. Kept apart so plan 0017 (ADR 0026: pay and leave, storm off) can replace them.
+ * The round's two endings (ADR 0026, plan 0017): fixed, they pay and leave with the generator; patience run out, they
+ * storm off with it. Both end with the customer and the generator gone.
  */
 export const ENDINGS: Record<"fixed" | "walked", ClipPlan> = {
-  fixed: { clip: "pleased", then: "hold" },
-  walked: { clip: "leaving", then: "hide" },
+  fixed: { clip: "pay_leave", then: "hide" },
+  walked: { clip: "storm_off", then: "hide" },
 };
+
+/** The three clips that carry the generator, and their moments in seconds (customer.py's CLIP_TIMES, STATUS.md). */
+export type StoryClip = "arrive" | "pay_leave" | "storm_off";
+export const STORY = {
+  /** Walks in carrying the generator, sets it on the bench (lands), steps back. */
+  arrive: { length: 3.1, lands: 2.5 },
+  /**
+   * Nods, takes the notes out (shown), holds them across the bench and lets go (taken), stands smiling (hold: plan
+   * 0018's engine runs and is switched off here, ADR 0027), takes the generator (lifted) and walks off.
+   */
+  pay_leave: { length: 3.6, notesShown: 0.55, notesTaken: 1.45, hold: 1.7, lifted: 2.0 },
+  /** Shakes the head, snatches the generator (lifted), storms off. Parts snap home in the first `snapBack` seconds. */
+  storm_off: { length: 2.5, lifted: 0.85, snapBack: 0.3 },
+} as const;
+
+/** Seconds over which the generator eases between the hands and its place on the bench. */
+export const SETTLE = 0.3;
+
+/** Where the generator is at time t of a story clip: carried by the customer, or on the bench. */
+export function generatorIn(clip: StoryClip, t: number): "carried" | "bench" {
+  if (clip === "arrive") return t < STORY.arrive.lands ? "carried" : "bench";
+  return t >= STORY[clip].lifted ? "carried" : "bench";
+}
+
+/** Whether the notes are in the customer's hand at time t (ADR 0026: only while paying). */
+export function notesShown(clip: StoryClip, t: number): boolean {
+  return clip === "pay_leave" && t >= STORY.pay_leave.notesShown && t < STORY.pay_leave.notesTaken;
+}
+
+/**
+ * How far (0 to 1) the generator has eased from the customer's hands to the bench (arrive, just before it lands) or the
+ * bench has been turned back to the landed turn before they reach for it (the endings): 0 not yet, 1 done.
+ */
+export function settleShare(clip: StoryClip, t: number): number {
+  const at = clip === "arrive" ? STORY.arrive.lands : STORY[clip].lifted;
+  const from = at - SETTLE;
+  return Math.max(0, Math.min(1, (t - from) / SETTLE));
+}
+
+/** True once the story clip has run to its end: the customer is gone (endings) or standing at the bench (arrive). */
+export function storyOver(clip: StoryClip, t: number): boolean {
+  return t >= STORY[clip].length;
+}
+
+/** The turn (radians) of a carried generator whose handle runs from the right hand's grip to the left hand's. */
+export function carriedYaw(right: Vec3, left: Vec3): number {
+  // The machine's +X turned by yaw about +Y is (cos, 0, -sin).
+  return Math.atan2(-(left[2] - right[2]), left[0] - right[0]);
+}
+
+/** Where the right hand holds the handle, in the machine's own axes (glTF: x right, y up, z towards its front). */
+export const HANDLE_RIGHT: Vec3 = [-0.05, 0.386, -0.03];
 
 /**
  * The clip a game event starts, given the mood before it, or null for an event that must not move the customer. Part

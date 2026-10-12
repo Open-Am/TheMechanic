@@ -553,6 +553,10 @@ for (const inp of INPUTS) {
     await waitFor("Start enabled", () => evaluate<boolean>("document.querySelector('.briefing .primary')?.disabled === false"), 30000);
     await tapSelector(".briefing .primary");
     await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+    // Plan 0017: the customer brings the generator; a tap skips the arrival, then the clock runs.
+    await sleep(250);
+    if (await evaluate<boolean>("!!window.__openAmDevRender.story()")) await tapSelector("canvas");
+    await waitFor("the clock running", () => evaluate<boolean>("window.__openAmDevRender.running()"), 15000);
     // Collapse the diagnostic panel to its one-line frame rate so it covers nothing a player would touch.
     await tapSelector('[data-marker="open-am-diagnostic-overlay"]');
     // Every pointer event the page handles: type, pointer type, where, when it was handled, how long after it happened.

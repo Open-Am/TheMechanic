@@ -20,6 +20,8 @@ const BANNER_MS = 3000;
 const SPEECH_MS = 4000;
 /** The longest the result screen waits for the round to be saved before showing without the best, ms. */
 const RECORD_WAIT_MS = 1500;
+/** The most the result screen waits for the customer's ending (plan 0017 reading 2), so a missing figure never blocks it. */
+const ENDING_WAIT_MS = 4000;
 
 export interface UiOptions {
   /** A picture of a part for its tray chip, or null. Supplied by main.ts. */
@@ -32,6 +34,8 @@ export interface UiOptions {
   share?: { send(text: string): Promise<ShareRoute>; sheet: boolean; url: string };
   /** Sound and vibration on or off, remembered by main.ts (ADR 0018). Without it there is no mute button. */
   sound?: { muted: boolean; setMuted(muted: boolean): void };
+  /** Settles when render's ending (pay and leave, or storm off) is over or skipped (plan 0017). Supplied by main.ts. */
+  ending?: () => Promise<void>;
 }
 
 export interface Ui {
@@ -164,15 +168,25 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     hud.hidden = true;
     meter.hidden = b.customer === null;
     speech.hidden = true;
-    showScreen(briefingScreen(b, () => game.begin(), loading));
+    showScreen(briefingScreen(b, () => game.arrive(), loading));
   }
 
   pull.addEventListener("click", () => game.propose({ type: "pull" }));
 
+  // Start pressed: the HUD shows at 0:00 while the customer brings the generator (plan 0017); the clock starts when it
+  // lands ("started").
+  game.events.on("arriving", () => {
+    overlays.querySelectorAll(".screen").forEach((s) => s.remove());
+    hud.hidden = false;
+    banner.hidden = true;
+    trayHost.hidden = false;
+    update();
+  });
   game.events.on("started", () => {
     overlays.querySelectorAll(".screen").forEach((s) => s.remove());
     hud.hidden = false;
     banner.hidden = true;
+    trayHost.hidden = false;
     update();
   });
   game.events.on("removed", update);
@@ -194,27 +208,39 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     update();
     const name = game.customerName;
     const extras = extrasFor(e.score);
-    setTimeout(() => {
-      void extras.then((x) => {
+    // The result waits for the ending (the customer pays and leaves, plan 0017) or its skip, never less than the
+    // engine-start moment and never more than ENDING_WAIT_MS.
+    void afterEnding(900).then(() =>
+      extras.then((x) => {
         hud.hidden = true;
         showScreen(resultScreen(e.score, () => void showStart(), name ? { name, line: e.line } : null, x));
-      });
-    }, 900); // let the engine-start moment register first
+      }),
+    );
   });
   game.events.on("left", (e) => {
     card.close();
     banner.hidden = true;
     update();
     say(e.line);
+    // They take the whole generator: the parts snap back on (render), and the tray empties (plan 0017 reading 3).
+    trayHost.hidden = true;
     const name = game.customerName ?? "";
     const extras = extrasFor(e.score);
-    setTimeout(() => {
-      void extras.then((x) => {
+    void afterEnding(1600).then(() =>
+      extras.then((x) => {
         hud.hidden = true;
         showScreen(resultScreen(e.score, () => void showStart(), { name, line: e.line }, x));
-      });
-    }, 1600); // long enough to read what they said as they leave
+      }),
+    ); // never less than long enough to read what they said as they leave
   });
+
+  /** At least `least` ms, then the ending (render's, or at once), and never more than ENDING_WAIT_MS in all. */
+  function afterEnding(least: number): Promise<void> {
+    const ending = options.ending ? options.ending() : Promise.resolve();
+    const min = new Promise<void>((r) => setTimeout(r, least));
+    const cap = new Promise<void>((r) => setTimeout(r, ENDING_WAIT_MS));
+    return Promise.race([Promise.all([ending, min]).then(() => undefined), cap]);
+  }
 
   function tick(): void {
     game.tick();

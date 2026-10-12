@@ -34,13 +34,14 @@ import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.t
 import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, flickAhead, GESTURE, type PointerSample, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
 import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, overPath, pathLength, poseAt, resolveMotion, spannerSwing, TIMING, tripPlan, turnCounter, type Pose, type TripStep, type TripTool } from "./motion.ts";
 import { TURN, worldPerPixel } from "./orbit.ts";
-import { BENCH, BENCH_EDGES, cameraPose, clampStage, DEFAULT_STAGE, DEFAULT_YAW, frameBench, type Framing, projectMachinePoint, rotateStage, stageLimits, type StageLimits, type StageState, TOOLBOX_ON_BENCH, turnStageToward, zoomStage } from "./stage.ts";
+import { BENCH, BENCH_EDGES, cameraPose, clampStage, wrapAngle, DEFAULT_STAGE, DEFAULT_YAW, frameBench, type Framing, projectMachinePoint, rotateStage, stageLimits, type StageLimits, type StageState, TOOLBOX_ON_BENCH, turnStageToward, zoomStage } from "./stage.ts";
 import { createBench } from "./bench.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
 import { armAnchor, armSideOnTrip, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolboxArmSide, toolFor } from "./handpose.ts";
 import type { RenderAssets, Tool } from "./model.ts";
 import { createCustomerStage, type CustomerLoader } from "./customer.ts";
+import { carriedYaw, generatorIn, HANDLE_RIGHT, notesShown, settleShare, STORY, storyOver, type StoryClip } from "./customerpose.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
 import { createContactShadow, createFloor, createMachineShadow } from "./ground.ts";
@@ -94,6 +95,18 @@ export interface RenderView {
   onMoment(fn: (moment: Moment) => void): void;
   /** True while the hand plays a loosening or doing-up sequence: a new put-back is ignored until it ends (ADR 0021). */
   busy(): boolean;
+  /**
+   * Plays the customer bringing the generator to the bench (plan 0017, ADR 0026) and calls `landed` when it is down, or
+   * at once if there is no figure. A tap skips the rest of the arrival and puts it down at once.
+   */
+  playArrival(landed: () => void): void;
+  /** Settles when the round's ending (pay and leave, or storm off) is over or skipped; at once if there is none. */
+  ending(): Promise<void>;
+  /**
+   * Plan 0018 (ADR 0027): while the customer pays, the ending holds after the notes change hands until `hold` settles
+   * (the engine runs and the mechanic switches it off). Without it the ending runs straight on.
+   */
+  setPayHold(hold: (() => Promise<void>) | null): void;
   dispose(): void;
 }
 
@@ -1169,20 +1182,145 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     );
   }
 
+  /** Every part home, nothing loose, carried or seating, the hand away: a new round, or a walk-out's whole generator. */
+  function homeEverything(): void {
+    tellCarry("none");
+    abortSequence();
+    hand?.hide();
+    loose.clear();
+    loosening.clear();
+    seating.clear();
+    carry = null;
+    chip = null;
+    for (const pv of view.parts.values()) reset(pv);
+  }
+
+  // ---- The customer brings the generator, and pays or storms off with it (plan 0017, ADR 0026) ----
+
+  interface Story {
+    clip: StoryClip;
+    /** arrive: called once when the generator lands. */
+    landed: (() => void) | null;
+    /** The endings: settles when the customer is gone. */
+    done: (() => void) | null;
+    /** The machine's turn when the story started, eased back to the landed turn before they reach for it. */
+    yawFrom: number;
+    holdAsked: boolean;
+  }
+  let story: Story | null = null;
+  let endingPromise: Promise<void> | null = null;
+  let payHold: (() => Promise<void>) | null = null;
+  /** The turntable's place on the bench. */
+  const benchPlace = new Vector3(0, BENCH.top, 0);
+
+  function startStory(clip: StoryClip, landed: (() => void) | null): Promise<void> {
+    if (story?.done) story.done();
+    let done: (() => void) | null = null;
+    const p = new Promise<void>((r) => (done = r));
+    story = { clip, landed, done, yawFrom: stage.yaw, holdAsked: false };
+    customer!.story(clip, clip === "arrive" ? "idle" : "hide");
+    return p;
+  }
+
+  function endStory(): void {
+    if (!story) return;
+    const s = story;
+    story = null;
+    if (s.landed) s.landed();
+    customer?.setNotes(false);
+    turntable.position.copy(benchPlace);
+    if (s.clip !== "arrive") turntable.visible = false; // they took it away
+    s.done?.();
+  }
+
+  /** Each frame while a story plays: where the generator is, the notes, the hold, the landing and the end. */
+  function storyStep(): void {
+    if (!story || !customer) return;
+    const t = customer.storyTime();
+    if (t === null || storyOver(story.clip, t)) {
+      endStory();
+      return;
+    }
+    customer.setNotes(notesShown(story.clip, t));
+    if (story.clip === "pay_leave" && payHold && !story.holdAsked && t >= STORY.pay_leave.hold - 0.05) {
+      story.holdAsked = true;
+      customer.holdAt(STORY.pay_leave.hold);
+      void payHold().then(() => customer?.release());
+    }
+    const grips = customer.grips();
+    const where = generatorIn(story.clip, t);
+    if (story.clip === "arrive" && where === "bench" && story.landed) {
+      const landed = story.landed;
+      story.landed = null;
+      turntable.position.copy(benchPlace);
+      landed();
+    }
+    const share = settleShare(story.clip, t);
+    if (where === "carried" && grips) {
+      const yaw = carriedYaw([grips.right.x, grips.right.y, grips.right.z], [grips.left.x, grips.left.y, grips.left.z]);
+      const handPos = grips.right.clone().sub(new Vector3(...HANDLE_RIGHT).applyAxisAngle(AXES.y, yaw));
+      if (story.clip === "arrive") {
+        // Eased onto the bench at the landed turn over the last moments before it lands.
+        turntable.position.lerpVectors(handPos, benchPlace, share);
+        turntable.rotation.y = yaw + wrapAngle(DEFAULT_YAW - yaw) * share;
+        stage = { ...stage, yaw: DEFAULT_YAW };
+      } else {
+        // Lifted off the bench: from where it stood into the hands over a moment.
+        const k = Math.min(1, (t - STORY[story.clip].lifted) / 0.15);
+        turntable.position.lerpVectors(benchPlace, handPos, k);
+        turntable.rotation.y = DEFAULT_YAW + wrapAngle(yaw - DEFAULT_YAW) * k;
+      }
+    } else if (story.clip !== "arrive") {
+      // Still on the bench: turned back to the landed turn before they reach for it.
+      turntable.position.copy(benchPlace);
+      stage = { ...stage, yaw: story.yawFrom + wrapAngle(DEFAULT_YAW - story.yawFrom) * share };
+      turntable.rotation.y = stage.yaw;
+    }
+    turntable.updateMatrixWorld(true);
+  }
+
+  function skipStory(): void {
+    if (!story) return;
+    if (story.clip === "arrive" && story.landed) {
+      const landed = story.landed;
+      story.landed = null;
+      turntable.position.copy(benchPlace);
+      stage = { ...stage, yaw: DEFAULT_YAW };
+      landed();
+    }
+    customer?.skip();
+    endStory();
+  }
+
+  function playArrival(landed: () => void): void {
+    endingPromise = null;
+    homeEverything();
+    turntable.visible = true;
+    turntable.position.copy(benchPlace);
+    stage = { ...stage, yaw: DEFAULT_YAW, lift: 0, zoom: 1 };
+    customer?.show(game.customerLook);
+    if (!customer || !customer.ready()) {
+      landed();
+      return;
+    }
+    void startStory("arrive", landed);
+  }
+
+  function startEnding(clip: "pay_leave" | "storm_off"): void {
+    if (!customer || !customer.ready()) {
+      endingPromise = Promise.resolve();
+      return;
+    }
+    endingPromise = startStory(clip, null);
+  }
+
   const unsubscribe = [
     game.events.on("removed", (e) => animateRemove(e.partId)),
     game.events.on("installed", (e) => animateInstall(e.partId)),
     game.events.on("pulled", () => pressHome()),
     game.events.on("started", () => {
-      tellCarry("none");
-      abortSequence();
-      hand?.hide();
-      loose.clear();
-      loosening.clear();
-      seating.clear();
-      carry = null;
-      chip = null;
-      for (const pv of view.parts.values()) reset(pv);
+      homeEverything();
+      turntable.visible = true;
     }),
     game.events.on("ended", () => {
       abortSequence();
@@ -1200,8 +1338,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     }),
     game.events.on("patience", (e) => customer?.event({ type: "patience", mood: e.mood })),
     game.events.on("pulled", (e) => customer?.event({ type: "pulled", started: e.started })),
-    game.events.on("ended", () => customer?.event({ type: "ended" })),
-    game.events.on("left", () => customer?.event({ type: "left" })),
+    // The endings (ADR 0026): paying and leaving with it, or storming off with it.
+    game.events.on("ended", () => startEnding("pay_leave")),
+    game.events.on("left", () => {
+      // A whole generator leaves: the parts that were off or loose snap back on, silently (plan 0017 reading 3).
+      homeEverything();
+      startEnding("storm_off");
+    }),
   ];
 
   // ---- Where the pointer is ----
@@ -1326,6 +1469,11 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   }
 
   function onDown(e: PointerEvent): void {
+    // A tap during the arrival or an ending skips it (ADR 0026).
+    if (story) {
+      skipStory();
+      return;
+    }
     renderer.domElement.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
@@ -1763,6 +1911,16 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         for (const x of [mbox.min.x, mbox.max.x]) for (const y of [mbox.min.y, mbox.max.y]) for (const z of [mbox.min.z, mbox.max.z]) farthest = Math.max(farthest, camera.position.distanceTo(new Vector3(x, y, z)));
         return { ...info, box, nearest: Number.isFinite(nearest) ? nearest : null, machineFarthest: farthest, now: Math.round(performance.now()) };
       },
+      /** Plan 0017: the story clip playing (arrive, pay_leave, storm_off), how far in, where the generator is, the notes. */
+      story: () => {
+        if (!story || !customer) return null;
+        const t = customer.storyTime() ?? 0;
+        return { clip: story.clip, t, generator: generatorIn(story.clip, t), notes: notesShown(story.clip, t), machineShown: turntable.visible };
+      },
+      running: () => game.running,
+      /** Parts not at home on the machine: off, loose or on their way (plan 0017: none after a walk-out). */
+      partsAway: () => [...view.parts.values()].filter((pv) => !pv.group.visible || pv.group.position.distanceTo(new Vector3(...pv.home)) > 1e-4).map((pv) => pv.id),
+      machineShown: () => turntable.visible,
       handPush: () => (hand ? hand.push : null),
       handNeed: () => (hand && hand.visible ? collide(hand.samplePoints()) : 0),
       marker: "open-am-dev-hook",
@@ -1777,7 +1935,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
     last = now;
     tweens.update(dt);
-    customer?.show(game.customerLook);
+    if (!story) customer?.show(game.customerLook);
     customer?.update(dt);
     // Settle into the space above the controls, but never under a finger that is carrying or turning, nor between the
     // two taps of a double tap (0.9.4).
@@ -1787,6 +1945,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       applyFraming();
     }
     placeCamera();
+    storyStep();
     // On a trip the forearm comes from the toolbox's side of the screen near the toolbox, and from the lower right at
     // the fasteners, so it does not lie across the machine (0.11.1 follow-up).
     hand?.armSide(sequence && tripPhase ? armSideOnTrip(tripPhase, tripP, toolboxSideNow()) : 1);
@@ -1820,6 +1979,11 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       momentFn = fn;
     },
     busy: () => sequence !== null,
+    playArrival,
+    ending: () => new Promise<void>((r) => setTimeout(() => void (endingPromise ?? Promise.resolve()).then(r), 0)),
+    setPayHold(hold) {
+      payHold = hold;
+    },
     carryChip,
     endChipCarry,
     dispose() {
