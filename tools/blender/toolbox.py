@@ -6,7 +6,7 @@
 
 A red-painted steel cantilever toolbox, open: the body, two trays swung out front and back on their arms, the two lids
 hanging open beyond them, and the carrying handle over the middle. Worn: chipped paint, rust at the edges, grease. A few
-things in it that the player never uses (a rag, a wire brush, sockets), so it reads as a working box.
+things in it that the player never uses (a wire brush, sockets), so it reads as a working box.
 
 One root node `toolbox` (glTF axes, metres): origin on the ground under the middle of the body, the long side along X,
 the front tray towards +Z. Under it, two empty nodes where the tools rest, each turned so a tool
@@ -58,7 +58,6 @@ def materials():
         "paint": mat("toolbox_red", "#b3241b", 0.15, 0.45),
         "rubber": mat("rubber", "#121212", 0.0, 0.85),
         "chrome": mat("chrome", "#c9ccd0", 1.0, 0.25),
-        "rag": mat("rag_cloth", "#56677a", 0.0, 0.9),
         "wood": mat("wood", "#8a5a32", 0.0, 0.7),
         "wire": mat("wire", "#8d8b86", 1.0, 0.45),
     }
@@ -133,30 +132,10 @@ def arm_parts(M):
 
 
 def contents(M):
-    """Things in the box the player never uses: a rag in the body, a wire brush, sockets in the front tray."""
+    """Things in the box the player never uses: a wire brush in the body, sockets in the front tray. (The rag, a
+    subdivided cube that read as a grey blob at game size, was taken out in release 0.11.1.)"""
     parts = []
-    # A crumpled rag spilling over the body's back edge.
-    bpy.ops.mesh.primitive_cube_add(size=1, location=common.gl(-0.08, BODY_H - 0.005, -0.02))
-    rag = bpy.context.active_object
-    rag.scale = (0.17, 0.13, 0.02)  # Blender (x, y, z) = glTF (x, -z, y)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    sub = rag.modifiers.new("sub", "SUBSURF")
-    sub.levels = 2
-    tex = bpy.data.textures.new("rag_noise", "CLOUDS")
-    tex.noise_scale = 0.022
-    tex.noise_depth = 3
-    disp = rag.modifiers.new("crumple", "DISPLACE")
-    disp.texture = tex
-    disp.texture_coords = "GLOBAL"
-    disp.direction = "RGB_TO_XYZ"
-    disp.mid_level = 0.5
-    disp.strength = 0.05
-    for m in (sub, disp):
-        bpy.ops.object.modifier_apply(modifier=m.name)
-    rag.data.materials.clear()
-    rag.data.materials.append(M["rag"])
-    parts.append(rag)
-    # A wire brush lying across the body, beside the rag.
+    # A wire brush lying across the body.
     handle = box((0.16, 0.014, 0.024), (0.08, BODY_H - 0.03, 0.025), M["wood"], bevel=0.005, segments=1)
     bristles = box((0.06, 0.016, 0.02), (0.03, BODY_H - 0.045, 0.025), M["wire"])
     for piece in (handle, bristles):
