@@ -393,8 +393,9 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
 
 await send("Runtime.enable");
 await send("Page.enable");
-// The real sounds play, through a zero gain, so the machine stays quiet (not --mute-audio: see silent-audio.ts).
-await send("Page.addScriptToEvaluateOnNewDocument", { source: SILENT_AUDIO_SOURCE });
+// The real sounds play through the speakers (the owner prefers to hear them, 2026-10-12). OPEN_AM_SILENT=1 routes them
+// through a zero gain instead, so the machine stays quiet. Never --mute-audio: see silent-audio.ts.
+if (process.env.OPEN_AM_SILENT === "1") await send("Page.addScriptToEvaluateOnNewDocument", { source: SILENT_AUDIO_SOURCE });
 await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
 
 const SHOTS = new Set([0, 4, 8, 11]);
