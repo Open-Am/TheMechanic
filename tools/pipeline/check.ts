@@ -3,7 +3,7 @@
 //
 //   node tools/pipeline/check.ts [model.glb] [--no-copy]
 //   node tools/pipeline/check.ts --audio [--from <dir>] [--to <dir>] [--sounds <sounds.json>]
-//   node tools/pipeline/check.ts --hand | --tools | --toolbox [file.glb] [--no-copy]
+//   node tools/pipeline/check.ts --hand | --tools | --toolbox | --bench [file.glb] [--no-copy]
 //
 // The checks are pure functions, exported for game/tests/pipeline.test.ts.
 
@@ -26,6 +26,7 @@ export interface Budgets {
   hand: { triangles: number; bytes: number; texturePx: number };
   tools: { triangles: number; bytes: number; texturePx: number };
   toolbox: { triangles: number; bytes: number; texturePx: number };
+  bench: { triangles: number; bytes: number; texturePx: number };
 }
 
 interface GltfJson {
@@ -353,6 +354,33 @@ export function checkToolbox(glb: Glb, budgets: Budgets): CheckResult {
   return { errors, warnings: [], triangles };
 }
 
+/** Images in one texture set: base colour, occlusion-roughness-metallic, normal. */
+export const TEXTURE_SET_IMAGES = 3;
+
+/**
+ * The workbench (ADR 0025, plan 0016): one root node named bench, within its budget of triangles and bytes, with one
+ * texture set (at most three images) no larger than its texture size.
+ */
+export function checkBench(glb: Glb, budgets: Budgets): CheckResult {
+  const errors: string[] = [];
+  const roots = rootNodes(glb.json);
+  if (roots.length !== 1 || roots[0]!.name !== "bench") {
+    errors.push(`The bench must be one root node named "bench"; found ${roots.map((r) => r.name || "(unnamed)").join(", ") || "none"}.`);
+  }
+  const triangles = roots.reduce((n, r) => n + nodeTriangles(glb.json, r.index), 0);
+  if (triangles > budgets.bench.triangles) errors.push(`The bench has ${triangles} triangles, over its budget of ${budgets.bench.triangles}.`);
+  if (glb.byteLength > budgets.bench.bytes) errors.push(`The bench is ${(glb.byteLength / 1000).toFixed(1)} KB, over its ${budgets.bench.bytes / 1000} KB budget.`);
+  const images = glb.json.images ?? [];
+  if (images.length > TEXTURE_SET_IMAGES) errors.push(`The bench has ${images.length} images; one texture set is at most ${TEXTURE_SET_IMAGES}.`);
+  for (const [i, img] of images.entries()) {
+    const bv = img.bufferView !== undefined ? glb.json.bufferViews?.[img.bufferView] : undefined;
+    if (!bv || !glb.bin) continue;
+    const size = imageSize(glb.bin.subarray(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength));
+    if (size && Math.max(size.width, size.height) > budgets.bench.texturePx) errors.push(`Bench image ${i} is ${size.width} x ${size.height}, over ${budgets.bench.texturePx} px.`);
+  }
+  return { errors, warnings: [], triangles };
+}
+
 /** A companion file (environment, ground shadow) against its byte budget. */
 export function checkFileSize(label: string, bytes: number | null, budget: number, required: boolean): string[] {
   if (bytes === null) return required ? [`${label} is missing.`] : [];
@@ -602,6 +630,26 @@ function mainToolbox(root: string, argv: string[]): void {
   }
 }
 
+function mainBench(root: string, argv: string[]): void {
+  const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "scene", "export", "bench.optimised.glb"));
+  const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
+  if (!existsSync(input)) {
+    console.error(`No bench at ${input}.`);
+    process.exit(1);
+  }
+  const glb = readGlb(new Uint8Array(readFileSync(input)));
+  const result = checkBench(glb, budgets);
+  for (const e of result.errors) console.log(`error: ${e}`);
+  console.log(`Checked ${input}: ${(glb.byteLength / 1000).toFixed(1)} KB of ${budgets.bench.bytes / 1000} KB, ${result.triangles} of ${budgets.bench.triangles} triangles, ${result.errors.length} error(s).`);
+  if (result.errors.length) process.exit(1);
+  if (!argv.includes("--no-copy")) {
+    const out = join(root, "game", "public", "scene");
+    mkdirSync(out, { recursive: true });
+    copyFileSync(input, join(out, "bench.glb"));
+    console.log(`Copied bench.glb to ${out}`);
+  }
+}
+
 function mainTools(root: string, argv: string[]): void {
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "tools", "export", "tools.optimised.glb"));
   const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
@@ -649,6 +697,7 @@ function main(): void {
   if (argv.includes("--audio")) return mainAudio(root, argv.filter((a) => a !== "--audio"));
   if (argv.includes("--tools")) return mainTools(root, argv.filter((a) => a !== "--tools"));
   if (argv.includes("--toolbox")) return mainToolbox(root, argv.filter((a) => a !== "--toolbox"));
+  if (argv.includes("--bench")) return mainBench(root, argv.filter((a) => a !== "--bench"));
   const copy = !argv.includes("--no-copy");
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "gen950", "export", "model.optimised.glb"));
   const groundIn = join(root, "assets", "gen950", "export", "ground.png");

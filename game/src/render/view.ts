@@ -1,16 +1,23 @@
-// The Three.js view: scene, lights, orbit camera, pointer input, and the animations that follow app events.
+// The Three.js view: scene, lights, the workbench and the camera over it, pointer input, and the animations that follow
+// app events.
 // It proposes removals to app and listens for what app accepted (ADR 0010). It never imports ui.
 //
 // Input (plan 0010, ADR 0020): the mechanic's hand is the pointer. It rests on what a mouse points at, comes in under a
 // finger, and closes on a press. A double tap (or double click, or G) loosens the part under the pointer if it can come
 // off; a drag on a loose part carries it, and dropping it on the tray proposes its removal. Every other drag turns the
 // machine, the held spot following the pointer. Whether a part could come off only ever shows in whether it loosens.
+//
+// The workbench (plan 0016, ADR 0025): the machine stands on a bench and turns there about its upright axis; the camera,
+// at a standing mechanic's eye on the near side, never moves sideways. A sideways drag turns the machine, an up-and-down
+// drag raises or lowers the camera within limits. The machine's group sits in a turntable group, so part positions stay
+// in the machine's own axes; anything placed from a world point goes through the part's parent.
 
 import {
   Box3,
   Color,
   Group,
   Matrix4,
+  type Mesh,
   type Object3D,
   PerspectiveCamera,
   Plane,
@@ -26,14 +33,16 @@ import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.ts";
 import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
 import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, overPath, pathLength, poseAt, resolveMotion, spannerSwing, TIMING, tripPlan, turnCounter, type Pose, type TripStep, type TripTool } from "./motion.ts";
-import { DEFAULT_ORBIT, fitDistance, frameAbove, groundPlace, position, projectPoint, rotate, TOOLBOX_PLACE, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
+import { TURN, worldPerPixel } from "./orbit.ts";
+import { BENCH, cameraPose, clampStage, DEFAULT_STAGE, DEFAULT_YAW, frameBench, type Framing, projectMachinePoint, rotateStage, stageLimits, type StageLimits, type StageState, TOOLBOX_ON_BENCH, turnStageToward, zoomStage } from "./stage.ts";
+import { createBench } from "./bench.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
 import { armAnchor, armSideOnTrip, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolboxArmSide, toolFor } from "./handpose.ts";
 import type { RenderAssets, Tool } from "./model.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
-import { createContactShadow, createGround } from "./ground.ts";
+import { createContactShadow, createFloor, createMachineShadow } from "./ground.ts";
 import { createLighting } from "./lighting.ts";
 import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
 
@@ -41,6 +50,8 @@ import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
 const FINGER_PX = 44;
 const FOV_DEG = 40;
 const BACKGROUND = "#1b1c1e";
+/** Directions on a sphere for the machine's outline points used in framing. */
+const OUTLINE_DIRECTIONS = 256;
 /** Seconds for the machine to settle halfway into its new place when the controls grow or shrink (release 0.9.3). */
 const REFRAME_HALF_LIFE = 0.08;
 
@@ -79,6 +90,45 @@ interface Surface {
   onMachine: boolean;
 }
 
+/**
+ * The machine's outline in its own axes, for framing: of all its mesh points (not the hit volumes), the farthest in
+ * each of OUTLINE_DIRECTIONS directions. A few hundred points instead of thousands, so framing stays cheap each frame
+ * while the controls grow or shrink, and the picture's edges come out the same.
+ */
+function outlinePoints(root: Object3D): Vec3[] {
+  root.updateMatrixWorld(true);
+  const all: Vector3[] = [];
+  const v = new Vector3();
+  root.traverse((o) => {
+    const mesh = o as Mesh;
+    if (!mesh.isMesh || o.name.endsWith("__hit") || !mesh.geometry?.attributes["position"]) return;
+    const n = mesh.geometry.attributes["position"].count;
+    for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 400))) all.push(mesh.getVertexPosition(i, v).applyMatrix4(mesh.matrixWorld).clone());
+  });
+  const inverse = new Matrix4().copy(root.matrixWorld).invert();
+  const chosen = new Set<Vector3>();
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let k = 0; k < OUTLINE_DIRECTIONS; k++) {
+    const y = 1 - (2 * (k + 0.5)) / OUTLINE_DIRECTIONS;
+    const r = Math.sqrt(1 - y * y);
+    const d = new Vector3(Math.cos(golden * k) * r, y, Math.sin(golden * k) * r);
+    let best: Vector3 | null = null;
+    let most = -Infinity;
+    for (const p of all) {
+      const s = p.dot(d);
+      if (s > most) {
+        most = s;
+        best = p;
+      }
+    }
+    if (best) chosen.add(best);
+  }
+  return [...chosen].map((p) => {
+    const q = p.clone().applyMatrix4(inverse);
+    return [q.x, q.y, q.z];
+  });
+}
+
 /** Throws if WebGL is not available, so main can show the "cannot run" message. `assets` come from loadRenderAssets. */
 export function mountRender(container: HTMLElement, game: Game, assets: RenderAssets = { model: null, environment: null, ground: null, hand: null }): RenderView {
   const machine: Machine = game.machine;
@@ -96,36 +146,50 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   lighting.addTo(scene);
   // Diagnostic mode reads this; it may not import render (ADR 0010).
   document.documentElement.dataset.lighting = lighting.rig;
-  scene.add(createGround(machine.size, assets.ground));
-
   const view = buildMachine(machine, assets.model);
   document.documentElement.dataset.model = assets.model ? (view.fallbacks.length ? "partial" : "glb") : "placeholders";
-  scene.add(view.root);
   const partIds = new Set(view.parts.keys());
+  // The machine's outline in its own axes, for framing; and its bounds with every part on, for the trips (overPath).
+  const machinePoints = outlinePoints(view.root);
+  const machineLocalBox = new Box3().setFromObject(view.root);
+
+  // The workbench and the floor beyond it; the machine and its shadow stand on the bench top, in the turntable.
+  const bench = createBench(assets.bench ?? null);
+  document.documentElement.dataset.bench = assets.bench ? "glb" : "box";
+  scene.add(bench);
+  const floor = createFloor(BENCH.width, BENCH.depth);
+  floor.position.x = BENCH.centre[0];
+  floor.position.z = BENCH.centre[2];
+  scene.add(floor);
+  const turntable = new Group();
+  turntable.name = "turntable";
+  turntable.position.set(0, BENCH.top, 0);
+  const machineShadow = createMachineShadow(machine.size, assets.ground);
+  machineShadow.position.y = 0.004; // over the planks' small ups and downs
+  turntable.add(view.root, machineShadow);
+  scene.add(turntable);
 
   const camera = new PerspectiveCamera(FOV_DEG, 1, 0.01, 20);
   const fovY = (FOV_DEG * Math.PI) / 180;
-  const center = new Vector3(...view.center);
-  const target = center.clone();
-  let orbit: OrbitState = { ...DEFAULT_ORBIT, distance: 1 };
-  let limits: OrbitLimits = { minDistance: 0.5, maxDistance: 2, minPolar: 0.35, maxPolar: 1.55 };
-  let fitted = false;
-  let fit = 1;
-  // The machine is framed in the part of the screen the controls leave free (release 0.9.3): the picture moves up by a
-  // view offset, and the camera stands back if the free part is too short for the machine. `cover` eases towards
-  // `coverWanted`, the CSS px the controls cover, so the machine glides rather than jumps when a tray row comes or goes.
+  /** The machine's middle in the world: on its turning axis, so it stays put as the machine turns. */
+  const center = new Vector3(view.center[0], view.center[1] + BENCH.top, view.center[2]);
+  let stage: StageState = { ...DEFAULT_STAGE };
+  // The default camera is framed for the screen and for the part of it the controls leave free (ADR 0025, release
+  // 0.9.3). `cover` eases towards `coverWanted`, the CSS px the controls cover, so the machine glides rather than jumps
+  // when a tray row comes or goes.
   let coverWanted = 0;
   let cover = 0;
-  let framing = { shiftPx: 0, distanceScale: 1 };
+  let framing: Framing = frameBench(machinePoints, DEFAULT_YAW, fovY, 390, 844, 0);
+  let limits: StageLimits = stageLimits(framing);
 
   function applyFraming(): void {
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
-    framing = frameAbove(fovY, w, h, cover);
-    if (framing.shiftPx > 0.25) camera.setViewOffset(w, h, 0, framing.shiftPx, w, h);
-    else camera.clearViewOffset();
-    camera.updateProjectionMatrix();
-    sizeHitVolumes(view, FINGER_PX * worldPerPixel(fit * framing.distanceScale, fovY, h));
+    framing = frameBench(machinePoints, DEFAULT_YAW, fovY, w, h, cover);
+    limits = stageLimits(framing);
+    stage = clampStage(stage, limits);
+    placeCamera();
+    sizeHitVolumes(view, FINGER_PX * worldPerPixel(camera.position.distanceTo(center), fovY, h));
   }
 
   function resize(): void {
@@ -135,27 +199,27 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     renderer.domElement.style.width = `${w}px`;
     renderer.domElement.style.height = `${h}px`;
     camera.aspect = w / h;
-    fit = fitDistance(view.radius, fovY, camera.aspect);
-    limits = { ...limits, minDistance: fit * 0.6, maxDistance: fit * 1.6 };
-    orbit = fitted ? zoom(orbit, 1, limits) : { ...orbit, distance: fit };
-    fitted = true;
+    camera.updateProjectionMatrix();
     applyFraming();
+  }
+
+  /** The camera where the framing and the player put it, and the machine turned on the bench. */
+  function placeCamera(): void {
+    const pose = cameraPose(framing, stage);
+    camera.position.set(...pose.eye);
+    camera.rotation.set(-pose.pitch, 0, 0);
+    camera.updateMatrixWorld();
+    turntable.rotation.y = stage.yaw;
+    turntable.updateMatrixWorld(true);
   }
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
 
-  /** The orbit as the camera stands: farther back when the free part of the screen is too short for the machine. */
-  const cameraOrbit = (): OrbitState => ({ ...orbit, distance: orbit.distance * framing.distanceScale });
-
-  /** A pointer's normalised device coordinates in the unmoved frustum the orbit maths works in. */
-  const orbitNdc = (ndc: Vector2): [number, number] => [ndc.x, unshiftNdcY(ndc.y, framing.shiftPx, Math.max(1, container.clientHeight))];
-
-  function placeCamera(): void {
-    camera.position.set(...position(cameraOrbit(), [target.x, target.y, target.z]));
-    camera.lookAt(target);
-    camera.updateMatrixWorld();
-  }
+  /** A world point in the frame a part's group is placed in (the machine's own axes). */
+  const toPartFrame = (pv: PartView, world: Vector3): Vector3 => (pv.group.parent ? pv.group.parent.worldToLocal(world.clone()) : world.clone());
+  /** A point in the machine's own axes, in the world. */
+  const toWorld = (local: Vector3): Vector3 => view.root.localToWorld(local.clone());
 
   // ---- Parts ----
 
@@ -166,7 +230,10 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const collide = (points: readonly Vector3[]): number => {
     // On its way to or from the toolbox the hand follows a path over the machine (overPath). Away from the machine
     // (at the toolbox, which may be behind it from this view) nothing is pushed; near it, the hand keeps out as always.
-    if (tripLeg && !points.some((p) => nearMachine.containsPoint(p))) return 0;
+    if (tripLeg) {
+      const near = nearMachine();
+      if (!points.some((p) => near.containsPoint(p))) return 0;
+    }
     return depthBehind(points);
   };
   /** How far (metres) the deepest of `points` is behind the machine's surface as the camera sees it, plus the margin. */
@@ -323,19 +390,21 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   const tools = assets.tools ?? null;
   const toolbox = assets.toolbox ?? null;
-  /** The machine's bounds with every part on: the hand's trips go over them, never through (overPath). */
-  const machineBox = new Box3().setFromObject(view.root);
+  /** The machine's bounds with every part on, as it is turned now: the hand's trips go over them, never through. */
+  const machineBox = (): Box3 => machineLocalBox.clone().applyMatrix4(view.root.matrixWorld);
   /** The machine's bounds grown by a hand's length: inside it, the hand is kept out of the machine even on a trip leg. */
-  const nearMachine = machineBox.clone().expandByScalar(0.1);
-  const bounds = (): Bounds => ({ min: [machineBox.min.x, machineBox.min.y, machineBox.min.z], max: [machineBox.max.x, machineBox.max.y, machineBox.max.z] });
+  const nearMachine = (): Box3 => machineBox().expandByScalar(0.1);
+  const bounds = (): Bounds => {
+    const b = machineBox();
+    return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] };
+  };
   if (toolbox) {
-    // On the ground to the left of the machine as the default camera sees it, cut by the screen edge so only its open
-    // back tray and the tools show beside the machine (plan 0012, release 0.11.1).
-    const place = groundPlace(DEFAULT_ORBIT.azimuth, view.radius, TOOLBOX_PLACE);
+    // On the bench's left end, its back tray with the tools towards the camera, cut by the left screen edge (plan 0016,
+    // ADR 0025; on the ground before).
     const wrap = new Group();
     wrap.name = "toolbox_place";
-    wrap.position.set(place.x, 0, place.z);
-    wrap.rotation.y = place.rotationY;
+    wrap.position.set(TOOLBOX_ON_BENCH.x, BENCH.top, TOOLBOX_ON_BENCH.z);
+    wrap.rotation.y = TOOLBOX_ON_BENCH.rotationY;
     wrap.add(toolbox.object);
     const size = new Box3().setFromObject(toolbox.object).getSize(new Vector3());
     wrap.add(createContactShadow(size.x * 0.9, size.z * 0.6));
@@ -540,7 +609,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         move(legAt.clone(), p);
         if (watchTrips) {
           // Between the stand-offs the path must keep out of the machine's bounds; and how much of the hand is hidden.
-          if (p > r.core[0] + 1e-3 && p < r.core[1] - 1e-3 && machineBox.clone().expandByScalar(-0.01).containsPoint(legAt)) {
+          if (p > r.core[0] + 1e-3 && p < r.core[1] - 1e-3 && machineBox().expandByScalar(-0.01).containsPoint(legAt)) {
             tripLog.through.push(kind);
             if (tripLog.throughAt.length < 3) tripLog.throughAt.push({ kind, p, at: v3(legAt), points: r.points, core: r.core });
           }
@@ -848,13 +917,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       applyPose(carry.pv, carryPose(m, part.explode, c));
       if (c >= 1) {
         // Out of its place: from here it follows the hand freely, at the depth it came out at.
-        const depth = carry.pv.group.position.clone();
+        const depth = carry.pv.group.getWorldPosition(new Vector3());
         const under = pointAtDepth(x, y, depth);
         carry.free = { offset: depth.clone().sub(under), depth };
       }
       return;
     }
-    carry.pv.group.position.copy(pointAtDepth(x, y, carry.free.depth).add(carry.free.offset));
+    carry.pv.group.position.copy(toPartFrame(carry.pv, pointAtDepth(x, y, carry.free.depth).add(carry.free.offset)));
   }
 
   /** Drops the carried part: on the tray it is removed; anywhere else it flies back to its loose point. */
@@ -893,7 +962,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     hand?.detach();
     hand?.open();
     const from = pv.group.position.clone();
-    const to = trayPoint(from);
+    const to = toPartFrame(pv, trayPoint(toWorld(from)));
     tweens.play(id, {
       duration: CARRY.intoTraySeconds,
       ease: ease.inOutCubic,
@@ -927,7 +996,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       hand?.grab(s.point, s.normal, shapeOf(id));
       hand?.attachTo(pv.group);
     }
-    pv.group.position.copy(pointAtDepth(x, y, center));
+    pv.group.position.copy(toPartFrame(pv, pointAtDepth(x, y, center)));
   }
 
   function endChipCarry(id: PartId): void {
@@ -948,7 +1017,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const out = poseAt(m, part.explode, 1);
     const outPos = new Vector3(pv.home[0] + out.offset[0], pv.home[1] + out.offset[1], pv.home[2] + out.offset[2]);
     const carried = chip?.id === id;
-    const start = carried ? pv.group.position.clone() : trayPoint(outPos);
+    const start = carried ? pv.group.position.clone() : toPartFrame(pv, trayPoint(toWorld(outPos)));
     if (!carried) {
       reset(pv);
       applyPose(pv, out);
@@ -1020,7 +1089,6 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       carry = null;
       chip = null;
       for (const pv of view.parts.values()) reset(pv);
-      target.copy(center);
     }),
     game.events.on("ended", () => {
       abortSequence();
@@ -1132,8 +1200,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     part: PartId | null;
     surface: Surface;
     mode: "pending" | "carry" | "turn";
-    /** For a turn: the spot the hand holds, or null over empty space. */
-    held: { point: Vector3; normal: Vector3 } | null;
+    /** For a turn: the spot the hand holds, in the machine's own axes (it turns with it), or null over empty space. */
+    held: { local: Vector3; normalLocal: Vector3 } | null;
     /** Set when G loosens the part under a held press: the press carries the part once it is loose. */
     carryWhenLoose: boolean;
     /** The press's event time stamp, ms. */
@@ -1176,8 +1244,15 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   function startTurn(x: number, y: number): void {
     if (!drag) return;
     drag.mode = "turn";
-    drag.held = drag.surface.onMachine ? { point: drag.surface.point.clone(), normal: drag.surface.normal.clone() } : null;
+    drag.held = drag.surface.onMachine ? holdOf(drag.surface) : null;
     turnTo(x, y);
+  }
+
+  /** A spot on the machine, kept in its own axes so it turns with it. */
+  function holdOf(s: Surface): { local: Vector3; normalLocal: Vector3 } {
+    view.root.updateMatrixWorld();
+    const inverse = new Matrix4().copy(view.root.matrixWorld).invert();
+    return { local: view.root.worldToLocal(s.point.clone()), normalLocal: s.normal.clone().transformDirection(inverse) };
   }
 
   function turnTo(x: number, y: number): void {
@@ -1186,27 +1261,29 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const mdy = y - drag.lastY;
     if (!drag.held) {
       // Nothing held: turn at the old rate, the hand following the pointer at the machine's depth.
-      orbit = rotate(orbit, mdx, mdy, limits);
+      stage = rotateStage(stage, mdx, mdy, limits);
       placeCamera();
       if (game.running && !handBusy()) hand?.grab(pointAtDepth(x, y, center), camera.position.clone().sub(center).normalize(), "grip");
       return;
     }
     const ndc = ndcOf(x, y);
-    const at = orbitNdc(ndc);
-    const turned = turnToward(cameraOrbit(), limits, [target.x, target.y, target.z], [drag.held.point.x, drag.held.point.y, drag.held.point.z], at, fovY, camera.aspect);
-    orbit = { ...orbit, azimuth: turned.azimuth, polar: turned.polar };
+    const at: [number, number] = [ndc.x, ndc.y];
+    const held: Vec3 = [drag.held.local.x, drag.held.local.y, drag.held.local.z];
+    stage = turnStageToward(stage, limits, framing, held, at, fovY, camera.aspect);
     placeCamera();
     // Let go and grab again under the pointer if the held spot has turned away or fallen behind the pointer.
-    const p = projectPoint(cameraOrbit(), [target.x, target.y, target.z], [drag.held.point.x, drag.held.point.y, drag.held.point.z], fovY, camera.aspect);
+    const p = projectMachinePoint(framing, stage, held, fovY, camera.aspect);
     const rect = renderer.domElement.getBoundingClientRect();
     const lagPx = p ? Math.hypot(((p[0] - at[0]) / 2) * rect.width, ((p[1] - at[1]) / 2) * rect.height) : Infinity;
-    const facing = drag.held.normal.dot(camera.position.clone().sub(drag.held.point)) > 0;
+    const point = toWorld(drag.held.local);
+    const normal = drag.held.normalLocal.clone().transformDirection(view.root.matrixWorld);
+    const facing = normal.dot(camera.position.clone().sub(point)) > 0;
     if (lagPx > TURN.regripPx || !facing) {
       const s = surfaceAt(x, y);
-      drag.held = s.onMachine ? { point: s.point, normal: s.normal } : null;
+      drag.held = s.onMachine ? holdOf(s) : null;
       if (game.running && !handBusy()) hand?.grab(s.point, s.normal, shapeOf(s.part));
     } else if (game.running && !handBusy()) {
-      hand?.grab(drag.held.point, drag.held.normal, shapeOf(drag.surface.part));
+      hand?.grab(point, normal, shapeOf(drag.surface.part));
     }
   }
 
@@ -1219,7 +1296,10 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2 && pinch) {
       const d = pinchDistance();
-      if (d > 0) orbit = zoom(orbit, pinch / d, limits);
+      if (d > 0) {
+        stage = zoomStage(stage, pinch / d, limits);
+        placeCamera();
+      }
       pinch = d;
       return;
     }
@@ -1285,7 +1365,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   function onWheel(e: WheelEvent): void {
     e.preventDefault();
-    orbit = zoom(orbit, Math.exp(e.deltaY * 0.001), limits);
+    stage = zoomStage(stage, Math.exp(e.deltaY * 0.001), limits);
+    placeCamera();
   }
 
   /** G loosens the part under the pointer; with the button held, the press then carries it (ADR 0020). */
@@ -1324,7 +1405,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   if (import.meta.env.DEV) {
     const directionOf = (id: PartId): ScreenDirection => {
-      const v = new Vector3(...partById(id).explode).transformDirection(camera.matrixWorldInverse);
+      const v = new Vector3(...partById(id).explode).transformDirection(view.root.matrixWorld).transformDirection(camera.matrixWorldInverse);
       return screenDirection(v);
     };
     const probe = (id: PartId): { x: number; y: number; dir: ScreenDirection } | null => {
@@ -1492,11 +1573,50 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         watchTrips = on;
       },
       tripLog: () => ({ ...tripLog, reach: Number.isFinite(tripLog.reach) ? tripLog.reach : null, toolAtBolts: Number.isFinite(tripLog.toolAtBolts) ? tripLog.toolAtBolts : null }),
-      orbit: () => ({ ...orbit }),
-      /** Sets the camera's azimuth and polar (radians), for checks that need a given angle. */
-      setOrbit: (azimuth: number, polar: number) => {
-        orbit = { ...orbit, azimuth, polar };
+      /**
+       * The view (plan 0016): the machine's turn, the camera's rise and zoom, where the camera stands and how far it
+       * looks down, and the default framing's measures for this screen.
+       */
+      stage: () => ({ ...stage, eye: camera.position.toArray(), pitch: -camera.rotation.x, framing: { widthShare: framing.widthShare, headPx: framing.headPx, bottomPx: framing.bottomPx, distance: framing.distance, pitch: framing.pitch } }),
+      /** Sets the machine's turn and the camera's rise (radians), for checks that need a given view; null keeps one. */
+      setStage: (yaw: number | null, lift: number | null = null) => {
+        stage = clampStage({ ...stage, yaw: yaw ?? stage.yaw, lift: lift ?? stage.lift }, limits);
         placeCamera();
+      },
+      /** The machine's turn and the camera's rise and zoom back to the default view. */
+      resetStage: () => {
+        stage = { ...DEFAULT_STAGE };
+        placeCamera();
+      },
+      /**
+       * Screen rectangles (CSS px) of the bench and of the machine as drawn, where the bench top's near edge crosses the
+       * middle of the screen, and whether the bench is the model or the plain box.
+       */
+      benchRect: () => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const v = new Vector3();
+        type R = { left: number; top: number; right: number; bottom: number };
+        const box = (root: Object3D, skip: (o: Object3D) => boolean): R | null => {
+          let r: R | null = null;
+          root.updateMatrixWorld(true);
+          root.traverse((o) => {
+            const mesh = o as Object3D & { isMesh?: boolean; geometry?: { attributes: { position?: { count: number } } } };
+            if (!mesh.isMesh || skip(o) || !shown(o) || !mesh.geometry?.attributes.position) return;
+            const m = o as unknown as { getVertexPosition(i: number, t: Vector3): Vector3; matrixWorld: Matrix4 };
+            const n = mesh.geometry.attributes.position.count;
+            for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 3000))) {
+              m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld).project(camera);
+              if (v.z > 1) continue;
+              const x = rect.left + ((v.x + 1) / 2) * rect.width;
+              const y = rect.top + ((1 - v.y) / 2) * rect.height;
+              const c: R | null = r;
+              r = c ? { left: Math.min(c.left, x), top: Math.min(c.top, y), right: Math.max(c.right, x), bottom: Math.max(c.bottom, y) } : { left: x, top: y, right: x, bottom: y };
+            }
+          });
+          return r;
+        };
+        const near = new Vector3(0, BENCH.top, BENCH.centre[2] + BENCH.depth / 2).project(camera);
+        return { bench: box(bench, () => false), machine: box(view.root, (o) => hitMeshes.has(o)), nearEdgeY: rect.top + ((1 - near.y) / 2) * rect.height, kind: assets.bench ? "glb" : "box", screen: { width: rect.width, height: rect.height } };
       },
       /** How far (metres) the whole hand, every sample point, would have to come towards the camera to clear the machine. */
       handPush: () => (hand ? hand.push : null),

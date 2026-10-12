@@ -73,7 +73,25 @@ PROFILES = {
     "wood": ("plain", None, 0.3),
     "wire": ("metal", None, 0.2),
     "ground": ("plain", None, 0.0),
+    # The workbench (plan 0016): weathered planks with oil stains on the top, the frame without. "under" carries the
+    # grain axis in Blender axes (the material names use glTF axes), the dark of the grain, and whether it is stained.
+    # bench_top_0 to _4 vary the planks.
+    "bench_top_*": ("wood", ("x", "#3a2a1c", True), 0.35),
+    "bench_frame_x": ("wood", ("x", "#2e2116", False), 0.45),
+    "bench_frame_y": ("wood", ("z", "#2e2116", False), 0.45),
+    "bench_frame_z": ("wood", ("y", "#2e2116", False), 0.45),
+    "bench_nail": ("metal", None, 0.3),
 }
+
+
+def profile_of(base_name):
+    """The wear profile for a modelling material: by name, or by a `prefix*` entry."""
+    if base_name in PROFILES:
+        return PROFILES[base_name]
+    for key, value in PROFILES.items():
+        if key.endswith("*") and base_name.startswith(key[:-1]):
+            return value
+    return ("plain", None, 0.3)
 GREASE = (0.012, 0.010, 0.009)
 DUST = (0.36, 0.31, 0.25)  # Lagos laterite dust, linear-ish, reddish brown
 RUST = (0.32, 0.12, 0.04)
@@ -116,7 +134,7 @@ def authoring(base_name, group, image):
     base = tuple(bsdf_src.inputs["Base Color"].default_value)[:3]
     metallic = bsdf_src.inputs["Metallic"].default_value
     rough = bsdf_src.inputs["Roughness"].default_value
-    profile, under, dust_amount = PROFILES.get(base_name, ("plain", None, 0.3))
+    profile, under, dust_amount = profile_of(base_name)
 
     m = bpy.data.materials.new(f"{base_name}@{group}")
     m.use_nodes = True
@@ -194,6 +212,7 @@ def authoring(base_name, group, image):
     colour = mix_rgb(math_node("MULTIPLY", variation, 0.12), base, tuple(c * 0.75 for c in base))
     metal_out = metallic
     rough_out = rough
+    wood_normal = None
 
     if profile in ("paint", "toolpaint"):
         chips = math_node("MULTIPLY", edge, ramp(big, 0.45, 0.6))
@@ -256,6 +275,41 @@ def authoring(base_name, group, image):
         link(t, coord.outputs["Object"], lines.inputs["Vector"])
         text = math_node("MULTIPLY", math_node("GREATER_THAN", lines.outputs["Fac"], 0.75), math_node("GREATER_THAN", fine, 0.42))
         colour = mix_rgb(text, colour, (0.03, 0.03, 0.03))
+    elif profile == "wood":
+        # Weathered roadside planks (plan 0016): grain stretched along the plank, sun-greyed patches, grime in the
+        # corners and, on the top, dark oil stains that are a little glossier than the dry wood.
+        axis, dark, stained = under
+        mp = n.new("ShaderNodeMapping")
+        mp.inputs["Scale"].default_value = tuple(0.6 if a == axis else 9.0 for a in "xyz")
+        link(t, coord.outputs["Object"], mp.inputs["Vector"])
+        gn = n.new("ShaderNodeTexNoise")
+        gn.inputs["Scale"].default_value = 2.5
+        gn.inputs["Detail"].default_value = 10.0
+        gn.inputs["Roughness"].default_value = 0.7
+        gn.inputs["Distortion"].default_value = 2.5
+        link(t, mp.outputs["Vector"], gn.inputs["Vector"])
+        grain = gn.outputs["Fac"]
+        colour = mix_rgb(ramp(grain, 0.3, 0.75), srgb_to_linear(dark), base)
+        colour = mix_rgb(math_node("MULTIPLY", ramp(noise(4.0, 4.0), 0.35, 0.75), 0.6), colour, srgb_to_linear("#6e655a"))
+        colour = mix_rgb(math_node("MULTIPLY", crevice, 1.3), colour, tuple(c * 0.4 for c in base))
+        rough_out = math_node("ADD", math_node("MULTIPLY", variation, 0.08), rough)
+        if stained:
+            sn = n.new("ShaderNodeTexNoise")
+            sn.inputs["Scale"].default_value = 3.2
+            sn.inputs["Detail"].default_value = 3.0
+            link(t, coord.outputs["Object"], sn.inputs["Vector"])
+            stain = math_node("MULTIPLY", ramp(sn.outputs["Fac"], 0.5, 0.57), 0.85)
+            colour = mix_rgb(stain, colour, srgb_to_linear("#171310"))
+            # Old oil soaked in all over: a fainter, wider darkening, as on the benches in the Lagos photos.
+            soak = math_node("MULTIPLY", ramp(noise(1.6, 3.0), 0.4, 0.65), 0.45)
+            colour = mix_rgb(soak, colour, srgb_to_linear("#2a221b"))
+            # Only a little glossier than dry wood: glossier stains mirrored the sky blue in the game (plan 0016).
+            rough_out = math_node("SUBTRACT", rough_out, math_node("MULTIPLY", stain, 0.15))
+        wb = n.new("ShaderNodeBump")
+        wb.inputs["Strength"].default_value = 0.25
+        wb.inputs["Distance"].default_value = 0.002
+        link(t, grain, wb.inputs["Height"])
+        wood_normal = wb.outputs["Normal"]
 
     # Dust over everything that faces up or sits in a crevice, broken up by noise.
     if dust_amount > 0:
@@ -283,6 +337,8 @@ def authoring(base_name, group, image):
     bump.inputs["Strength"].default_value = {"paint": 0.05, "metal": 0.12, "plastic": 0.06, "exhaust": 0.18, "skin": 0.14, "cloth": 0.2}.get(profile, 0.04)
     bump.inputs["Distance"].default_value = 0.0004
     link(t, noise(220.0, 4.0), bump.inputs["Height"])
+    if wood_normal is not None:
+        link(t, wood_normal, bump.inputs["Normal"])
     link(t, bump.outputs["Normal"], bsdf.inputs["Normal"])
 
     # A reroute carrying metallic, for the metallic bake through emission.

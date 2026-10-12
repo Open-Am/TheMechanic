@@ -10,11 +10,15 @@ things in it that the player never uses (a wire brush, sockets), so it reads as 
 
 One root node `toolbox` (glTF axes, metres): origin on the ground under the middle of the body, the long side along X,
 the front tray towards +Z. Under it, two empty nodes where the tools rest, each turned so a tool
-placed with the empty's transform lies in it. They lie side by side in the back tray, which the game turns towards the
-machine, so from the default camera they show just under the machine:
+placed with the empty's transform lies in it. Since plan 0016 the toolbox stands on the workbench's left end with its
+back tray towards the camera, seen from a standing mechanic's eye: the tray's wall would hide anything lying on its
+floor, so the tools lie across the back tray on its rims, as a mechanic leaves them, side by side in its -X half (the
+end nearest the machine and the screen's middle, while the left screen edge cuts the box's other end):
 
-- `slot_spanner`: the spanner's jaw centre; its local Z (the bolt axis) points up, its handle along +X.
-- `slot_screwdriver`: the screwdriver's tip; its shaft (local +Z) runs along -X.
+- `slot_spanner`: the spanner's jaw centre, just past the tray's outer rim; its local Z (the bolt axis) points up, its
+  handle along +Z, over the tray towards the body.
+- `slot_screwdriver`: the screwdriver's tip, over the body's open top; its shaft (local +Z) runs along -Z, so the handle
+  rests on the tray's outer rim.
 
 Scenery only (ADR 0021): no part of the game picks it. Made by script from our own materials; reference photos of real
 toolboxes are for matching only and never committed (ADR 0013).
@@ -152,9 +156,10 @@ def contents(M):
 
 # Where the tools rest in the back tray (glTF), and their axes: see the module docstring.
 FLOOR = TRAY_Y + WALL
+RIM = TRAY_Y + TRAY_H  # the trays' top edge, where the tools lie since plan 0016
 SLOT_POSES = {
-    "slot_spanner": ((-0.07, FLOOR + 0.003, -TRAY_Z - 0.02), (1, 0, 0), (0, 0, -1), (0, 1, 0)),
-    "slot_screwdriver": ((0.09, FLOOR + 0.0132, -TRAY_Z + 0.02), (0, 0, 1), (0, 1, 0), (-1, 0, 0)),
+    "slot_spanner": ((-0.14, RIM + 0.004, -TRAY_Z - TRAY_D / 2 - 0.02), (0, 0, 1), (1, 0, 0), (0, 1, 0)),
+    "slot_screwdriver": ((-0.07, RIM + 0.0132, -0.02), (-1, 0, 0), (0, 1, 0), (0, 0, -1)),
 }
 
 # glTF axes from Blender axes: gl = C @ bl.

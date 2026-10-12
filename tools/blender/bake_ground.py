@@ -1,10 +1,14 @@
-"""Bakes the ground contact shadow from the assembled machine (plan 0005 step 6, ADR 0014).
+"""Bakes the machine's contact shadow on the bench top from the assembled machine (plan 0005 step 6, ADR 0014; since
+plan 0016 and ADR 0025 it lies on the workbench's top, not the ground).
 
     node tools/run-blender.mjs tools/blender/bake_ground.py --blend assets/gen950/blend/gen950.blend
 
-Renders the machine straight down with an orthographic camera into a transparent image, takes its coverage, blurs it
-into a soft shadow, and writes assets/gen950/export/ground.png: black with the shadow in the alpha channel. The image
-spans 3 times the machine's longest side, the same span as the game's ground plane (game/src/render/ground.ts).
+Renders the machine straight down with an orthographic camera into a transparent image twice: all of it, and only what
+lies within CONTACT_M of its base (the feet and the bottom of the frame, which touch the bench top). Each coverage is
+blurred and the two are combined: a wide soft shadow under the whole machine and a darker, tighter one where it stands.
+Writes assets/gen950/export/ground.png: black with the shadow in the alpha channel. The image spans SPAN_FACTOR times
+the machine's longest side, the same span as the game's shadow plane (SHADOW_SPAN in game/src/render/ground.ts), small
+enough to stay on the bench top however the machine is turned.
 """
 
 import os
@@ -17,10 +21,13 @@ sys.path.insert(0, os.path.dirname(__file__))
 import common  # noqa: E402
 
 common.check_version()
-PX = 256  # the shadow is soft; 256 px over about 1.1 m is plenty and stays far inside 64 KB
-SPAN_FACTOR = 3.0
-STRENGTH = 0.62  # matches GROUND.shadowAlpha in the game
-BLUR_M = 0.03  # blur radius in metres
+PX = 256  # the shadow is soft; 256 px over about 0.6 m is plenty and stays far inside 64 KB
+SPAN_FACTOR = 1.6  # matches SHADOW_SPAN in game/src/render/ground.ts
+STRENGTH = 0.55  # the wide shadow under the whole machine
+BLUR_M = 0.035  # its blur radius in metres
+CONTACT_M = 0.03  # height above the base that counts as touching the bench
+CONTACT_STRENGTH = 0.8
+CONTACT_BLUR_M = 0.012
 
 machine = common.load_machine()
 span = max(machine["size"][0], machine["size"][2]) * SPAN_FACTOR
@@ -39,7 +46,8 @@ cam_data.type = "ORTHO"
 cam_data.ortho_scale = span
 cam = bpy.data.objects.new("cam_ground", cam_data)
 scene.collection.objects.link(cam)
-cam.location = (0, 0, 2)
+CAM_Z = 2.0
+cam.location = (0, 0, CAM_Z)
 cam.rotation_euler = (0, 0, 0)  # looking straight down -Z; image up is Blender +Y, which is glTF -Z (the back)
 scene.camera = cam
 
@@ -52,11 +60,21 @@ scene.render.film_transparent = True
 scene.render.image_settings.file_format = "PNG"
 scene.render.image_settings.color_mode = "RGBA"
 scene.render.filepath = raw_path
-bpy.ops.render.render(write_still=True)
 
-img = bpy.data.images.load(raw_path)
-pixels = np.array(img.pixels[:], dtype=np.float32).reshape(PX, PX, 4)
-coverage = pixels[:, :, 3]
+
+def coverage(clip_start):
+    """The machine's coverage seen from above, of what lies below CAM_Z - clip_start (Blender Z, the base at 0)."""
+    cam_data.clip_start = clip_start
+    cam_data.clip_end = CAM_Z + 1.0
+    bpy.ops.render.render(write_still=True)
+    img = bpy.data.images.load(raw_path)
+    a = np.array(img.pixels[:], dtype=np.float32).reshape(PX, PX, 4)[:, :, 3].copy()
+    bpy.data.images.remove(img)
+    return a
+
+
+whole = coverage(0.01)
+base = coverage(CAM_Z - CONTACT_M)
 
 
 def blur(a, radius_px):
@@ -71,7 +89,9 @@ def blur(a, radius_px):
     return a
 
 
-shadow = np.clip(blur(coverage, BLUR_M / span * PX) * STRENGTH, 0, 1)
+soft = np.clip(blur(whole, BLUR_M / span * PX) * STRENGTH, 0, 1)
+contact = np.clip(blur(base, CONTACT_BLUR_M / span * PX) * CONTACT_STRENGTH, 0, 1)
+shadow = 1 - (1 - soft) * (1 - contact)  # the two together, never darker than either alone allows
 result = np.zeros((PX, PX, 4), dtype=np.float32)
 result[:, :, 3] = shadow
 out_img = bpy.data.images.new("ground", PX, PX, alpha=True)

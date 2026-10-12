@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
 import { alongPath, CARRY, exitDistance, carryPose, carryProgress, FASTEN, fastenerPose, legSeconds, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, overPath, pathLength, poseAt, resolveMotion, segmentHitsBox, spannerSwing, TRIP, tripPlan, turnCounter, turnsCrossed, type Bounds } from "../src/render/motion.ts";
-import { clampOrbit, DEFAULT_ORBIT, fitDistance, FRAME, frameAbove, groundPlace, position, projectPoint, rotate, TOOLBOX_PLACE, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
+import { fitDistance, position, worldPerPixel } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
 import { matchNodes } from "../src/render/match.ts";
@@ -161,23 +161,7 @@ describe("gesture", () => {
 
 });
 
-describe("orbit", () => {
-  const limits: OrbitLimits = { minDistance: 0.5, maxDistance: 2, minPolar: 0.3, maxPolar: 1.5 };
-
-  it("keeps distance and tilt inside the limits", () => {
-    const s = clampOrbit({ azimuth: 0, polar: 3, distance: 10 }, limits);
-    expect(s.polar).toBe(1.5);
-    expect(s.distance).toBe(2);
-    expect(rotate(s, 0, 10000, limits).polar).toBe(0.3);
-    expect(zoom(s, 0.001, limits).distance).toBe(0.5);
-  });
-
-  it("ignores a nonsense zoom factor", () => {
-    const s = { azimuth: 0, polar: 1, distance: 1 };
-    expect(zoom(s, 0, limits)).toBe(s);
-    expect(zoom(s, Number.NaN, limits)).toBe(s);
-  });
-
+describe("orbit helpers (the tray pictures' camera)", () => {
   it("azimuth 0 looks at the front of the machine from +Z", () => {
     const [x, y, z] = position({ azimuth: 0, polar: Math.PI / 2, distance: 1 }, [0, 0, 0]);
     expect(close(x, 0) && close(y, 0) && close(z, 1)).toBe(true);
@@ -195,42 +179,6 @@ describe("orbit", () => {
 
   it("world per pixel grows with distance", () => {
     expect(worldPerPixel(2, 0.8, 800)).toBeCloseTo(2 * worldPerPixel(1, 0.8, 800));
-  });
-});
-
-describe("framing the machine above the controls (0.9.3)", () => {
-  const fov = (40 * Math.PI) / 180;
-
-  it("with nothing covering the screen the picture is not moved", () => {
-    expect(frameAbove(fov, 390, 844, 0)).toEqual({ shiftPx: 0, distanceScale: 1 });
-    expect(frameAbove(fov, 390, 844, -20)).toEqual({ shiftPx: 0, distanceScale: 1 });
-  });
-
-  it("centres the machine in the part of the screen above the controls", () => {
-    const cover = 376; // a phone with twelve chips in the tray
-    const f = frameAbove(fov, 390, 844, cover);
-    expect(f.shiftPx).toBe(cover / 2);
-    // The orbit target, at the centre of the whole frustum, lands in the middle of the free part of the screen.
-    const p = projectPoint({ azimuth: 0.5, polar: 1.1, distance: 1 }, [0, 0, 0], [0, 0, 0], fov, 390 / 844)!;
-    const viewNdcY = p[1] + (2 * f.shiftPx) / 844;
-    expect(close(((1 - viewNdcY) / 2) * 844, (844 - cover) / 2, 1e-9)).toBe(true);
-    expect(close(unshiftNdcY(viewNdcY, f.shiftPx, 844), p[1], 1e-12)).toBe(true);
-  });
-
-  it("a narrow portrait screen is fitted by its width, so the machine keeps its size", () => {
-    expect(frameAbove(fov, 390, 844, 200).distanceScale).toBeCloseTo(1, 12);
-  });
-
-  it("when the free part is the narrower side, the camera stands back so the machine still fits", () => {
-    const f = frameAbove(fov, 800, 800, 400);
-    const freeFov = 2 * Math.atan(Math.tan(fov / 2) * 0.5);
-    expect(close(f.distanceScale, fitDistance(1, freeFov, 2) / fitDistance(1, fov, 1), 1e-12)).toBe(true);
-    expect(f.distanceScale).toBeGreaterThan(1);
-  });
-
-  it("always leaves the machine a share of the screen, however tall the controls grow", () => {
-    const f = frameAbove(fov, 390, 844, 5000);
-    expect(f.shiftPx).toBeCloseTo((844 * (1 - FRAME.minFreeShare)) / 2);
   });
 });
 
@@ -572,40 +520,6 @@ describe("deliberate removal: double tap, then carry (plan 0010, ADR 0020)", () 
     expect(carryProgress(CARRY.outPx / 2)).toBeCloseTo(0.5);
     expect(carryProgress(CARRY.outPx * 3)).toBe(1);
     expect(carryProgress(-5)).toBe(0);
-  });
-});
-
-describe("turning with the hand (plan 0010, ADR 0020)", () => {
-  const limits: OrbitLimits = { minDistance: 0.5, maxDistance: 2, minPolar: 0.35, maxPolar: 1.55 };
-  const target: Vec3 = [0, 0.19, 0];
-  const fov = (40 * Math.PI) / 180;
-
-  it("the orbit target lands in the middle of the screen", () => {
-    const p = projectPoint({ azimuth: 0.4, polar: 1.1, distance: 1 }, target, target, fov, 0.46)!;
-    expect(p[0]).toBeCloseTo(0);
-    expect(p[1]).toBeCloseTo(0);
-  });
-
-  it("each step brings the held spot closer to the pointer, within the limits", () => {
-    let s = { azimuth: 0.55, polar: 1.12, distance: 1 };
-    const held: Vec3 = [0.15, 0.25, 0.12];
-    const pointer: [number, number] = [0.25, 0.05];
-    const gap = (st: typeof s) => {
-      const p = projectPoint(st, target, held, fov, 0.46)!;
-      return Math.hypot(p[0] - pointer[0], p[1] - pointer[1]);
-    };
-    let g = gap(s);
-    for (let i = 0; i < 4; i++) {
-      const next = turnToward(s, limits, target, held, pointer, fov, 0.46);
-      expect(Math.abs(next.azimuth - s.azimuth)).toBeLessThanOrEqual(TURN.maxStep + 1e-12);
-      expect(next.polar).toBeGreaterThanOrEqual(limits.minPolar);
-      expect(next.polar).toBeLessThanOrEqual(limits.maxPolar);
-      const ng = gap(next);
-      expect(ng).toBeLessThanOrEqual(g + 1e-9);
-      s = next;
-      g = ng;
-    }
-    expect(g).toBeLessThan(0.05);
   });
 });
 
@@ -993,39 +907,6 @@ describe("where the spanner's handle lies on a bolt (plan 0012 follow-up)", () =
   });
 });
 
-describe("where the toolbox stands (plan 0012, release 0.11.1)", () => {
-  const [sx, sy, sz] = machine.size;
-  const radius = Math.hypot(sx, sy, sz) / 2;
-  const target: Vec3 = [0, sy / 2, 0];
-  const fov = (40 * Math.PI) / 180;
-
-  it("places a spot ahead of and to the left of the machine as a camera at that azimuth sees it", () => {
-    expect(groundPlace(0, 2, { ahead: 1, left: 0.5, turn: -1 })).toEqual({ x: -1, z: 2, rotationY: -1 });
-    const turned = groundPlace(Math.PI / 2, 1, { ahead: 1, left: 0.5, turn: 0 });
-    expect(turned.x).toBeCloseTo(1);
-    expect(turned.z).toBeCloseTo(0.5);
-    expect(groundPlace(0.55, radius, TOOLBOX_PLACE)).toEqual(groundPlace(0.55, radius, TOOLBOX_PLACE));
-  });
-
-  it("stands beside the machine, off its footprint, rather than in front of it", () => {
-    const p = groundPlace(DEFAULT_ORBIT.azimuth, radius, TOOLBOX_PLACE);
-    expect(Math.hypot(p.x, p.z)).toBeGreaterThan(radius);
-    expect(TOOLBOX_PLACE.left).toBeGreaterThan(TOOLBOX_PLACE.ahead);
-  });
-
-  it("in the default view on both phone sizes its middle is at the left screen edge, left of and below the machine", () => {
-    for (const [w, h] of [[390, 844], [360, 640]] as const) {
-      const orbit = { ...DEFAULT_ORBIT, distance: fitDistance(radius, fov, w / h) };
-      const p = groundPlace(DEFAULT_ORBIT.azimuth, radius, TOOLBOX_PLACE);
-      const at = projectPoint(orbit, target, [p.x, 0, p.z], fov, w / h)!;
-      const machineLeft = projectPoint(orbit, target, [-sx / 2, 0, sz / 2], fov, w / h)!;
-      expect(Math.abs(at[0] + 1)).toBeLessThan(0.25);
-      expect(at[0]).toBeLessThan(machineLeft[0]);
-      expect(at[1]).toBeLessThan(0);
-    }
-  });
-});
-
 describe("the arm on the toolbox trip (0.11.1 follow-up)", () => {
   const cam: Vec3 = [0, 0, 1];
   const right: Vec3 = [1, 0, 0];
@@ -1096,5 +977,15 @@ describe("the arm reaches the toolbox's side early (0.11.1 follow-up)", () => {
     expect(armSideOnTrip("toFastener", 1 - ARM_REACH.crossShare, -1)).toBeCloseTo(-1);
     expect(armSideOnTrip("home", 0.2, -1)).toBeCloseTo(-1);
     expect(armSideOnTrip("toToolbox", 0.35, -1)).toBeLessThan(1);
+  });
+});
+
+describe("the machine's shadow on the bench top (plan 0016 step 2, ADR 0025)", () => {
+  it("the shadow plane and the Blender bake span the same share of the machine", async () => {
+    const { SHADOW_SPAN, shadowSpan } = await import("../src/render/ground.ts");
+    const { readFileSync } = await import("node:fs");
+    const bake = readFileSync(new URL("../../tools/blender/bake_ground.py", import.meta.url), "utf8");
+    expect(Number(/^SPAN_FACTOR = ([0-9.]+)/m.exec(bake)?.[1])).toBe(SHADOW_SPAN);
+    expect(shadowSpan([0.367, 0.375, 0.312])).toBeCloseTo(0.367 * SHADOW_SPAN, 9);
   });
 });

@@ -45,5 +45,11 @@
     "triangles": 3000,
     "bytes": 200000,
     "texturePx": 1024
+  },
+  "bench": {
+    "_source": "ADR 0025: the workbench under the generator, scenery only",
+    "triangles": 3000,
+    "bytes": 300000,
+    "texturePx": 1024
   }
 }
