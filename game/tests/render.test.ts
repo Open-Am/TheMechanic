@@ -1085,9 +1085,17 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(windDownFade(r, r.stopped)).toBe(0);
   });
 
-  it("the customer pays while it runs, then the hand presses the switch and the rocker flips before it stops", () => {
+  it("it runs alone for about 3 s, the customer smiles, pays while it runs, then the hand presses the switch", () => {
     const r = runTimes(0);
-    expect(r.payStart).toBeGreaterThan(r.catch);
+    // The owner's clarification (ADR 0027 history, 2026-10-12): the start runs a little longer on its own first.
+    expect(r.smile - r.catch).toBeGreaterThanOrEqual(2.8);
+    for (const t of frames(r.running, r.smile)) expect(runShake(r, t)).toBe(1);
+    expect(r.smile - r.running).toBeGreaterThan(2);
+    // The smile comes before the notes, and lines up with pay_leave: notes out 0.55 s in, taken 1.45 s in.
+    expect(r.payStart).toBeGreaterThan(r.smile);
+    expect(r.payStart - r.smile).toBeCloseTo(0.55, 9);
+    expect(r.payEnd - r.smile).toBeCloseTo(1.45, 9);
+    for (const t of frames(r.smile, r.press)) expect(runShake(r, t)).toBeGreaterThan(0);
     expect(r.payEnd).toBeGreaterThan(r.payStart);
     for (const t of frames(r.payStart, r.payEnd)) expect(runShake(r, t)).toBeGreaterThan(0);
     expect(r.press).toBeGreaterThan(r.payEnd);
@@ -1095,9 +1103,11 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(switchAngle(r, r.pressed)).toBeCloseTo(STARTUP.switchAngle, 12);
     expect(switchAngle(r, r.gone)).toBeCloseTo(STARTUP.switchAngle, 12);
     expect(r.stopped).toBeLessThan(r.gone);
-    // ADR 0027: about 4 to 5 seconds from the catch to the customer leaving.
-    expect(r.gone - r.catch).toBeGreaterThanOrEqual(4);
-    expect(r.gone - r.catch).toBeLessThanOrEqual(5);
+    for (const t of frames(r.stopped, r.gone + 1)) expect(runShake(r, t)).toBe(0);
+    // ADR 0027 said about 4 to 5 seconds from the catch to the customer leaving; with the owner's longer run
+    // (ADR 0027 history, 2026-10-12) it is about 6.5 to 7 seconds.
+    expect(r.gone - r.catch).toBeGreaterThanOrEqual(6.5);
+    expect(r.gone - r.catch).toBeLessThanOrEqual(7.1);
   });
 
   it("a failed pull coughs and dies in about 1.5 s, with a jolt at each cough and no shake after", () => {
@@ -1146,8 +1156,8 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(plan.end).toBe(plan.run!.gone);
     for (const t of frames(0, plan.run!.catch)) expect(planShake(plan, t)).toBe(0);
     for (const t of frames(plan.run!.stopped, plan.end)) expect(planShake(plan, t)).toBe(0);
-    // The handle is home before the customer starts paying.
-    expect(plan.pull!.home).toBeLessThan(plan.run!.payStart);
+    // The handle is home long before the customer smiles.
+    expect(plan.pull!.home).toBeLessThan(plan.run!.smile);
   });
 
   it("plans a failed pull, and a cough without a pull when the recoil starter is off the machine", () => {

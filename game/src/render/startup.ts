@@ -31,15 +31,21 @@ export const STARTUP = {
   pullLift: 0.05,
   /** The rope's length at rest, from the housing's outlet to the handle: STARTER_GRIP - STARTER_OUTLET in model.py. */
   ropeRest: 0.0195,
-  // The run, from the catch (ADR 0027: about 4 to 5 seconds from the catch to the customer leaving).
+  // The run, from the catch. ADR 0027 said about 4 to 5 seconds from the catch to the customer leaving; the owner's
+  // clarification of 2026-10-12 (ADR 0027 history) lets it run a little longer first, about 7 seconds in all: the
+  // engine runs on its own, the customer smiles, pays while it still runs, the mechanic stops it, the customer leaves.
   /** The catch: the shake jumps to catchKick times the running shake and settles over rampIn. */
   rampIn: 0.35,
   catchKick: 2.2,
   /** The exhaust haze builds up over hazeIn. */
   hazeIn: 0.6,
-  /** The customer starts paying payDelay after the catch and the hand has the notes payHold later (ADR 0026). */
-  payDelay: 0.4,
-  payHold: 1.5,
+  /** The engine runs on its own after the catch, nothing else happening: the shake settles, the haze builds. */
+  runAlone: 3.0,
+  /** Then the customer smiles (about 0.6 s): the start of their pay_leave clip (plan 0017). */
+  smile: 0.55,
+  /** Then the notes are held out and the hand takes them: pay_leave shows the notes from 0.55 s to 1.45 s, so the smile
+   * is the clip's first 0.55 s and the hold its next 0.9 s (ADR 0026). */
+  payHold: 0.9,
   /** The hand moves from the notes to the red switch and presses it; the rocker flips by switchAngle about X. */
   switchReach: 0.45,
   press: 0.15,
@@ -47,7 +53,7 @@ export const STARTUP = {
   /** The engine winds down after the press: the shake, the haze and the `start` sound fade out (about 0.8 s). */
   windDown: 0.8,
   /** The customer lifts the stopped generator and walks off (their clip, plan 0017; step 3 fits it to this). */
-  carryOff: 1.2,
+  carryOff: 1.1,
   // The running shake (plan 0018 reading 4): a small random walk of offset and roll at about 25 Hz, 1.5 mm.
   shakeHz: 25,
   shakeAmplitude: 0.0015,
@@ -161,7 +167,9 @@ export interface RunTimes {
   catch: number;
   /** The kick has settled into the running shake. */
   running: number;
-  /** The customer holds out the notes (ADR 0026), and the hand has them. */
+  /** The engine has run on its own; the customer smiles: the start of their pay_leave clip (plan 0017). */
+  smile: number;
+  /** The customer holds out the notes (ADR 0026), and the hand has them: 0.55 s and 1.45 s into pay_leave. */
   payStart: number;
   payEnd: number;
   /** The hand reaches the red switch and presses it; the rocker has flipped and the engine starts winding down. */
@@ -174,12 +182,13 @@ export interface RunTimes {
 }
 
 export function runTimes(catchAt: number): RunTimes {
-  const payStart = catchAt + STARTUP.payDelay;
+  const smile = catchAt + STARTUP.runAlone;
+  const payStart = smile + STARTUP.smile;
   const payEnd = payStart + STARTUP.payHold;
   const press = payEnd + STARTUP.switchReach;
   const pressed = press + STARTUP.press;
   const stopped = pressed + STARTUP.windDown;
-  return { catch: catchAt, running: catchAt + STARTUP.rampIn, payStart, payEnd, press, pressed, stopped, gone: stopped + STARTUP.carryOff };
+  return { catch: catchAt, running: catchAt + STARTUP.rampIn, smile, payStart, payEnd, press, pressed, stopped, gone: stopped + STARTUP.carryOff };
 }
 
 /** The shake's size as a share of the running shake: 0 before the catch, a kick, 1 while running, 0 once stopped. */
