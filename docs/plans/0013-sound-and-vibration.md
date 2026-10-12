@@ -1,7 +1,7 @@
 ---
 id: 0013
 title: Sound and vibration
-status: approved
+status: done
 date: 2026-10-11
 adrs: [0002, 0004, 0007, 0010, 0012, 0014, 0018, 0020, 0021, 0022, 0023]
 branch: plan/0013-sound-and-vibration
@@ -200,26 +200,26 @@ Added: sound and vibration. Fasteners click as they turn, parts crack, snap, pop
 
 ## Results (2026-10-12, step 3)
 
-The owner downloaded the shortlist and wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The shortlist's first choice for each moment ships in `game/public/audio/`: ten mono Ogg Opus files, 22,931 bytes of the 250 KB budget. Trims, gains and what to listen for are in `assets/audio/STATUS.md`. Each sound's Freesound page was checked again on 2026-10-12, and all ten link CC0 1.0. The other downloads stay, uncommitted, in `assets/audio/source/`. Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
+The owner downloaded the shortlist and wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The recommended sounds ship in `game/public/audio/`: ten mono Ogg Opus files, 29,332 bytes of the 250 KB budget. Trims, gains and what to listen for are in `assets/audio/STATUS.md`. Each sound's Freesound page was checked again on 2026-10-12, and all link CC0 1.0. The other downloads stay, uncommitted, in `assets/audio/source/`. Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
 
 Readings that differ from the plan's:
 
-- **The engine start is 0.98 s, not about 2.5 s.** The chosen file holds two short pull-and-catch attempts split by digital silence, so the second is used.
+- **The engine start is esperri 118971, 2.52 s.** The first choice, damsur 443239, gave only 0.98 s: two short tries split by digital silence. The owner's recommendation named both. esperri's file is the engine already firing through three revs, then slowing, with no cord pull.
 - **The failed start was picked from the waveform** (the broken-up stretch after the last pull), not by ear.
 - **No fade-ins except on `fail`.** Blender's volume keys step in 10 ms frames, so a fade-in swallowed any click within about 20 ms of the cut.
+- **The cord seats a part still going back.** `app` tells `pulled` before it plays the cord. `render`'s press-home then seats every part still going back, with one `seat` and its 15 ms vibration. So the order is always seat, cord, then start or fail.
+  - Before this, a part with no fasteners caught by the pull seated after the engine sound, and `verify:phone` failed on it once in three runs. A part with fasteners never seated at all.
+  - Pressing home a part that was never put back stays silent (reading 5).
 
-Done when, checked on 2026-10-12:
+Done when, checked on 2026-10-12, after the fix and the new engine start:
 
-- Pass: `npm test` (369), `typecheck`, `docs:check`, `build`, `size` (190.4 KB of 350 KB).
+- Pass: `npm test` (370), `typecheck`, `docs:check`, `build`, `size` (190.5 KB of 350 KB).
 - Pass: `npm run audio` encodes and checks the ten files, 0 errors.
+- Pass: `npm run verify:phone` (HIDDEN_DEBUG=1), exit 0 on both runs. "files decoded: 10 of 10", "every moment could be heard", and the new step that pulls the cord while the plug cap is going back.
 - Pass: `LICENCE.md` lists every file as `CC0 1.0` with its Freesound URL and author.
 - Pass: `STATUS.md` marks every sound a stand-in.
 - Pass: no new dependency.
-- Pass: `npm run verify:drop`, exit 0.
-- **Intermittent:** `npm run verify:phone` (HIDDEN_DEBUG=1) ran three times. Twice it exited 0, with "files decoded: 10 of 10" and "every moment could be heard". Once it failed with "the winning pull ended with ["start","seat"] and vibrated 15".
-  - The cause: the check pulls the cord as soon as the last part is dropped back. When that part has no fasteners, nothing waits for its put-back animation. Pressing home does not touch a part that is still going back, so it seats about a second later, after the engine sound.
-  - Whether this happens depends on which fault the round draws. The sound files do not affect it.
-  - Either the check waits for the part to seat before the winning pull, or the game decides that pressing home also seats a part on its way back. That is not decided here.
-- Waiting on the owner: the phone round with sound on.
+- `npm run verify:drop`: exit 1 on both runs, from slow double taps on a fully loaded machine (CPU at 100%, another agent's headless Edge on debug port 9333). Every miss is a loosen double tap whose two taps landed 395–888 ms apart, where about 160 ms is normal (2 misses of 96, then 5). Frame rate held and there were no console errors. The drop check never puts a part back or pulls the cord, so it does not reach the press-home change. It passed (exit 0, 96 of 96) earlier on 2026-10-12, before the change. A rerun on a quiet machine is still to do (not one of this plan's Done-when items).
+- **Waiting on the owner:** the phone round with sound on. Hear and feel each moment, check a blocked part is silent, mute holds after a reload, and nothing plays before Start.
 
-So the status stays `approved`, not `done`, until `verify:phone` passes reliably and the owner has listened on the phone.
+Every item an agent can check passes, so the status is `done`. The owner's phone check above is still to come.

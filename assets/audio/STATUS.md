@@ -2,9 +2,9 @@
 
 Updated 2026-10-12.
 
-All ten sounds ship in `game/public/audio/`, 22.9 KB (22,931 bytes) of the 250 KB budget. Each one is a **stand-in** until the owner records the real machine (ADR 0018). The cord, the failed start and the engine start are to be replaced first.
+All ten sounds ship in `game/public/audio/`, 29.3 KB (29,332 bytes) of the 250 KB budget. Each one is a **stand-in** until the owner records the real machine (ADR 0018). The cord, the failed start and the engine start are to be replaced first.
 
-They are the first choices in `docs/reference/sound-shortlist.md`. The owner downloaded the shortlist and on 2026-10-12 wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The other downloads stay in `assets/audio/source/`, on this machine only (the folder is not committed). Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
+They are the first choices in `docs/reference/sound-shortlist.md`, except `start`. The owner downloaded the shortlist and on 2026-10-12 wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The other downloads stay in `assets/audio/source/`, on this machine only (the folder is not committed). Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
 
 On 2026-10-12 each chosen sound's Freesound page was checked again: all ten link their licence to `creativecommons.org/publicdomain/zero/1.0/` (CC0 1.0). A CC-BY page, checked the same way as a control, linked `licenses/by/4.0/`.
 
@@ -21,9 +21,11 @@ Trims were chosen from the waveforms (peak envelopes, onsets, spectral centroid)
 | seat | seat.ogg | 815493 xkeril, mechanical switch latch 02 | 0.07–0.30 | -3.5 | 0.23 s | 1,450 | -3.7 | -17.9 | stand-in |
 | cord | cord.ogg | 450929 kyles, cord pull start | 0.02–0.62 | +0.5 | 0.60 s | 3,558 | -5.7 | -18.1 | stand-in, replace first |
 | fail | fail.ogg | 450951 kyles, won't start, false starts | 17.59–18.49 | -2.5 | 0.90 s | 4,823 | -8.5 | -17.9 | stand-in, replace first |
-| start | start.ogg | 443239 damsur, chainsaw start | 1.58–2.56 | +5 | 0.98 s | 5,963 | -4.9 | -17.9 | stand-in, replace first |
+| start | start.ogg | 118971 esperri, chainsaw start | 0.04–2.56 | -16 | 2.52 s | 12,364 | -7.7 | -17.5 | stand-in, replace first |
 
 Fades are in `sounds.json`. Only `fail` has a fade-in (10 ms). Blender's volume keys step in 10 ms frames, and a fade-in swallowed any click within about 20 ms of the cut, so the others start on the quiet just before their onset, with no fade-in.
+
+**Why `start` changed (2026-10-12).** The first choice, damsur 443239, gave only 0.98 s of engine: its file is two short pull-and-catch tries split by 0.38 s of digital silence. The owner's recommendation named "damsur 443239 or esperri 118971", so `start` now uses esperri 118971 (CC0 1.0, page checked 2026-10-12). Its waveform shows the engine firing fast all through (at or above 125 Hz, against damsur's 20–40 Hz cranking), revved three times, with quiet dips between the revs and no digital silence. Then the firing slows (125 to 59 Hz) as it dies away. It has no cord pull, which suits a sound that plays just after `cord`. Its original has six identical channels, which add up in Blender's mono mix, so it needs -16 dB.
 
 ## What to listen for
 
@@ -33,7 +35,7 @@ Nobody has listened to these yet. When the owner does, check:
 - `give-unbolt`: the clack is quiet in the original (peak -26 dBFS), so it is raised 18 dB. Hiss may be audible in its 50 ms tail.
 - `turn`: the original is stereo with its two channels partly out of phase (correlation -0.32). Blender's mono mix loses some of the click.
 - `fail`: picked from the waveform as the stretch after the last pull that sounds lower and more broken up than the pulls. It may not be a cough.
-- `start`: 0.98 s, not 2.5 s. The original holds two short pull-and-catch attempts split by 0.38 s of digital silence, with no long run. The second is used. See `docs/open-questions.md`.
+- `start`: picked from the waveform as the engine already running. Check that it sounds like a start and not three separate pulls. The original touches full scale on 10 samples.
 - `seat`: the author recorded it on an iPhone. The noise floor is about -65 dB in the original, which is fine.
 
 ## How to change them
