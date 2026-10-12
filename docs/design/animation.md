@@ -59,6 +59,21 @@ The hand is the player's pointer. It follows the pointer with a short smoothing,
 
 Input is not blocked during an animation, except a new loosen, carry or put-back during the toolbox sequence (above). The reducer has already accepted the action; the animation only shows it.
 
+## The customer (plan 0015, ADRs 0007, 0015 and 0025)
+
+One person per round stands 0.35 m behind the bench's far edge, facing the mechanic, and plays one clip at a time with a 0.2 s blend (`render/customer.ts`, `render/customerpose.ts`). Only the clock and the cord move them; part events never do (ADR 0007).
+
+| Event | Clip | Then |
+| --- | --- | --- |
+| `started` | `idle` (4 s loop: breathing, a slow weight shift) | loops |
+| `patience`, waiting (50 percent) | `waiting` (1.5 s: looks at the wrist) | `idle` |
+| `patience`, annoyed (20 percent) | `annoyed` (1 s: crosses the arms) | `annoyed_idle` (2 s loop, foot tapping) |
+| `pulled`, not started | `failed_pull` (1.2 s: hands to hips, head shakes) | the resting loop for the mood |
+| `ended` | `pleased` (0.85 s: nods and claps) | held on the last frame |
+| `left` | `leaving` (1.6 s: turns and walks off) | hidden |
+
+The files also carry plan 0017's `arrive`, `pay_leave` and `storm_off` (ADR 0026), not yet played. A figure that arrives late starts in the resting loop for the current mood.
+
 ## Motion defaults
 
 Kept in one file, `game/src/render/motion.ts`. A part's `motion.duration`, `axis` and `turns` override these.
