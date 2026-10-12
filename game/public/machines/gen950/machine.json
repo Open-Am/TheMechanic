@@ -149,12 +149,12 @@
       "requires": ["recoil_starter"],
       "hiddenBy": ["recoil_starter"],
       "inspectOk": "The lead is sound. No cracks or burns on the core.",
-      "placeholder": { "shape": "box", "size": [0.022, 0.04, 0.05], "position": [0.131, 0.19, -0.075], "color": "#151515" },
+      "placeholder": { "shape": "box", "size": [0.022, 0.04, 0.05], "position": [0.131, 0.17, -0.02], "color": "#151515" },
       "explode": [0.1, 0, 0],
       "motion": { "type": "unbolt", "axis": "x" },
       "fasteners": [
-        {"id": "ignition_coil.bolt_1", "kind": "bolt", "position": [0.142, 0.204, -0.075], "axis": [1, 0, 0]},
-        {"id": "ignition_coil.bolt_2", "kind": "bolt", "position": [0.142, 0.176, -0.075], "axis": [1, 0, 0]}
+        {"id": "ignition_coil.bolt_1", "kind": "bolt", "position": [0.142, 0.184, -0.02], "axis": [1, 0, 0]},
+        {"id": "ignition_coil.bolt_2", "kind": "bolt", "position": [0.142, 0.156, -0.02], "axis": [1, 0, 0]}
       ]
     },
     {
