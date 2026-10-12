@@ -47,7 +47,7 @@ export function mountDiagnostic(root: HTMLElement, game: Game): void {
       : "none";
     const log = game.log.map((a) => `${(a.t / 1000).toFixed(1)}s ${a.type} ${a.partId ?? ""}`).join("\n  ");
     panel.textContent = [
-      `fps ${fps}  lighting ${document.documentElement.dataset.lighting ?? "-"}  model ${document.documentElement.dataset.model ?? "-"}`,
+      `fps ${fps}  lighting ${document.documentElement.dataset.lighting ?? "-"}  model ${document.documentElement.dataset.model ?? "-"}  bench ${document.documentElement.dataset.bench ?? "-"}`,
       `fault ${game.faultId ?? "-"}  culprit ${game.culprit ?? "-"}  fixed ${s.fixed}`,
       `customer ${game.customerName ?? "-"}  patience ${Math.round(game.patience() * 100)}%  leaves at ${game.walkOutAt === null ? "-" : (game.walkOutAt / 1000).toFixed(1) + "s"}  outcome ${game.outcome ?? "-"}`,
       `last refusal: ${refusal}`,

@@ -1,44 +1,21 @@
-// Orbit camera maths, written in the project because OrbitControls cannot hand a drag over to the pull gesture.
-// Pure: the scene copies position() onto the Three.js camera.
+// Camera helpers shared by the scene and the tray pictures. Pure.
+//
+// Since plan 0016 (ADR 0025) the scene's camera no longer orbits the machine: render/stage.ts frames it from a standing
+// mechanic's eye and turns the machine instead. What stays here: the orbit position the tray pictures still use for
+// their three-quarter view, fitting a sphere in view, world size per pixel, and the turning rates and limits.
 
 import type { Vec3 } from "../core/index.ts";
-
-export interface OrbitLimits {
-  minDistance: number;
-  maxDistance: number;
-  /** Polar angle from straight up, in radians. */
-  minPolar: number;
-  maxPolar: number;
-}
 
 export interface OrbitState {
   /** Azimuth around the up axis, radians. 0 looks at the front (+Z) of the machine. */
   azimuth: number;
+  /** Polar angle from straight up, radians. */
   polar: number;
   distance: number;
 }
 
-/** Radians of rotation per CSS pixel of drag. */
+/** Radians of turn per CSS pixel of drag. */
 export const ROTATE_PER_PX = 0.008;
-
-export function clampOrbit(s: OrbitState, l: OrbitLimits): OrbitState {
-  return {
-    azimuth: s.azimuth,
-    polar: Math.min(l.maxPolar, Math.max(l.minPolar, s.polar)),
-    distance: Math.min(l.maxDistance, Math.max(l.minDistance, s.distance)),
-  };
-}
-
-/** Dragging right turns the machine right (the camera goes left); dragging down tilts to look from above. */
-export function rotate(s: OrbitState, dxPx: number, dyPx: number, l: OrbitLimits): OrbitState {
-  return clampOrbit({ ...s, azimuth: s.azimuth - dxPx * ROTATE_PER_PX, polar: s.polar - dyPx * ROTATE_PER_PX }, l);
-}
-
-/** factor > 1 moves away, < 1 moves closer. */
-export function zoom(s: OrbitState, factor: number, l: OrbitLimits): OrbitState {
-  if (!(factor > 0) || !Number.isFinite(factor)) return s;
-  return clampOrbit({ ...s, distance: s.distance * factor }, l);
-}
 
 export function position(s: OrbitState, target: Vec3): Vec3 {
   const sinP = Math.sin(s.polar);
@@ -59,113 +36,18 @@ export function fitDistance(radius: number, fovY: number, aspect: number, margin
   return (radius * margin) / Math.sin(fov / 2);
 }
 
-// ---- Framing above the controls (release 0.9.3) ----
-
-export const FRAME = {
-  /** The machine always gets at least this share of the view's height, however tall the controls grow. */
-  minFreeShare: 0.4,
-} as const;
-
-/**
- * Frames the machine in the part of the view the controls leave free: `coverPx` CSS px at the bottom of a view
- * `widthPx` by `heightPx` are covered by the pull cord and the tray. Returns how far to move the picture up (CSS px, a
- * view offset on the camera) and how much farther the camera must stand than the whole-view fit for the machine to fit
- * the free part. On a narrow portrait screen the width decides the fit, so the scale stays 1 and the machine keeps its
- * size; it only moves up.
- */
-export function frameAbove(fovY: number, widthPx: number, heightPx: number, coverPx: number): { shiftPx: number; distanceScale: number } {
-  if (!(coverPx > 0) || !(heightPx > 0) || !(widthPx > 0)) return { shiftPx: 0, distanceScale: 1 };
-  const free = Math.max(heightPx * FRAME.minFreeShare, heightPx - coverPx);
-  const fovFree = 2 * Math.atan((Math.tan(fovY / 2) * free) / heightPx);
-  const scale = fitDistance(1, fovFree, widthPx / free) / fitDistance(1, fovY, widthPx / heightPx);
-  return { shiftPx: (heightPx - free) / 2, distanceScale: Math.max(1, scale) };
-}
-
-/** A y in normalised device coordinates of a view moved up by `shiftPx`, in the unmoved frustum the orbit maths uses. */
-export function unshiftNdcY(ndcY: number, shiftPx: number, heightPx: number): number {
-  return ndcY - (2 * shiftPx) / heightPx;
-}
-
 /** World units per CSS pixel at `distance` from a perspective camera. */
 export function worldPerPixel(distance: number, fovY: number, viewportHeightPx: number): number {
   return (2 * distance * Math.tan(fovY / 2)) / viewportHeightPx;
 }
 
-// ---- Turning by the hand (plan 0010, ADR 0020) ----
+// ---- Turning by the hand (plan 0010, ADR 0020; the solver is turnStageToward in stage.ts since plan 0016) ----
 
 export const TURN = {
-  /** Most the camera may move in one step, radians on each of azimuth and tilt. */
+  /** Most the view may change in one step, radians on each of its two variables. */
   maxStep: 0.15,
   /** Radians used to estimate how the held point moves on screen. */
   eps: 1e-3,
   /** CSS px the held point may lag the pointer before the hand lets go and grabs again under the pointer. */
   regripPx: 60,
 } as const;
-
-const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const dot3 = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const unit3 = (a: Vec3): Vec3 => {
-  const l = Math.hypot(a[0], a[1], a[2]);
-  return l > 1e-12 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0];
-};
-
-/**
- * Where `point` lands on screen, in normalised device coordinates (-1 to 1, y up), for a camera orbiting `target`
- * with the world's up as up, as the scene's camera does. Null if the point is behind the camera.
- */
-export function projectPoint(s: OrbitState, target: Vec3, point: Vec3, fovY: number, aspect: number): [number, number] | null {
-  const eye = position(s, target);
-  const f = unit3(sub3(target, eye));
-  const r = unit3(cross3(f, [0, 1, 0]));
-  const u = cross3(r, f);
-  const d = sub3(point, eye);
-  const z = dot3(d, f);
-  if (z <= 1e-6) return null;
-  const t = Math.tan(fovY / 2);
-  return [dot3(d, r) / (z * t * aspect), dot3(d, u) / (z * t)];
-}
-
-/**
- * One step of turning the camera so that `point` (the spot the hand holds) moves towards the pointer at `ndc`: a
- * Newton step on azimuth and tilt, its screen motion estimated numerically, each change capped at TURN.maxStep.
- */
-export function turnToward(s: OrbitState, l: OrbitLimits, target: Vec3, point: Vec3, ndc: [number, number], fovY: number, aspect: number): OrbitState {
-  const p0 = projectPoint(s, target, point, fovY, aspect);
-  const pa = projectPoint({ ...s, azimuth: s.azimuth + TURN.eps }, target, point, fovY, aspect);
-  const pp = projectPoint({ ...s, polar: s.polar + TURN.eps }, target, point, fovY, aspect);
-  if (!p0 || !pa || !pp) return s;
-  const j00 = (pa[0] - p0[0]) / TURN.eps;
-  const j01 = (pp[0] - p0[0]) / TURN.eps;
-  const j10 = (pa[1] - p0[1]) / TURN.eps;
-  const j11 = (pp[1] - p0[1]) / TURN.eps;
-  const det = j00 * j11 - j01 * j10;
-  if (Math.abs(det) < 1e-9) return s;
-  const ex = ndc[0] - p0[0];
-  const ey = ndc[1] - p0[1];
-  const cap = (v: number) => Math.max(-TURN.maxStep, Math.min(TURN.maxStep, v));
-  const da = cap((j11 * ex - j01 * ey) / det);
-  const dp = cap((-j10 * ex + j00 * ey) / det);
-  return clampOrbit({ ...s, azimuth: s.azimuth + da, polar: s.polar + dp }, l);
-}
-
-// ---- Things standing on the ground beside the machine (plan 0012, release 0.11.1) ----
-
-/** Where the camera starts: the default view. */
-export const DEFAULT_ORBIT = { azimuth: 0.55, polar: 1.12 } as const;
-
-/**
- * Where the toolbox stands, in machine radii from the machine's centre, as seen from the default camera: `ahead` towards
- * the camera, `left` to its left; `turn` radians from facing the camera. Since 0.11.1 it stands to the left of the
- * machine, level with its front, so the left screen edge cuts it and only its open back tray and the tools show,
- * beside the machine (the owner's choice on 2026-10-12). Before, it stood 1.85 radii in front, where it looked bigger
- * than the generator.
- */
-export const TOOLBOX_PLACE = { ahead: 0.6, left: 1.3, turn: -1.2 } as const;
-
-/** A spot on the ground `ahead` and `left` machine radii from the centre as a camera at `azimuth` sees it, and its turn. */
-export function groundPlace(azimuth: number, radius: number, place: { ahead: number; left: number; turn: number }): { x: number; z: number; rotationY: number } {
-  const s = Math.sin(azimuth);
-  const c = Math.cos(azimuth);
-  return { x: (s * place.ahead - c * place.left) * radius, z: (c * place.ahead + s * place.left) * radius, rotationY: azimuth + place.turn };
-}

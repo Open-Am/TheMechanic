@@ -11,7 +11,10 @@
 // bar with Start disabled, today's fault scored once then practice, Share text on the clipboard, a daily left mid-round
 // reading "Not finished" (ADR 0024), the next day's daily, and a round with localStorage throwing. Plan 0013 adds sound
 // and vibration: nothing fetched before Start, the moments each action fires (read from a dev hook, so it works with no
-// sound files), the vibrations, a blocked part and the walk-out silent, and mute kept over a reload. Exits 1 on any failure.
+// sound files), the vibrations, a blocked part and the walk-out silent, and mute kept over a reload. Plan 0016 adds the
+// workbench: the bench under the machine, the generator's share of the width at both phone sizes, a customer's head
+// line under the timer, a sideways drag turning the machine and not the camera, and the toolbox on the bench's left end.
+// Exits 1 on any failure.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -207,7 +210,9 @@ type HandState = { visible: boolean; closed: number; action: string; holding: st
 const probe = (id: string) => evaluate<Probe | null>(`window.__openAmDevRender.probe(${JSON.stringify(id)})`);
 const looseNow = () => evaluate<string[]>("window.__openAmDevRender.loose()");
 const handNow = () => evaluate<HandState>("window.__openAmDevRender.hand()");
-const orbitNow = () => evaluate<{ azimuth: number; polar: number }>("window.__openAmDevRender.orbit()");
+/** The view (plan 0016): the machine's turn on the bench, the camera's rise, where the camera stands. */
+type StageNow = { yaw: number; lift: number; zoom: number; eye: [number, number, number]; pitch: number; framing: { widthShare: number; headPx: number; bottomPx: number; distance: number; pitch: number } };
+const stageNow = () => evaluate<StageNow>("window.__openAmDevRender.stage()");
 const trayAt = () =>
   evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('.tray-host').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
 async function doubleTap(x: number, y: number): Promise<void> {
@@ -451,10 +456,10 @@ async function noteHidden(where: string): Promise<void> {
   const share = await evaluate<number>("window.__openAmDevRender.handHidden()");
   if (process.env.HIDDEN_DEBUG && share > 0.05) {
     const need = await evaluate<number>("window.__openAmDevRender.handNeed()");
-    const o = await orbitNow();
+    const o = await stageNow();
     // The whole-machine check's last ask and what it applied, capped at HAND.maxPush: "needs" is on top of "applied".
     const push = await evaluate<{ asked: number; applied: number } | null>("window.__openAmDevRender.handPush()");
-    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; asked ${((push?.asked ?? 0) * 100).toFixed(1)} cm, applied ${((push?.applied ?? 0) * 100).toFixed(1)} cm; azimuth ${o.azimuth.toFixed(2)} polar ${o.polar.toFixed(2)}`);
+    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; asked ${((push?.asked ?? 0) * 100).toFixed(1)} cm, applied ${((push?.applied ?? 0) * 100).toFixed(1)} cm; yaw ${o.yaw.toFixed(2)} lift ${o.lift.toFixed(2)}`);
     if (share > HIDDEN_LIMIT) await screenshot(`hidden-${where.replace(/[^a-z0-9]+/gi, "-")}`);
   }
   if (share > worstHidden.share) worstHidden = { share, where };
@@ -508,13 +513,13 @@ async function noteHidden(where: string): Promise<void> {
       // A drag on the blocked tank, and on the hose that could come off but is not loose, turns the machine.
       for (const [id, p] of [["fuel_tank", tank], ["fuel_hose", await probe("fuel_hose")]] as const) {
         if (!p) continue;
-        const before = await orbitNow();
+        const before = await stageNow();
         const dx = p.dir.headOn ? 0 : p.dir.x;
         const dy = p.dir.headOn ? 1 : p.dir.y;
         await drag(p.x, p.y, p.x + dx * 70, p.y + dy * 70);
         await sleep(300);
-        const after = await orbitNow();
-        const turned = Math.abs(after.azimuth - before.azimuth) + Math.abs(after.polar - before.polar) > 0.01;
+        const after = await stageNow();
+        const turned = Math.abs(after.yaw - before.yaw) + Math.abs(after.lift - before.lift) > 0.01;
         if (!turned || (await trayHas(id)) || (await looseNow()).includes(id)) failures.push(`drag: pulling ${id} without loosening it did not just turn the machine`);
         else checks.push(`a drag on ${id} (${id === "fuel_tank" ? "blocked" : "not loose"}) turns the machine`);
       }
@@ -814,7 +819,7 @@ try {
   await screenshot("fail-sound");
 }
 
-// The toolbox (plan 0012, ADR 0021; placed off to the left in release 0.11.1). At 390 by 844 and 360 by 640, in the
+// The toolbox (plan 0012, ADR 0021; on the bench's left end since plan 0016). At 390 by 844 and 360 by 640, in the
 // default view, with the tray at every size from empty to all twelve chips: the toolbox stands to the left of the
 // machine, cut by the left screen edge (with the tray empty), with its tools in view above the controls; no point of
 // it is drawn over the machine or under the pull cord or a tray chip. Then a loosening in the default view (the recoil
@@ -886,6 +891,51 @@ async function checkToolboxInView(label: string): Promise<void> {
   if (ok) toolboxChecks.push(`at ${label}, with the tray empty to full, the toolbox stands left of the machine, cut by the screen edge, its tools in view, drawn clear of the machine and the controls (${worst})`);
 }
 
+// The workbench (plan 0016, ADR 0025), in the default view with the tray empty: the bench model (not the fallback box)
+// is drawn under the machine, its near edge below the machine's lowest point; the generator fills 55 to 65 percent of
+// the width at 390 by 844 and at least 40 percent on the shorter screen, with a 1.76 m customer's head line under the
+// timer; a sideways drag on empty space turns the machine and leaves the camera exactly where it was; the toolbox
+// stands on the bench (its lowest point drawn above the bench's near edge, behind it).
+const benchChecks: string[] = [];
+type BenchRect = { bench: Rect | null; machine: Rect | null; nearEdgeY: number; kind: string; screen: { width: number; height: number } };
+const HEAD_LINE_PX = 82; // FRAMING.topPx + FRAMING.headMarginPx in game/src/render/stage.ts
+async function checkBench(label: string): Promise<void> {
+  await evaluate("window.__openAmDevRender.resetStage()");
+  await standInChips(0);
+  await idle();
+  await settled();
+  const b = await evaluate<BenchRect>("window.__openAmDevRender.benchRect()");
+  const s = await stageNow();
+  const tb = await evaluate<ToolboxRect | null>("window.__openAmDevRender.toolboxRect([])");
+  const fail = (why: string): void => {
+    failures.push(`bench: at ${label} ${why}`);
+  };
+  if (!b.bench || !b.machine) return fail("the bench or the machine is not drawn");
+  const share = (b.machine.right - b.machine.left) / b.screen.width;
+  const say = `machine ${Math.round(b.machine.left)} to ${Math.round(b.machine.right)} px across (${(share * 100).toFixed(1)}% of the width), lowest at ${Math.round(b.machine.bottom)} px; bench near edge at ${Math.round(b.nearEdgeY)} px; camera ${s.eye[1].toFixed(2)} m high, ${s.framing.distance.toFixed(2)} m back, ${((s.pitch * 180) / Math.PI).toFixed(1)} degrees down; a 1.76 m head at ${Math.round(s.framing.headPx)} px`;
+  if (b.kind !== "glb") fail(`the bench is the fallback box, not bench.glb (${say})`);
+  else if (!(b.bench.top < b.machine.bottom && b.nearEdgeY > b.machine.bottom && b.bench.left < b.machine.left && b.bench.right > b.machine.right)) fail(`the bench is not under the machine (${say})`);
+  else if (b.screen.width === 390 && b.screen.height === 844 && !(share >= 0.55 && share <= 0.65)) fail(`the generator is not 55 to 65 percent of the width (${say})`);
+  else if (!(share >= 0.4)) fail(`the generator is under 40 percent of the width (${say})`);
+  else if (!(s.framing.headPx >= HEAD_LINE_PX - 0.5)) fail(`a 1.76 m customer's head would be under the timer (${say})`);
+  else if (!tb?.toolbox || !(tb.toolbox.bottom < b.nearEdgeY)) fail(`the toolbox is not standing on the bench (${say})`);
+  else benchChecks.push(`at ${label}: the bench is under the machine; ${say}`);
+  // A sideways drag on empty space, clear of the diagnostic panel: the machine turns, the camera does not move.
+  const before = await stageNow();
+  const y = Math.round(b.screen.height * 0.24);
+  await drag(Math.round(b.screen.width * 0.72), y, Math.round(b.screen.width * 0.72) - 70, y, 12);
+  await sleep(300);
+  const after = await stageNow();
+  const moved = Math.hypot(after.eye[0] - before.eye[0], after.eye[1] - before.eye[1], after.eye[2] - before.eye[2]);
+  if (!(Math.abs(after.yaw - before.yaw) > 0.2)) fail(`a sideways drag did not turn the machine (yaw ${before.yaw.toFixed(3)} to ${after.yaw.toFixed(3)})`);
+  else if (moved > 1e-6 || after.lift !== before.lift) fail(`a sideways drag moved the camera ${(moved * 1000).toFixed(2)} mm (lift ${before.lift} to ${after.lift})`);
+  else benchChecks.push(`at ${label} a sideways drag turned the machine ${(((after.yaw - before.yaw) * 180) / Math.PI).toFixed(0)} degrees and left the camera where it was`);
+  await idle();
+  await screenshot(`20-turned-${label}`);
+  await evaluate("window.__openAmDevRender.resetStage()");
+  await sleep(200);
+}
+
 /** Loosens a part with fasteners and watches the trip. Returns false if the part was never in view. */
 /**
  * How far (CSS px) the sleeve may reach into the machine's rectangle on screen while the hand is at the toolbox in the
@@ -952,6 +1002,7 @@ async function watchTrip(id: string, label: string, shot: string | null, interru
     await toBriefing();
     await beginRound();
     if (!(await evaluate<boolean>("window.__openAmDevRender.hasToolbox()"))) throw new Error("the game has no toolbox (toolbox.glb missing?)");
+    await checkBench("390x844");
     await checkToolboxInView("390x844");
     if (!(await watchTrip("recoil_starter", DEFAULT_TRIP, "18-hand-taking-tool-390x844", null, true))) failures.push("toolbox: the recoil starter was not in view");
     if (!(await watchTrip("alternator_cover", "alternator cover", null, "fuel_hose"))) failures.push("toolbox: the alternator cover was never in view");
@@ -960,6 +1011,7 @@ async function watchTrip(id: string, label: string, shot: string | null, interru
     await load(url);
     await toBriefing();
     await beginRound();
+    await checkBench("360x640");
     await checkToolboxInView("360x640");
     if (!(await watchTrip("recoil_starter", "recoil starter from the default view at 360x640", "18-hand-taking-tool-360x640", null, true))) failures.push("toolbox: the recoil starter was not in view at 360x640");
   } catch (e) {
@@ -1115,6 +1167,8 @@ console.log(`Sound: ${soundChecks.join("; ") || "not run"}; files decoded: ${sou
 console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done up again on ${[...fastenedBackIn].join(", ") || "none"}; tools seen: ${[...toolsSeen].join(", ") || "none"}`);
 if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
 for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
+console.log(`Bench: ${benchChecks.join("; ") || "not run"}`);
+if (benchChecks.length !== 4 && !failures.some((x) => x.startsWith("bench:"))) failures.push("bench: the bench checks did not all run");
 console.log(`Toolbox: ${toolboxChecks.join("; ") || "not run"}`);
 console.log(`Trips: ${tripsRead} watched frame by frame; the hand's path inside the machine's bounds on ${throughMachine.length}${throughMachine.length ? ` (${[...new Set(throughMachine)].join(", ")})` : ""}`);
 // In the default view the toolbox and the machine are both in front of the camera: the trip must not hide the hand.

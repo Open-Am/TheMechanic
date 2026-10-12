@@ -210,3 +210,34 @@ describe("the bench, the customer's spot and the toolbox (plan 0016, ADRs 0021 a
     }
   });
 });
+
+describe("loading the bench, or drawing a box in its place (plan 0016, ADR 0025)", () => {
+  it("finds the bench in bench.glb by name and takes it out of the file's scene", async () => {
+    const { Group } = await import("three");
+    const { pickBench, renderFileCount } = await import("../src/render/model.ts");
+    const scene = new Group();
+    const node = new Group();
+    node.userData = { name: "bench" };
+    scene.add(node);
+    expect(pickBench(scene)).toBe(node);
+    expect(node.parent).toBeNull();
+    expect(pickBench(new Group())).toBeNull();
+    expect(pickBench(null)).toBeNull();
+    // The loading bar counts the bench as one more file.
+    expect(renderFileCount("hand.glb", "tools.glb", "toolbox.glb", "bench.glb")).toBe(7);
+  });
+
+  it("without the file the bench is a plain box-shaped one, its top at the bench height, never moved by the model's absence", async () => {
+    const { Box3 } = await import("three");
+    const { createBench } = await import("../src/render/bench.ts");
+    const fallback = createBench(null);
+    fallback.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(fallback);
+    expect(box.max.y).toBeCloseTo(BENCH.top, 6);
+    expect(box.min.y).toBeCloseTo(0, 6);
+    expect(box.max.x - box.min.x).toBeCloseTo(BENCH.width, 6);
+    expect(box.max.z).toBeCloseTo(BENCH_EDGES.near, 6);
+    expect(box.min.z).toBeCloseTo(BENCH_EDGES.far, 6);
+    expect(fallback.getObjectByName("bench_fallback")).toBeTruthy();
+  });
+});
