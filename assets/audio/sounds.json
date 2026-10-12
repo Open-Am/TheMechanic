@@ -110,16 +110,16 @@
       "gainDb": -2.5
     },
     "start": {
-      "source": "443239__damsur__chainsaw-start.wav",
-      "url": "https://freesound.org/people/damsur/sounds/443239/",
-      "author": "damsur",
+      "source": "118971__esperri__chainsaw-start.wav",
+      "url": "https://freesound.org/people/esperri/sounds/118971/",
+      "author": "esperri",
       "licence": "CC0 1.0",
       "fetched": "2026-10-12",
-      "start": 1.58,
+      "start": 0.04,
       "end": 2.56,
       "fadeIn": 0,
-      "fadeOut": 0.2,
-      "gainDb": 5
+      "fadeOut": 0.25,
+      "gainDb": -16
     }
   }
 }

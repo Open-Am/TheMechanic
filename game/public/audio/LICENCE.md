@@ -14,4 +14,4 @@ Written by `npm run audio` from `assets/audio/sounds.json`; do not edit by hand.
 | seat.ogg | https://freesound.org/people/xkeril/sounds/815493/ | xkeril | CC0 1.0 | 2026-10-12 | 0.07–0.30 s |
 | cord.ogg | https://freesound.org/people/kyles/sounds/450929/ | kyles | CC0 1.0 | 2026-10-12 | 0.02–0.62 s |
 | fail.ogg | https://freesound.org/people/kyles/sounds/450951/ | kyles | CC0 1.0 | 2026-10-12 | 17.59–18.49 s |
-| start.ogg | https://freesound.org/people/damsur/sounds/443239/ | damsur | CC0 1.0 | 2026-10-12 | 1.58–2.56 s |
+| start.ogg | https://freesound.org/people/esperri/sounds/118971/ | esperri | CC0 1.0 | 2026-10-12 | 0.04–2.56 s |
