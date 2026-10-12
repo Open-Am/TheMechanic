@@ -15,8 +15,8 @@
 //   bench         on the bench top's near edge, below the generator;
 //   mid-controls  half-way down the controls (pull cord and tray);
 //   hint          on the "Drop it here" label;
-//   flick         a fast flick downward, released over the generator a little above the zone (it counts where it was
-//                 heading);
+//   flick         a fast flick downward from 200 px above, released over the generator a little above the zone (it
+//                 counts where it was heading);
 //   magnet        released beside the generator, a little above the zone, within the magnet's reach;
 //   chips         right on top of the chips already in the tray (on the last one).
 // Each removal is:
@@ -479,18 +479,16 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
     const to = await dropPoint(place, start.x);
     const from = { x: start.x, y: start.y + 15 };
     if (place === "flick") {
-      // Brought to 160 px above the release at a walk, then flicked down: four 40 px moves 8 ms apart, and the thumb
-      // lifts while still moving, so the release is reported above the zone.
-      const via = { x: to.x, y: Math.max(from.y, to.y - 160) };
+      // Brought to 200 px above the release at a walk (up first if the part starts lower), then flicked down: five
+      // 40 px moves sent back to back, and the thumb lifts while still moving, so the release is reported above the zone.
+      const via = { x: to.x, y: Math.max(100, to.y - 200) };
       for (let i = 1; i <= 12; i++) {
         await move(from.x + ((via.x - from.x) * i) / 12, from.y + ((via.y - from.y) * i) / 12);
         await sleep(16);
       }
+      await sleep(120); // a beat at the top, as a thumb gathers itself
       const flick = Math.max(4, Math.round((to.y - via.y) / 40));
-      for (let i = 1; i <= flick; i++) {
-        await move(to.x, via.y + ((to.y - via.y) * i) / flick);
-        await sleep(8);
-      }
+      for (let i = 1; i <= flick; i++) await move(to.x, via.y + ((to.y - via.y) * i) / flick);
       await up(to.x, to.y);
     } else {
       const steps = 24;
@@ -502,6 +500,7 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
       await sleep(30);
       await up(to.x, to.y);
     }
+    if (DEBUG) console.log(`   released at ${JSON.stringify(to)} flick ${JSON.stringify(await evaluate("window.__openAmDevRender.lastFlick ? window.__openAmDevRender.lastFlick() : null"))}`);
     if (await waitFor("in the tray", () => trayHas(id), 2000).catch(() => false)) {
       row.how = String((await evaluate<string | null>(`window.__openAmDevRender.lastDrop ? window.__openAmDevRender.lastDrop() : null`)) ?? "?");
       // Let the chips glide into their new rows, then check every chip shows (release 0.15.1).

@@ -931,6 +931,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   /** How the last carry ended, for the browser check. */
   let lastDrop: "finger" | "flick" | "back" | null = null;
+  /** The last release judged for a flick, for the browser check. */
+  let lastFlick: unknown = null;
 
   /** A world point on screen, CSS px. */
   function toScreen(world: Vector3): { x: number; y: number } {
@@ -1018,6 +1020,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     lastDrop = toTray ? "finger" : "back";
     if (!toTray && t !== null) {
       const ahead = flickAhead(c.samples, { x, y, t });
+      lastFlick = { release: { x, y, t }, samples: c.samples.slice(-8), ahead };
       if (ahead) toTray = overTray(ahead, partAt ? { x: partAt.x + ahead.x - x, y: partAt.y + ahead.y - y } : null, machine);
       if (toTray) lastDrop = "flick";
     }
@@ -1578,6 +1581,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       benchEdge: () => toScreen(new Vector3(0, BENCH.top, BENCH_EDGES.near)),
       /** How the last carry ended: "finger" or "flick" into the tray, or "back". */
       lastDrop: () => lastDrop,
+      lastFlick: () => lastFlick,
       /** The lowest screen y (CSS px) of any vertex of the machine still drawn, and the part it belongs to. */
       machineBottom: () => {
         view.root.updateMatrixWorld();
