@@ -65,3 +65,4 @@ Work this creates, for plans: the patience rule, customers.json and the result s
 - 2026-10-10: proposed by Claude, from the owner's feedback quoted above and their choices of a patience meter with walk-out, a 3D customer, and a 3D hand on pulls.
 - 2026-10-10: accepted by the owner, who wrote "Approved".
 - 2026-10-11: its paragraph "The mechanic's hand", including "It is visible only while it acts", is replaced by ADR 0020 (the hand follows the pointer). The rest of this ADR stays in force.
+- 2026-10-12: ADR 0026 adds how the customer brings the generator, pays when it is fixed, and storms off with it on a walk-out, and starts the timer when the generator lands. The rest of this ADR stands.
