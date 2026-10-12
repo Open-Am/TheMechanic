@@ -392,9 +392,23 @@ async function toBriefing(button = ".start .free"): Promise<void> {
   await waitFor("Start enabled", () => evaluate<boolean>("document.querySelector('.briefing .primary')?.disabled === false"), 60000);
   await sleep(300);
 }
+/**
+ * After Start (plan 0017): the customer brings the generator. A tap skips the arrival (ADR 0026), on the right of the
+ * screen, clear of the diagnostic panel (a tap there folds it); then wait for the clock.
+ * `natural` lets the arrival play out instead.
+ */
+async function arrival(natural = false): Promise<void> {
+  if (!natural) {
+    await sleep(250);
+    const w = await evaluate<number>("window.innerWidth");
+    if (await evaluate<boolean>("!!window.__openAmDevRender.story()")) await tapAt(w * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
+  }
+  await waitFor("the generator on the bench and the clock running", () => evaluate<boolean>("window.__openAmDevRender.running()"), 15000);
+}
 async function beginRound(): Promise<void> {
   await tapSelector(".briefing .primary");
   await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+  await arrival();
   await evaluate("window.__openAmDevRender.watchTrips(true)"); // plan 0012: the page logs each trip to the toolbox
 }
 async function load(pageUrl: string): Promise<void> {
@@ -481,6 +495,7 @@ async function noteHidden(where: string): Promise<void> {
 {
   await tapSelector(".briefing .primary");
   await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+  await arrival();
   await idle();
   if (await evaluate<boolean>("window.__openAmDevRender.hasHand()")) {
     const hose = await probe("fuel_hose");
@@ -578,13 +593,19 @@ async function noteHidden(where: string): Promise<void> {
         if ((await trayHas("fuel_hose")) || !(await looseNow()).includes("fuel_hose")) failures.push("drop: a part dropped away from the tray did not go back loose");
         else checks.push("a loose part dropped away from the tray goes back, still loose");
       }
-    } else failures.push("checks: the fuel hose or tank was not in view");
+    } else {
+      failures.push(`checks: the fuel hose or tank was not in view (hose ${JSON.stringify(hose)}, tank ${JSON.stringify(tank)}, story ${JSON.stringify(await evaluate("window.__openAmDevRender.story()"))}, stage ${JSON.stringify(await stageNow())})`);
+      await screenshot("fail-hose-tank");
+    }
   }
   // Back to a fresh round for the faults.
   await load(url);
 }
 
 /** Plays the running round's fault to the result screen, as a player does. Returns the fault and the shown total. */
+let watchEnding = false;
+/** Plan 0017: called right after the winning pull, to watch the ending, when watchEnding is set. */
+let onWinningPull: (() => Promise<void>) | null = null;
 async function solveRound(): Promise<{ faultId: string; score: string }> {
   const m = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
   if (!m) throw new Error("diagnostic overlay did not show the fault");
@@ -612,7 +633,16 @@ async function solveRound(): Promise<{ faultId: string; score: string }> {
   await tapSelector(".card .close");
   for (const id of [...order].reverse()) await putBack(id);
   await tapSelector(".pull");
-  await waitFor("the result screen", () => evaluate<boolean>("!!document.querySelector('.result')"), 5000);
+  // The customer pays and leaves before the result (plan 0017): skip it unless the caller watches it.
+  if (watchEnding && onWinningPull) await onWinningPull();
+  if (!watchEnding) {
+    await sleep(300);
+    if (await evaluate<boolean>("!!window.__openAmDevRender.story()")) {
+      const w = await evaluate<number>("window.innerWidth");
+      await tapAt(w * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
+    }
+  }
+  await waitFor("the result screen", () => evaluate<boolean>("!!document.querySelector('.result')"), 9000);
   return { faultId: fault.id, score: await evaluate<string>("document.querySelector('.result .total').textContent") };
 }
 
@@ -1172,9 +1202,10 @@ const controlsTop = () => evaluate<number>("document.querySelector('.controls').
       await putBack(first);
     }
     await solveRound();
-    const pleased = (await customerNow())?.clip;
-    if (pleased === "pleased") customerChecks.push("solving plays pleased");
-    else failures.push(`customer: solving played ${pleased}`);
+    // Solving ends with paying and leaving (plan 0017); solveRound skipped it, so the customer is gone.
+    const gone = await customerNow();
+    if (!gone?.shown) customerChecks.push("solving ends with the customer gone (pay_leave, skipped)");
+    else failures.push(`customer: after solving the customer was still shown in ${gone.clip}`);
   } catch (e) {
     failures.push(`customer clips: ${(e as Error).message}`);
     await screenshot("fail-customer-clips");
@@ -1206,6 +1237,120 @@ const controlsTop = () => evaluate<number>("document.querySelector('.controls').
   await load(url);
 }
 
+// Bringing the generator, paying, storming off (plan 0017 step 5, ADR 0026). Frames of each to OPEN_AM_ENDING_SHOTS.
+interface StoryNow {
+  clip: string;
+  t: number;
+  generator: "carried" | "bench";
+  notes: boolean;
+  machineShown: boolean;
+}
+const storyNow = () => evaluate<StoryNow | null>("window.__openAmDevRender.story()");
+const endingChecks: string[] = [];
+const endingShots = process.env.OPEN_AM_ENDING_SHOTS ?? outDir;
+mkdirSync(endingShots, { recursive: true });
+/** Watches a story clip to its end, saving a frame at each of `marks` seconds; returns what was seen. */
+async function watchStory(clip: string, marks: number[], name: string): Promise<{ timerDuring: Set<string>; notes: boolean; carried: boolean; bench: boolean; lastT: number }> {
+  const seen = { timerDuring: new Set<string>(), notes: false, carried: false, bench: false, lastT: 0 };
+  let next = 0;
+  for (const end = Date.now() + 9000; Date.now() < end; ) {
+    const st = await storyNow();
+    if (!st || st.clip !== clip) {
+      if (seen.lastT > 0) break;
+      await sleep(40);
+      continue;
+    }
+    seen.lastT = st.t;
+    if (clip === "arrive" && st.generator === "carried") seen.timerDuring.add((await textOf(".timer")) ?? "");
+    if (st.notes) seen.notes = true;
+    if (st.generator === "carried") seen.carried = true;
+    if (st.generator === "bench") seen.bench = true;
+    if (next < marks.length && st.t >= marks[next]!) {
+      await shotTo(endingShots, `${name}-${String(next + 1).padStart(2, "0")}-${st.t.toFixed(2)}s`);
+      next++;
+    }
+    await sleep(15);
+  }
+  return seen;
+}
+try {
+  // The arrival, played out: the timer stays at 0:00 while the generator is carried, then the clock runs.
+  await load(url.replace("?diag", "?diag&patience=600"));
+  await toBriefing();
+  const t0 = Date.now();
+  await tapSelector(".briefing .primary");
+  const a = await watchStory("arrive", [0.2, 0.8, 1.4, 1.9, 2.3, 2.9], "arrive");
+  await waitFor("the clock running", () => evaluate<boolean>("window.__openAmDevRender.running()"), 6000);
+  const landedAfter = (Date.now() - t0) / 1000;
+  if (a.carried && [...a.timerDuring].every((x) => x === "0:00") && a.timerDuring.size > 0) endingChecks.push(`the timer read 0:00 while the generator was carried; the clock ran ${landedAfter.toFixed(1)} s after Start`);
+  else failures.push(`ending: during the arrival the timer read ${[...a.timerDuring].join(", ") || "nothing"} (carried ${a.carried})`);
+  const away = await evaluate<string[]>("window.__openAmDevRender.partsAway()");
+  if (away.length) failures.push(`ending: after the arrival parts were away: ${away.join(", ")}`);
+
+  // A fixed round: the customer pays (the notes shown), takes the generator and leaves, then the result.
+  watchEnding = true;
+  let pay = { timerDuring: new Set<string>(), notes: false, carried: false, bench: false, lastT: 0 };
+  onWinningPull = async () => {
+    pay = await watchStory("pay_leave", [0.3, 0.9, 1.3, 1.8, 2.4, 3.2], "pay_leave");
+  };
+  await solveRound();
+  onWinningPull = null;
+  watchEnding = false;
+  if (pay.notes && pay.bench && pay.carried) endingChecks.push(`a fixed round: the notes shown, the generator lifted from the bench and carried off, ${pay.lastT.toFixed(1)} s, then the result`);
+  else failures.push(`ending: pay_leave saw notes ${pay.notes}, on the bench ${pay.bench}, carried ${pay.carried}`);
+
+  // Skips: a tap during the arrival lands it at once; a tap during the ending goes to the result.
+  await tapSelector(".result .primary");
+  await atStart();
+  await toBriefing();
+  await tapSelector(".briefing .primary");
+  await waitFor("the arrival", async () => ((await storyNow())?.clip === "arrive" ? true : null), 5000);
+  await sleep(400);
+  const w = await evaluate<number>("window.innerWidth");
+  const skipAt = Date.now();
+  await tapAt(w * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
+  await waitFor("the clock running", () => evaluate<boolean>("window.__openAmDevRender.running()"), 3000);
+  endingChecks.push(`a tap skipped the arrival: the clock ran ${((Date.now() - skipAt) / 1000).toFixed(2)} s after it`);
+  watchEnding = true;
+  let skip2 = Date.now();
+  onWinningPull = async () => {
+    await waitFor("pay_leave", async () => ((await storyNow())?.clip === "pay_leave" ? true : null), 8000);
+    await sleep(500);
+    skip2 = Date.now();
+    await tapAt(w * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
+  };
+  await solveRound();
+  onWinningPull = null;
+  watchEnding = false;
+  const toResult = (Date.now() - skip2) / 1000;
+  if (toResult < 1.6) endingChecks.push(`a tap skipped paying and leaving: the result ${toResult.toFixed(2)} s after it`);
+  else failures.push(`ending: after a tap on the ending the result took ${toResult.toFixed(2)} s`);
+
+  // The walk-out with a part off: it snaps back, the tray empties, they storm off with a whole generator.
+  await tapSelector(".result .primary");
+  await atStart();
+  await load(url.replace("?diag", "?diag&patience=20"));
+  await toBriefing();
+  await beginRound();
+  const mm = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
+  const fault = faultFile.faults.find((f) => f.id === mm?.[1]);
+  const first = fault ? removalOrder(machine, fault)[0]! : null;
+  if (first) await pullOff(first);
+  await waitFor("storm_off", async () => ((await storyNow())?.clip === "storm_off" ? true : null), 40000);
+  const storm = await watchStory("storm_off", [0.05, 0.4, 0.9, 1.3, 1.8, 2.3], "storm_off");
+  const awayAfter = await evaluate<string[]>("window.__openAmDevRender.partsAway()");
+  const trayHidden = await evaluate<boolean>("document.querySelector('.tray-host').hidden");
+  await waitFor("the walked result", () => evaluate<boolean>("!!document.querySelector('.result.walked')"), 8000);
+  if (storm.carried && storm.bench && awayAfter.length === 0 && trayHidden) endingChecks.push(`a walk-out with ${first ?? "nothing"} off: it snapped back on, the tray emptied, the customer stormed off with it (${storm.lastT.toFixed(1)} s), then the result`);
+  else failures.push(`ending: storm_off carried ${storm.carried}, bench ${storm.bench}, parts away ${awayAfter.join(", ") || "none"}, tray hidden ${trayHidden}`);
+} catch (e) {
+  failures.push(`ending: ${(e as Error).message}`);
+  await screenshot("fail-ending");
+}
+watchEnding = false;
+onWinningPull = null;
+await load(url);
+
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
 if (failures.length === 0) {
   await toBriefing();
@@ -1226,12 +1371,13 @@ if (failures.length === 0) {
   await load(url.replace("?diag", "?diag&patience=5"));
   await toBriefing();
   await tapSelector(".briefing .primary");
+  await arrival();
   await evaluate<void>("(window.__openAmDevAudio?.clear(), window.__vibrations = [], undefined)");
   // The customer's clips through the walk-out (plan 0015): annoyed, then leaving before the result screen.
   const walkClips: string[] = [];
   let annoyedShot = false;
   const watching = (async () => {
-    for (const end = Date.now() + 14000; Date.now() < end; ) {
+    for (const end = Date.now() + 18000; Date.now() < end; ) {
       const c = await customerNow().catch(() => null);
       if (c?.clip && walkClips[walkClips.length - 1] !== c.clip) walkClips.push(c.clip);
       if (c?.clip === "annoyed_idle" && !annoyedShot) {
@@ -1245,10 +1391,10 @@ if (failures.length === 0) {
   await sleep(3000);
   if (await evaluate<boolean>("!document.querySelector('.speech').hidden")) await screenshot("5-customer-line");
   else failures.push("walk-out: the customer said nothing at 50 percent patience");
-  walkedOk = await waitFor("the walked result", () => evaluate<boolean>("!!document.querySelector('.result.walked')"), 12000).catch(() => false);
+  walkedOk = await waitFor("the walked result", () => evaluate<boolean>("!!document.querySelector('.result.walked')"), 16000).catch(() => false);
   await watching;
-  if (walkClips.indexOf("annoyed") >= 0 && walkClips.indexOf("leaving") > walkClips.indexOf("annoyed")) customerChecks.push(`the walk-out played ${walkClips.join(", ")}`);
-  else failures.push(`customer: the walk-out played ${walkClips.join(", ") || "nothing"}, not annoyed then leaving`);
+  if (walkClips.indexOf("annoyed") >= 0 && walkClips.indexOf("storm_off") > walkClips.indexOf("annoyed")) customerChecks.push(`the walk-out played ${walkClips.join(", ")}`);
+  else failures.push(`customer: the walk-out played ${walkClips.join(", ") || "nothing"}, not annoyed then storm_off`);
   if (walkedOk) await screenshot("6-walked");
   else failures.push("walk-out: no walked result screen after the patience ran out");
   const walkHeard = await evaluate<unknown[]>("window.__openAmDevAudio?.log() ?? []");
@@ -1371,6 +1517,8 @@ if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its 
 for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
 console.log(`Bench: ${benchChecks.join("; ") || "not run"}`);
 console.log(`Customer: ${customerChecks.join("; ") || "not run"}`);
+console.log(`Bringing and endings: ${endingChecks.join("; ") || "not run"}`);
+if (endingChecks.length < 5 && !failures.some((x) => x.startsWith("ending"))) failures.push("ending: the plan 0017 checks did not all run");
 if (benchChecks.length !== 4 && !failures.some((x) => x.startsWith("bench:"))) failures.push("bench: the bench checks did not all run");
 console.log(`Toolbox: ${toolboxChecks.join("; ") || "not run"}`);
 console.log(`Trips: ${tripsRead} watched frame by frame; the hand's path inside the machine's bounds on ${throughMachine.length}${throughMachine.length ? ` (${[...new Set(throughMachine)].join(", ")})` : ""}`);
