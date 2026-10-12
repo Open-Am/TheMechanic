@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, FLICK, flickAhead, screenDirection } from "../src/render/gesture.ts";
+import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, FLICK, flickAhead, screenBounds, screenDirection } from "../src/render/gesture.ts";
 import { alongPath, CARRY, exitDistance, carryPose, carryProgress, FASTEN, fastenerPose, legSeconds, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, overPath, pathLength, poseAt, resolveMotion, segmentHitsBox, spannerSwing, TRIP, tripPlan, turnCounter, turnsCrossed, type Bounds } from "../src/render/motion.ts";
 import { fitDistance, position, worldPerPixel } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
@@ -987,6 +987,21 @@ describe("the machine's shadow on the bench top (plan 0016 step 2, ADR 0025)", (
     const bake = readFileSync(new URL("../../tools/blender/bake_ground.py", import.meta.url), "utf8");
     expect(Number(/^SPAN_FACTOR = ([0-9.]+)/m.exec(bake)?.[1])).toBe(SHADOW_SPAN);
     expect(shadowSpan([0.367, 0.375, 0.312])).toBeCloseTo(0.367 * SHADOW_SPAN, 9);
+  });
+});
+
+describe("the generator's bounds on screen (release 0.15.1)", () => {
+  it("is the smallest rectangle holding every point", () => {
+    expect(screenBounds([{ x: 10, y: 50 }, { x: 40, y: 20 }, { x: 25, y: 80 }])).toEqual({ left: 10, top: 20, right: 40, bottom: 80 });
+  });
+
+  it("skips points that did not project (behind the camera)", () => {
+    expect(screenBounds([{ x: NaN, y: 0 }, { x: 5, y: Infinity }, { x: 3, y: 4 }])).toEqual({ left: 3, top: 4, right: 3, bottom: 4 });
+  });
+
+  it("is null with no point", () => {
+    expect(screenBounds([])).toBeNull();
+    expect(screenBounds([{ x: NaN, y: NaN }])).toBeNull();
   });
 });
 

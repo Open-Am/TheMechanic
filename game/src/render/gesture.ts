@@ -127,3 +127,13 @@ export function flickAhead(samples: readonly PointerSample[], release: PointerSa
   if (vy < FLICK.minSpeed || Math.abs(vx) > vy * 2) return null;
   return { x: release.x + vx * FLICK.aheadMs, y: release.y + vy * FLICK.aheadMs };
 }
+
+/** The smallest screen rectangle holding every finite point, or null if there is none (release 0.15.1). */
+export function screenBounds(points: ReadonlyArray<{ x: number; y: number }>): { left: number; top: number; right: number; bottom: number } | null {
+  let box: { left: number; top: number; right: number; bottom: number } | null = null;
+  for (const { x, y } of points) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    box = box ? { left: Math.min(box.left, x), top: Math.min(box.top, y), right: Math.max(box.right, x), bottom: Math.max(box.bottom, y) } : { left: x, top: y, right: x, bottom: y };
+  }
+  return box;
+}

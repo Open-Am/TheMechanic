@@ -31,7 +31,7 @@ import {
 import { type Cue, giveMoment, type Moment } from "../app/moments.ts";
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.ts";
-import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, flickAhead, GESTURE, type PointerSample, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
+import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, flickAhead, GESTURE, type PointerSample, screenBounds, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
 import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, overPath, pathLength, poseAt, resolveMotion, spannerSwing, TIMING, tripPlan, turnCounter, type Pose, type TripStep, type TripTool } from "./motion.ts";
 import { TURN, worldPerPixel } from "./orbit.ts";
 import { BENCH, BENCH_EDGES, cameraPose, clampStage, wrapAngle, DEFAULT_STAGE, DEFAULT_YAW, frameBench, type Framing, projectMachinePoint, rotateStage, stageLimits, type StageLimits, type StageState, TOOLBOX_ON_BENCH, turnStageToward, zoomStage } from "./stage.ts";
@@ -947,26 +947,27 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   /** The last release judged for a flick, for the browser check. */
   let lastFlick: unknown = null;
 
-  /** A world point on screen, CSS px. */
-  function toScreen(world: Vector3): { x: number; y: number } {
-    const rect = renderer.domElement.getBoundingClientRect();
+  /** A world point on screen, CSS px. `rect` is the canvas's rectangle, read once by a caller projecting many points. */
+  function toScreen(world: Vector3, rect: DOMRect = renderer.domElement.getBoundingClientRect()): { x: number; y: number } {
     const v = world.clone().project(camera);
     return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
   }
 
-  /** The generator's bounds on screen as drawn now, from its outline points (release 0.15.1). */
+  /**
+   * The generator's bounds on screen as drawn now, from its outline points (release 0.15.1). Projected again only when
+   * the camera, the machine's turn or the canvas changed: during a carry none of them does, so a pointer move costs a
+   * key comparison instead of 256 projections and a layout read per point (perf follow-up to 0.15.1).
+   */
+  let boundsCache: { key: string; box: ScreenBox | null } | null = null;
   function machineOnScreen(): ScreenBox | null {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const p = camera.position;
+    const key = `${p.x},${p.y},${p.z},${camera.rotation.x},${camera.aspect},${turntable.rotation.y},${rect.left},${rect.top},${rect.width},${rect.height}`;
+    if (boundsCache?.key === key) return boundsCache.box;
     view.root.updateMatrixWorld();
-    let box: ScreenBox | null = null;
     const v = new Vector3();
-    for (const p of machinePoints) {
-      v.set(p[0], p[1], p[2]);
-      const at = toScreen(view.root.localToWorld(v));
-      if (!Number.isFinite(at.x) || !Number.isFinite(at.y)) continue;
-      box = box
-        ? { left: Math.min(box.left, at.x), top: Math.min(box.top, at.y), right: Math.max(box.right, at.x), bottom: Math.max(box.bottom, at.y) }
-        : { left: at.x, top: at.y, right: at.x, bottom: at.y };
-    }
+    const box = screenBounds(machinePoints.map((m) => toScreen(view.root.localToWorld(v.set(m[0], m[1], m[2])), rect)));
+    boundsCache = { key, box };
     return box;
   }
 

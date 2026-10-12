@@ -113,6 +113,11 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   }
 
   let carrying = false;
+  /** While carrying: the controls' rectangle (they do not change mid-carry, release 0.9.3), the zone's state as shown. */
+  let carryRect: DOMRect | null = null;
+  let dropOver = false;
+  let dropTop = "";
+  const controlsRect = (): DOMRect => (carrying ? (carryRect ??= controls.getBoundingClientRect()) : controls.getBoundingClientRect());
   function update(): void {
     tray.refresh();
     pull.disabled = carrying || !game.running || game.state.tray.length > 0;
@@ -258,17 +263,28 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   return {
     overTray(finger, part, machine) {
       if (hud.hidden) return false;
-      return dropTarget(finger, machine, { width: window.innerWidth, height: window.innerHeight }, controls.getBoundingClientRect(), part) === "tray";
+      return dropTarget(finger, machine, { width: window.innerWidth, height: window.innerHeight }, controlsRect(), part) === "tray";
     },
     setDropState(state, machine) {
       const on = state !== "none";
-      controls.classList.toggle("carrying", on);
-      dropZone.classList.toggle("over", state === "over");
-      dropZone.hidden = !on;
-      if (on) dropZone.style.top = `${Math.max(0, Math.round(dropLine(machine, controls.getBoundingClientRect())))}px`;
+      // Written only when something changes, and the controls' rectangle is read once per carry, so a pointer move
+      // does not write the page and read its layout back each time (perf follow-up to 0.15.1).
       if (on !== carrying) {
         carrying = on;
+        carryRect = null;
+        controls.classList.toggle("carrying", on);
+        dropZone.hidden = !on;
         pull.disabled = carrying || !game.running || game.state.tray.length > 0;
+      }
+      if ((state === "over") !== dropOver) {
+        dropOver = state === "over";
+        dropZone.classList.toggle("over", dropOver);
+      }
+      if (!on) return;
+      const top = `${Math.max(0, Math.round(dropLine(machine, controlsRect())))}px`;
+      if (top !== dropTop) {
+        dropTop = top;
+        dropZone.style.top = top;
       }
     },
     setLoading(done, total) {
