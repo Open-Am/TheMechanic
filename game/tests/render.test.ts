@@ -1095,8 +1095,12 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(r.smile - r.running).toBeGreaterThan(2);
     // The smile comes before the notes, and lines up with pay_leave: notes out 0.55 s in, taken 1.45 s in.
     expect(r.payStart).toBeGreaterThan(r.smile);
-    expect(r.payStart - r.smile).toBeCloseTo(0.55, 9);
-    expect(r.payEnd - r.smile).toBeCloseTo(1.45, 9);
+    expect(r.payStart - r.smile).toBeCloseTo(STORY.pay_leave.notesShown, 9);
+    expect(r.payEnd - r.smile).toBeCloseTo(STORY.pay_leave.notesTaken, 9);
+    // The notes go to the mechanic's pocket while it still runs, before the hand goes to the switch (the owner, 2026-10-12).
+    expect(r.pocketed).toBeGreaterThan(r.payEnd);
+    expect(r.press).toBeGreaterThan(r.pocketed);
+    for (const t of frames(r.payEnd, r.pocketed)) expect(runShake(r, t)).toBe(1);
     for (const t of frames(r.smile, r.press)) expect(runShake(r, t)).toBeGreaterThan(0);
     expect(r.payEnd).toBeGreaterThan(r.payStart);
     for (const t of frames(r.payStart, r.payEnd)) expect(runShake(r, t)).toBeGreaterThan(0);
@@ -1107,9 +1111,10 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(r.stopped).toBeLessThan(r.gone);
     for (const t of frames(r.stopped, r.gone + 1)) expect(runShake(r, t)).toBe(0);
     // ADR 0027 said about 4 to 5 seconds from the catch to the customer leaving; with the owner's longer run
-    // (ADR 0027 history, 2026-10-12) and the customer's whole pay_leave clip after the hold, about 7.5 to 8 seconds.
+    // (ADR 0027 history, 2026-10-12), the notes pocketed and the customer's pay_leave clip after its hold: about 8 to 9 s
+    // with today's clip (it grows if pay_leave does).
     expect(r.gone - r.catch).toBeGreaterThanOrEqual(7);
-    expect(r.gone - r.catch).toBeLessThanOrEqual(8);
+    expect(r.gone - r.catch).toBeLessThanOrEqual(STARTUP.runAlone + STORY.pay_leave.notesTaken + STARTUP.pocket + STARTUP.switchReach + STARTUP.press + STARTUP.windDown + STORY.pay_leave.length - STORY.pay_leave.hold + 1e-9);
     expect(r.gone - r.stopped).toBeCloseTo(STORY.pay_leave.length - STORY.pay_leave.hold, 9);
     // The customer's hold (1.7 s into pay_leave) comes after the notes are taken and before the press.
     expect(r.smile + STORY.pay_leave.hold).toBeGreaterThan(r.payEnd);

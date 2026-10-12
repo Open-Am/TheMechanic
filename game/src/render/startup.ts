@@ -42,12 +42,14 @@ export const STARTUP = {
   hazeIn: 0.6,
   /** The engine runs on its own after the catch, nothing else happening: the shake settles, the haze builds. */
   runAlone: 3.0,
-  /** Then the customer smiles (about 0.6 s): the start of their pay_leave clip (plan 0017). */
+  /** Then the customer smiles: the start of their pay_leave clip (plan 0017), until the notes come out. */
   smile: STORY.pay_leave.notesShown,
-  /** Then the notes are held out and the hand takes them: pay_leave shows the notes from 0.55 s to 1.45 s, so the smile
-   * is the clip's first 0.55 s and the hold its next 0.9 s (ADR 0026). */
+  /** Then the notes are held out across the bench and the hand takes them, as pay_leave shows them (ADR 0026). */
   payHold: STORY.pay_leave.notesTaken - STORY.pay_leave.notesShown,
-  /** The hand moves from the notes to the red switch and presses it; the rocker flips by switchAngle about X. */
+  /** The hand brings the notes back towards the mechanic and off the bottom of the screen, pocketing them, while the
+   * engine still runs (the owner, 2026-10-12: the money exchange must be seen). */
+  pocket: 0.6,
+  /** The hand moves from the pocket to the red switch and presses it; the rocker flips by switchAngle about X. */
   switchReach: 0.45,
   press: 0.15,
   switchAngle: -16 * DEG,
@@ -173,6 +175,8 @@ export interface RunTimes {
   /** The customer holds out the notes (ADR 0026), and the hand has them: 0.55 s and 1.45 s into pay_leave. */
   payStart: number;
   payEnd: number;
+  /** The notes are in the mechanic's pocket, off the bottom of the screen. */
+  pocketed: number;
   /** The hand reaches the red switch and presses it; the rocker has flipped and the engine starts winding down. */
   press: number;
   pressed: number;
@@ -186,10 +190,11 @@ export function runTimes(catchAt: number): RunTimes {
   const smile = catchAt + STARTUP.runAlone;
   const payStart = smile + STARTUP.smile;
   const payEnd = payStart + STARTUP.payHold;
-  const press = payEnd + STARTUP.switchReach;
+  const pocketed = payEnd + STARTUP.pocket;
+  const press = pocketed + STARTUP.switchReach;
   const pressed = press + STARTUP.press;
   const stopped = pressed + STARTUP.windDown;
-  return { catch: catchAt, running: catchAt + STARTUP.rampIn, smile, payStart, payEnd, press, pressed, stopped, gone: stopped + STARTUP.carryOff };
+  return { catch: catchAt, running: catchAt + STARTUP.rampIn, smile, payStart, payEnd, pocketed, press, pressed, stopped, gone: stopped + STARTUP.carryOff };
 }
 
 /** The shake's size as a share of the running shake: 0 before the catch, a kick, 1 while running, 0 once stopped. */

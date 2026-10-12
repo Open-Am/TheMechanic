@@ -1290,6 +1290,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   }
   let startup: Startup | null = null;
   let startups = 0;
+  /** The copy of the customer's notes in the mechanic's hand, from taking them to the pocket. */
+  let handNotes: Object3D | null = null;
+  function dropHandNotes(): void {
+    if (handNotes) handNotes.removeFromParent();
+    handNotes = null;
+  }
 
   const machineDir = (x: number, y: number, z: number): Vector3 => {
     view.root.updateMatrixWorld(true);
@@ -1325,6 +1331,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     view.root.position.copy(rootRest.p);
     view.root.rotation.z = rootRest.r;
     exhaust.clear();
+    dropHandNotes();
     if (s.did.has("run") && !s.did.has("fade")) engine({ type: "stop", seconds: 0.2 });
     s.done();
   }
@@ -1396,16 +1403,42 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           customer.holdAt(STORY.pay_leave.hold);
         }
       });
-      const grips = s.paying ? customer?.grips() : null;
-      if (grips && t >= r.payStart && t < r.payEnd) {
-        const at = grips.right.clone();
-        if (t < r.payEnd - 0.3) hand?.point(at, toCamera(at));
-        else hand?.grab(at, toCamera(at), "pinch");
+      // The money changes hands, clearly (the owner, 2026-10-12): the hand reaches across the bench to the notes the
+      // customer holds out, takes them (a copy of their notes moves into the mechanic's hand) and brings them back off
+      // the bottom of the screen, into the pocket, while the engine still runs.
+      const notesNode = s.paying ? customer?.notesObject() ?? null : null;
+      const notesAt = notesNode && notesNode.visible ? worldOf(notesNode) : (s.paying ? customer?.grips()?.right ?? null : null);
+      if (notesAt && t >= r.payStart && t < r.payEnd) {
+        if (t < r.payEnd - 0.3) hand?.point(notesAt, toCamera(notesAt));
+        else hand?.grab(notesAt, toCamera(notesAt), "pinch");
       }
-      once(s, "took-notes", r.payEnd, () => hand?.open());
+      once(s, "took-notes", r.payEnd, () => {
+        if (!notesNode) return;
+        notesNode.updateMatrixWorld(true);
+        const copy = notesNode.clone();
+        notesNode.matrixWorld.decompose(copy.position, copy.quaternion, copy.scale);
+        copy.visible = true;
+        copy.traverse((o) => o.layers.enableAll());
+        scene.add(copy);
+        handNotes = copy;
+      });
+      if (t >= r.payEnd && t < r.pocketed) {
+        const fwd = camera.getWorldDirection(new Vector3());
+        const down = new Vector3(0, -1, 0).applyQuaternion(camera.quaternion);
+        const pocket = camera.position.clone().addScaledVector(fwd, 0.42).addScaledVector(down, 0.26);
+        hand?.grab(pocket, toCamera(pocket), "pinch");
+      }
+      if (handNotes) {
+        const k = Math.min(1, (t - r.payEnd) / 0.15);
+        handNotes.position.lerp(handAt(), k);
+      }
+      once(s, "pocketed", r.pocketed, () => {
+        dropHandNotes();
+        hand?.open();
+      });
       const sw = worldOf(pullNodes.switch);
       const front = machineDir(0, 0, 1);
-      if (sw && t >= r.payEnd && t < r.press) hand?.point(sw.clone().addScaledVector(front, 0.01), front);
+      if (sw && t >= r.pocketed && t < r.press) hand?.point(sw.clone().addScaledVector(front, 0.01), front);
       if (sw && t >= r.press && t < r.pressed + 0.15) hand?.grab(sw, front, "pinch");
       if (pullNodes.switch) {
         const rest = nodeRest.get(pullNodes.switch)!;
@@ -1870,7 +1903,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         const handleOut = pullNodes.handle ? pullNodes.handle.position.distanceTo(nodeRest.get(pullNodes.handle)!.p) : null;
         const ropeLen = pullNodes.rope ? pullNodes.rope.scale.x * ropeRest : null;
         const r = s.plan.run;
-        const phase = s.t < 0 ? "homing" : s.plan.pull && s.t < s.plan.pull.release ? "pull" : r ? (s.t < r.smile ? "running" : s.t < r.payEnd ? "paying" : s.t < r.pressed ? "switch" : s.t < r.stopped ? "winding-down" : "leaving") : "cough";
+        const phase = s.t < 0 ? "homing" : s.plan.pull && s.t < s.plan.pull.release ? "pull" : r ? (s.t < r.smile ? "running" : s.t < r.payEnd ? "paying" : s.t < r.pocketed ? "pocketing" : s.t < r.pressed ? "switch" : s.t < r.stopped ? "winding-down" : "leaving") : "cough";
         return {
           t: s.t,
           phase,
@@ -1881,6 +1914,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           roll: view.root.rotation.z - rootRest.r,
           switchAngle: pullNodes.switch ? 2 * Math.asin(Math.min(1, Math.abs(pullNodes.switch.quaternion.clone().multiply(nodeRest.get(pullNodes.switch)!.q.clone().invert()).x))) : null,
           sprites: exhaust.alive(),
+          notesInHand: !!handNotes,
           handHolding: hand?.holding ?? null,
           customerClip: story?.clip ?? null,
           stops: [...s.stops],

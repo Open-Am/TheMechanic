@@ -51,6 +51,8 @@ export interface CustomerStage {
   seek(t: number): void;
   /** World positions of the right and left hands' grip points, or null without a figure. */
   grips(): { right: Vector3; left: Vector3 } | null;
+  /** The notes prop in the right hand, or null without a figure: the mechanic's hand takes a copy (plan 0018). */
+  notesObject(): Object3D | null;
   /** Shows or hides the notes in the right hand (ADR 0026). */
   setNotes(shown: boolean): void;
   /** The group at the customer's spot (for measuring on screen). */
@@ -246,6 +248,9 @@ export function createCustomerStage(scene: Scene, camera: Camera, load: Customer
       if (!storyClip || !action) return;
       action.time = Math.max(0, Math.min(t, action.getClip().duration));
       mixer?.update(0);
+    },
+    notesObject() {
+      return (attached ? cache.get(attached)?.file?.scene.getObjectByName(`${attached}_notes`) : null) ?? null;
     },
     grips() {
       if (!attached || !root.visible) return null;
