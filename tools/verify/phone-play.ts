@@ -255,6 +255,11 @@ async function carryTo(id: string, x: number, y: number, tx: number, ty: number)
 
 /** Removes a part as a player does (ADR 0020): double tap to loosen it, then drag it to the tray. */
 async function pullOff(id: string): Promise<void> {
+  // Each part starts from the default view, as a player turns the machine back to face them (plan 0016): the retry
+  // turns below would otherwise pile up from part to part and leave a part on the front seen edge-on, where the hand
+  // working on it is hidden behind the machine past HAND.maxPush (the known gap, release 0.9.4).
+  await idle();
+  await evaluate("window.__openAmDevRender.resetStage()");
   for (let attempt = 0; attempt < 8; attempt++) {
     await idle();
     const p = await probe(id);
