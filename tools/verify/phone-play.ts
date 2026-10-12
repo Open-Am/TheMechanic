@@ -514,9 +514,11 @@ async function noteHidden(where: string): Promise<void> {
       for (const [id, p] of [["fuel_tank", tank], ["fuel_hose", await probe("fuel_hose")]] as const) {
         if (!p) continue;
         const before = await stageNow();
+        // Along the part's path, plus 40 px sideways: since plan 0016 the default view is the camera's lowest, so a drag
+        // straight up there (the tank's path) has nothing to turn, and the check is that a pull removes nothing.
         const dx = p.dir.headOn ? 0 : p.dir.x;
         const dy = p.dir.headOn ? 1 : p.dir.y;
-        await drag(p.x, p.y, p.x + dx * 70, p.y + dy * 70);
+        await drag(p.x, p.y, p.x + dx * 70 + 40, p.y + dy * 70);
         await sleep(300);
         const after = await stageNow();
         const turned = Math.abs(after.yaw - before.yaw) + Math.abs(after.lift - before.lift) > 0.01;

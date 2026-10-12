@@ -30,7 +30,9 @@ with open(os.path.join(ROOT, "tools", "pipeline", "budgets.json"), encoding="utf
 TRIANGLE_BUDGET = BUDGETS["triangles"]
 ALLOCATION = BUDGETS["allocation"]
 
-# Game camera, matching game/src/render/view.ts and orbit.ts.
+# The three-quarter view of the old orbit camera, kept for match renders and the tray pictures (thumbnails.ts). Since
+# plan 0016 the game's camera stands at a mechanic's eye over the workbench (game/src/render/stage.ts) and the machine
+# starts turned to the same three-quarter view (DEFAULT_YAW = -azimuth), seen about 12 degrees down instead of 26.
 GAME_CAMERA = {"fov_deg": 40.0, "azimuth": 0.55, "polar": 1.12, "aspect": 390 / 844}
 # Key light direction, matching LIGHTING.key.direction in game/src/render/lighting.ts (glTF axes).
 KEY_DIRECTION = (0.6, 1.4, 1.0)
