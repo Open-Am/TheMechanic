@@ -104,7 +104,7 @@ await waitFor("the dev server", async () => (await fetch(`http://localhost:${POR
 const profile = mkdtempSync(join(tmpdir(), "open-am-browser-"));
 const browser = spawn(
   browserPath,
-  ["--headless=new", `--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--enable-unsafe-swiftshader", "about:blank"],
+  ["--headless=new", `--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--enable-unsafe-swiftshader", "--mute-audio", "about:blank"],
   { stdio: "ignore" },
 );
 children.push(browser);
