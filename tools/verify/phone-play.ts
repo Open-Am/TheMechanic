@@ -522,6 +522,7 @@ async function noteHidden(where: string): Promise<void> {
     // The whole-machine check's last ask and what it applied, capped at HAND.maxPush: "needs" is on top of "applied".
     const push = await evaluate<{ asked: number; applied: number } | null>("window.__openAmDevRender.handPush()");
     console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; asked ${((push?.asked ?? 0) * 100).toFixed(1)} cm, applied ${((push?.applied ?? 0) * 100).toFixed(1)} cm; yaw ${o.yaw.toFixed(2)} lift ${o.lift.toFixed(2)}`);
+    if (share > HIDDEN_LIMIT) console.log(`   hidden by ${[...new Set(await evaluate<string[]>("window.__openAmDevRender.handHiddenBy?.() ?? []"))].join("; ")}`);
     if (share > HIDDEN_LIMIT) await screenshot(`hidden-${where.replace(/[^a-z0-9]+/gi, "-")}`);
   }
   if (share > worstHidden.share) worstHidden = { share, where };

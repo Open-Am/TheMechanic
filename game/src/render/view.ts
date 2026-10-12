@@ -1357,6 +1357,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     // The turn on the bench, then the pull.
     if (plan.turn.seconds > 0 && t <= plan.turn.seconds + dt) stage = { ...stage, yaw: turnYaw(plan.turn, t) };
     const p = plan.pull;
+    // The cord sounds as the handle comes out, even with a model that has no handle node to move.
+    if (p) once(s, "cord", p.pull, () => moment("cord"));
     if (p && pullNodes.handle) {
       const rest = nodeRest.get(pullNodes.handle)!;
       const [ox, oy, oz] = handleOffset(p, t);
@@ -1379,7 +1381,6 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         if (at) hand?.grab(at, out, "grip");
         if (pullNodes.handle) hand?.attachTo(pullNodes.handle);
       });
-      once(s, "cord", p.pull, () => moment("cord"));
       once(s, "let-go", p.recoil, () => {
         hand?.detach();
         hand?.open();
@@ -2034,6 +2035,24 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       // Share of the hand's sample points hidden behind the machine's surface from the camera: a hand that sinks into
       // the machine shows here (plan 0010 fix).
       handHidden: hiddenShare,
+      /** What hides the hand's hidden points: the hit object's name and its parents', and how far in front. */
+      handHiddenBy: () => {
+        if (!hand || !hand.visible) return [];
+        const out: string[] = [];
+        view.root.updateMatrixWorld();
+        for (const p of hand.samplePoints()) {
+          const dir = p.clone().sub(camera.position);
+          const dist = dir.length();
+          raycaster.set(camera.position, dir.normalize());
+          const hit = raycaster.intersectObject(view.root, true).find((h) => !hitMeshes.has(h.object) && shown(h.object) && (hand.holding === null || partIdOf(h.object, partIds) !== hand.holding));
+          if (hit && hit.distance < dist - 0.004) {
+            const chain: string[] = [];
+            for (let o: Object3D | null = hit.object; o && o !== view.root; o = o.parent) chain.push(o.name || "?");
+            out.push(`${chain.join("<")} ${((dist - hit.distance) * 100).toFixed(1)}cm`);
+          }
+        }
+        return out;
+      },
       /** Turns on the trip log (plan 0012); `tripLog` reads what the last trip did. */
       watchTrips: (on: boolean) => {
         watchTrips = on;
