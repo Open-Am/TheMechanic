@@ -1,5 +1,5 @@
 // Loads what the scene needs from the machine folder at startup (plan 0005 step 8): the model, its baked ground shadow,
-// and the shared environment map; and the hand, its tools and the toolbox (plans 0008, 0011, 0012). Fetched with the machine data, before the game starts; nothing is fetched after
+// and the shared environment map; and the hand, its tools, the toolbox and the workbench (plans 0008, 0011, 0012, 0016). Fetched with the machine data, before the game starts; nothing is fetched after
 // (ADR 0010). Each file is optional: whatever is missing falls back (placeholders, RoomEnvironment, a drawn shadow).
 
 import { DataTexture, EquirectangularReflectionMapping, LinearFilter, type Object3D } from "three";
@@ -21,6 +21,20 @@ export interface RenderAssets {
   tools?: Tools | null;
   /** The toolbox with the tools' slots (plan 0012), or null: the tools then come from just off screen. */
   toolbox?: Toolbox | null;
+  /** The workbench (plan 0016), or null: the view then draws a plain box-shaped bench. */
+  bench?: Object3D | null;
+}
+
+/** Picks the bench out of bench.glb by name. Null if it is not there. */
+export function pickBench(scene: Object3D | null): Object3D | null {
+  if (!scene) return null;
+  let found: Object3D | null = null;
+  scene.traverse((o) => {
+    if (!found && (o.userData?.["name"] === "bench" || o.name === "bench")) found = o;
+  });
+  const bench = found as Object3D | null;
+  bench?.removeFromParent();
+  return bench;
 }
 
 export interface Toolbox {
@@ -135,16 +149,17 @@ async function loadImage(url: string): Promise<ImageBitmap | null> {
   }
 }
 
-/** `machineBase`, `envUrl`, `handUrl`, `toolsUrl` and `toolboxUrl` are URLs relative to the page. Never throws. */
-export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null, toolsUrl: string | null = null, toolboxUrl: string | null = null, onProgress?: LoadProgress): Promise<RenderAssets> {
-  const counted = progressCounter(renderFileCount(handUrl, toolsUrl, toolboxUrl), onProgress);
-  const [model, environment, ground, hand, tools, toolbox] = await Promise.all([
+/** `machineBase`, `envUrl`, `handUrl`, `toolsUrl`, `toolboxUrl` and `benchUrl` are URLs relative to the page. Never throws. */
+export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null, toolsUrl: string | null = null, toolboxUrl: string | null = null, benchUrl: string | null = null, onProgress?: LoadProgress): Promise<RenderAssets> {
+  const counted = progressCounter(renderFileCount(handUrl, toolsUrl, toolboxUrl, benchUrl), onProgress);
+  const [model, environment, ground, hand, tools, toolbox, bench] = await Promise.all([
     counted(loadModel(`${machineBase}model.glb`)),
     counted(loadEnvironment(envUrl)),
     counted(loadImage(`${machineBase}ground.png`)),
     handUrl ? counted(loadModel(handUrl)) : Promise.resolve(null),
     toolsUrl ? counted(loadModel(toolsUrl)) : Promise.resolve(null),
     toolboxUrl ? counted(loadModel(toolboxUrl)) : Promise.resolve(null),
+    benchUrl ? counted(loadModel(benchUrl)) : Promise.resolve(null),
   ]);
-  return { model, environment, ground, hand, tools: pickTools(tools), toolbox: pickToolbox(toolbox) };
+  return { model, environment, ground, hand, tools: pickTools(tools), toolbox: pickToolbox(toolbox), bench: pickBench(bench) };
 }

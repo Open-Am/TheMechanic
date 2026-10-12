@@ -1,6 +1,6 @@
 // npm run assets: the Blender file to a validated, compressed model in the game (plan 0005, brief section 9).
-// Validate, export, bake the ground shadow, optimise, check and copy; then the hand and each customer. Stops at the
-// first step that fails.
+// Validate, export, bake the ground shadow, optimise, check and copy; then the hand, tools, toolbox, workbench and
+// each customer. Stops at the first step that fails.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -19,6 +19,9 @@ const toolsOpt = join(root, "assets", "tools", "export", "tools.optimised.glb");
 const toolboxBlend = join(root, "assets", "toolbox", "blend", "toolbox.blend");
 const toolboxGlb = join(root, "assets", "toolbox", "export", "toolbox.glb");
 const toolboxOpt = join(root, "assets", "toolbox", "export", "toolbox.optimised.glb");
+const benchBlend = join(root, "assets", "scene", "blend", "bench.blend");
+const benchGlb = join(root, "assets", "scene", "export", "bench.glb");
+const benchOpt = join(root, "assets", "scene", "export", "bench.optimised.glb");
 
 const steps = [
   ["Validate the model", blender("validate.py")],
@@ -35,6 +38,9 @@ const steps = [
   ["Validate and export the toolbox", blender("toolbox.py", toolboxBlend, "export")],
   ["Optimise the toolbox", [join(root, "tools", "pipeline", "optimise.mjs"), toolboxGlb, toolboxOpt, "--keep-empty"]],
   ["Check and copy the toolbox", [join(root, "tools", "pipeline", "check.ts"), "--toolbox"]],
+  ["Validate and export the bench", blender("bench.py", benchBlend, "export")],
+  ["Optimise the bench", [join(root, "tools", "pipeline", "optimise.mjs"), benchGlb, benchOpt]],
+  ["Check and copy the bench", [join(root, "tools", "pipeline", "check.ts"), "--bench"]],
 ];
 
 // The customers, one file per look (plan 0015, ADR 0023): each look's .blend is exported, optimised with 1024 px

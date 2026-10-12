@@ -158,7 +158,7 @@ async function start(): Promise<void> {
   document.getElementById("boot")?.remove();
 
   // The model, its ground shadow, the environment, the hand, the tools and the toolbox load behind the start and briefing screens (ADR 0014).
-  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`, `${import.meta.env.BASE_URL}hand/tools.glb`, `${import.meta.env.BASE_URL}hand/toolbox.glb`, mounted.setLoading);
+  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`, `${import.meta.env.BASE_URL}hand/tools.glb`, `${import.meta.env.BASE_URL}hand/toolbox.glb`, `${import.meta.env.BASE_URL}scene/bench.glb`, mounted.setLoading);
   try {
     view = mountRender(stage, game, assets);
   } catch (e) {
