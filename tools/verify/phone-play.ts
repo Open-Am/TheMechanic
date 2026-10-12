@@ -834,13 +834,28 @@ async function standInChips(n: number): Promise<void> {
     `(() => { const t = document.querySelector('.tray'); t.querySelectorAll('.stand-in').forEach((e) => e.remove()); const names = ${JSON.stringify(PART_NAMES)}; for (let i = 0; i < ${n}; i++) { const li = document.createElement('li'); li.className = 'chip stand-in'; const img = document.createElement('img'); img.alt = ''; li.append(img, names[i]); t.append(li); } document.querySelector('.tray-empty').hidden = ${n} > 0; })()`,
   );
 }
+/**
+ * Waits for the machine to finish gliding back down once the stand-in chips are gone (it eases to its place above the
+ * controls), so the trip that follows starts from a still view: a double tap on a gliding machine lands off the part.
+ */
+async function settled(): Promise<void> {
+  const bottom = () => evaluate<number>("window.__openAmDevRender.toolboxRect()?.machine?.bottom ?? 0");
+  let last = await bottom();
+  for (const end = Date.now() + 3000; Date.now() < end; ) {
+    await sleep(150);
+    const now = await bottom();
+    if (Math.abs(now - last) < 0.5) return;
+    last = now;
+  }
+}
 async function checkToolboxInView(label: string): Promise<void> {
   let worst = "";
   let ok = true;
   for (let n = 0; n <= PART_NAMES.length; n++) {
     await standInChips(n);
     await idle();
-    await sleep(n === 0 ? 400 : 250);
+    await sleep(150);
+    await settled();
     const avoid = await evaluate<Rect[]>("[...document.querySelectorAll('.controls .pull, .tray .chip')].map((e) => { const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; })");
     const r = await evaluate<ToolboxRect | null>(`window.__openAmDevRender.toolboxRect(${JSON.stringify(avoid)})`);
     const controlsTop = await evaluate<number>("document.querySelector('.controls').getBoundingClientRect().top");
@@ -865,6 +880,7 @@ async function checkToolboxInView(label: string): Promise<void> {
     if (!ok) break;
   }
   await standInChips(0);
+  await settled();
   if (ok) toolboxChecks.push(`at ${label}, with the tray empty to full, the toolbox stands left of the machine, cut by the screen edge, its tools in view, drawn clear of the machine and the controls (${worst})`);
 }
 
