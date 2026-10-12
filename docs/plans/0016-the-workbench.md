@@ -1,7 +1,7 @@
 ---
 id: 0016
 title: The generator on a workbench, the customer across it
-status: proposed
+status: approved
 date: 2026-10-12
 adrs: [0004, 0007, 0010, 0012, 0013, 0014, 0015, 0020, 0021, 0025]
 branch: plan/0016-the-workbench
@@ -12,6 +12,8 @@ branch: plan/0016-the-workbench
 ## Goal
 
 The generator stands on a worn wooden workbench. The camera is at a standing mechanic's eye level on the near side, and there is room across the bench for the customer (placed by plan 0015). A sideways drag turns the generator on the bench instead of moving the camera round it. The machine's shadow is baked onto the bench top and the toolbox stands on the bench's left end. Nothing changes in the rules or the score.
+
+Approved by the owner on 2026-10-12, who wrote "I accept adr 25 and plan 16".
 
 ## ADRs relied on
 

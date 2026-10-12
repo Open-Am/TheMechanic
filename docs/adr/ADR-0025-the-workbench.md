@@ -1,7 +1,7 @@
 ---
 id: 0025
 title: The generator on a workbench, the customer across it
-status: proposed
+status: accepted
 date: 2026-10-12
 supersedes: []
 superseded_by: null
@@ -38,3 +38,4 @@ The scene reads as a real roadside workshop, and the customer's face and reactio
 ## History
 
 - 2026-10-12: proposed by Claude, from the owner's choice quoted above.
+- 2026-10-12: accepted by the owner, who wrote "I accept adr 25 and plan 16".
