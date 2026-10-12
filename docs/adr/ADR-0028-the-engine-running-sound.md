@@ -15,7 +15,7 @@ ADR 0018's table gives "Engine starts: a short burst of the engine running". ADR
 
 ## Decision
 
-- The "Engine starts" moment becomes two parts: a **catch** (the engine firing up, about 0.5 to 1.5 seconds) followed by the **running** sound (a steady idle of a small two-stroke generator) that keeps playing for as long as the engine runs on screen. The running part is a seamless loop of 1 to 3 seconds, cut at zero crossings, played on repeat.
+- The "Engine starts" moment becomes two parts: a **catch** (the engine firing up, surging and settling, about 1 to 4 seconds, as real small engines do) followed by the **running** sound (a steady idle of a small two-stroke generator) that keeps playing for as long as the engine runs on screen. The running part is a seamless loop of 1 to 3 seconds, cut at zero crossings, played on repeat.
 - When the mechanic presses the switch (ADR 0027), the running sound fades out over the wind-down (about 0.8 seconds). A tap that skips the ending stops it at once.
 - Vibration is unchanged: one pattern under 300 ms at the catch.
 - The files are one recording or two (`start.ogg` for the catch and `run.ogg` for the loop), from our own recordings or CC0 only (ADR 0018, as the owner settled), listed in `game/public/audio/LICENCE.md`. All sound files together stay within 250 KB.
@@ -28,3 +28,4 @@ A fixed round ends with the sound of a generator that works, which is the payoff
 ## History
 
 - 2026-10-12: proposed by Claude, from the owner's message quoted above.
+- 2026-10-12: revised before acceptance: the catch may run 1 to 4 seconds, because no CC0 recording found settles in under 1.5 seconds and the surge is what makes it sound like a real start; it fits inside ADR 0027 run-alone phase of about 3 seconds.
