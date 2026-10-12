@@ -619,6 +619,30 @@ export interface SoundSource {
   fadeOut: number;
   /** Gain in decibels. */
   gainDb: number;
+  /** True for a sound played on repeat (ADR 0028: the engine running). */
+  loop?: boolean;
+  /** Where the repeat starts and ends, seconds into the source, inside start and end. */
+  loopStart?: number;
+  loopEnd?: number;
+}
+
+/** ADR 0028: the running sound is a seamless loop of 1 to 3 seconds. */
+export const LOOP_SECONDS = { min: 1, max: 3 } as const;
+
+/**
+ * A looping row against ADR 0028: loop points inside the trim, 1 to 3 s apart, and no fade reaching into the loop
+ * (it would dip at every seam). A row that does not loop has no loop points. Returns the problems, empty if none.
+ */
+export function checkLoop(moment: string, s: SoundSource): string[] {
+  const has = s.loopStart !== undefined || s.loopEnd !== undefined;
+  if (s.loop !== true) return has ? [`${moment}: loop points without loop: true.`] : [];
+  if (s.loopStart === undefined || s.loopEnd === undefined) return [`${moment}: loop: true needs loopStart and loopEnd.`];
+  const errors: string[] = [];
+  const { start, end, loopStart: a, loopEnd: b } = { start: s.start, end: s.end, loopStart: s.loopStart, loopEnd: s.loopEnd };
+  if (a < start || b > end || a >= b) errors.push(`${moment}: the loop ${a}–${b} s must lie inside the trim ${start}–${end} s, start before end.`);
+  else if (b - a < LOOP_SECONDS.min || b - a > LOOP_SECONDS.max) errors.push(`${moment}: the loop is ${(b - a).toFixed(3)} s; ADR 0028 asks for ${LOOP_SECONDS.min} to ${LOOP_SECONDS.max} s.`);
+  else if (start + s.fadeIn > a + 1e-9 || end - s.fadeOut < b - 1e-9) errors.push(`${moment}: a fade reaches into the loop ${a}–${b} s, so it would dip at every seam.`);
+  return errors;
 }
 
 /** LICENCE.md for the sounds in the game, written from sounds.json for the moments that have a file. */
@@ -635,7 +659,8 @@ export function licenceText(sounds: Record<string, SoundSource>, present: readon
   for (const m of present) {
     const s = sounds[m];
     if (!s) continue;
-    lines.push(`| ${m}.ogg | ${s.url ?? ""} | ${s.author ?? ""} | ${s.licence ?? ""} | ${s.fetched ?? ""} | ${s.start.toFixed(2)}–${s.end.toFixed(2)} s |`);
+    const loops = s.loop && s.loopStart !== undefined && s.loopEnd !== undefined ? `, loops ${s.loopStart.toFixed(6)}–${s.loopEnd.toFixed(6)} s` : "";
+    lines.push(`| ${m}.ogg | ${s.url ?? ""} | ${s.author ?? ""} | ${s.licence ?? ""} | ${s.fetched ?? ""} | ${s.start.toFixed(2)}–${s.end.toFixed(2)} s${loops} |`);
   }
   return lines.join("\n") + "\n";
 }
@@ -679,6 +704,7 @@ function mainAudio(root: string, argv: string[]): void {
   const files = existsSync(to) ? readdirSync(to).filter((n) => n !== "LICENCE.md").map((name) => ({ name, bytes: new Uint8Array(readFileSync(join(to, name))) })) : [];
   const licencePath = join(to, "LICENCE.md");
   const result = checkAudio(files, existsSync(licencePath) ? readFileSync(licencePath, "utf8") : null, MOMENTS, budgets.audioBytes, true);
+  for (const [m, row] of Object.entries(sounds)) result.errors.push(...checkLoop(m, row));
   for (const w of result.warnings) console.log(`warning: ${w}`);
   for (const e of result.errors) console.log(`error: ${e}`);
   console.log(`Checked ${to}: ${files.length} file(s), ${(result.bytes / 1000).toFixed(1)} KB of ${budgets.audioBytes / 1000} KB, ${result.errors.length} error(s).`);

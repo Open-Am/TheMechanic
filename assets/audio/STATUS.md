@@ -1,12 +1,12 @@
-# Sound status (plan 0013, ADR 0018)
+# Sound status (plan 0013, ADRs 0018 and 0028)
 
 Updated 2026-10-12.
 
-All ten sounds ship in `game/public/audio/`, 29.3 KB (29,332 bytes) of the 250 KB budget. Each one is a **stand-in** until the owner records the real machine (ADR 0018). The cord, the failed start and the engine start are to be replaced first.
+All eleven sounds ship in `game/public/audio/`, 50.7 KB (50,699 bytes) of the 250 KB budget: ADR 0018's ten moments, and since ADR 0028 the engine running (`run`), which loops. Each one is a **stand-in** until the owner records the real machine (ADR 0018). The cord, the failed start and the engine start are to be replaced first.
 
-They are the first choices in `docs/reference/sound-shortlist.md`, except `start`. The owner downloaded the shortlist and on 2026-10-12 wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The other downloads stay in `assets/audio/source/`, on this machine only (the folder is not committed). Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
+They are the first choices in `docs/reference/sound-shortlist.md`, except `start` and `run`, which the owner chose for ADR 0028. The owner downloaded the shortlist and on 2026-10-12 wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The other downloads stay in `assets/audio/source/`, on this machine only (the folder is not committed). Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
 
-On 2026-10-12 each chosen sound's Freesound page was checked again: all ten link their licence to `creativecommons.org/publicdomain/zero/1.0/` (CC0 1.0). A CC-BY page, checked the same way as a control, linked `licenses/by/4.0/`.
+On 2026-10-12 each chosen sound's Freesound page was checked again: all eleven link their licence to `creativecommons.org/publicdomain/zero/1.0/` (CC0 1.0). A CC-BY page, checked the same way as a control, linked `licenses/by/4.0/`.
 
 Trims were chosen from the waveforms (peak envelopes, onsets, spectral centroid), not by ear. Nobody has listened to the encoded files yet. Levels were matched on the encoded files: every file peaks between -1.5 and -8.5 dBFS. The loudest 50 ms of each is between -17.4 and -24.9 dB RMS. The sharpest clicks sit lower because their peaks limit them.
 
@@ -21,11 +21,20 @@ Trims were chosen from the waveforms (peak envelopes, onsets, spectral centroid)
 | seat | seat.ogg | 815493 xkeril, mechanical switch latch 02 | 0.07–0.30 | -3.5 | 0.23 s | 1,450 | -3.7 | -17.9 | stand-in |
 | cord | cord.ogg | 450929 kyles, cord pull start | 0.02–0.62 | +0.5 | 0.60 s | 3,558 | -5.7 | -18.1 | stand-in, replace first |
 | fail | fail.ogg | 450951 kyles, won't start, false starts | 17.59–18.49 | -2.5 | 0.90 s | 4,823 | -8.5 | -17.9 | stand-in, replace first |
-| start | start.ogg | 118971 esperri, chainsaw start | 0.04–2.56 | -16 | 2.52 s | 12,364 | -7.7 | -17.5 | stand-in, replace first |
+| start | start.ogg | 871136 ElSchorscho, chainsaw starting, idling, stopping (Husqvarna 445) | 2.84–6.80 | +4.5 | 3.96 s | 21,675 | -5.0 | -16.3 | stand-in, replace first |
+| run | run.ogg | 871135 ElSchorscho, chainsaw idle and revving (Husqvarna 445); loops 1.260229–3.508750 | 1.15–3.62 | +14.5 | 2.47 s (loop 2.249 s) | 12,056 | -7.5 | -25.2 | stand-in, replace first |
 
-Fades are in `sounds.json`. Only `fail` has a fade-in (10 ms). Blender's volume keys step in 10 ms frames, and a fade-in swallowed any click within about 20 ms of the cut, so the others start on the quiet just before their onset, with no fade-in.
+Fades are in `sounds.json`. Only `fail` has a fade-in (10 ms). `start` fades out over its last 0.3 s while `run` fades in over the same 0.3 s: the crossfade from the catch to the running engine. Blender's volume keys step in 10 ms frames, and a fade-in swallowed any click within about 20 ms of the cut, so the others start on the quiet just before their onset, with no fade-in.
 
-**Why `start` changed (2026-10-12).** The first choice, damsur 443239, gave only 0.98 s of engine: its file is two short pull-and-catch tries split by 0.38 s of digital silence. The owner's recommendation named "damsur 443239 or esperri 118971", so `start` now uses esperri 118971 (CC0 1.0, page checked 2026-10-12). Its waveform shows the engine firing fast all through (at or above 125 Hz, against damsur's 20–40 Hz cranking), revved three times, with quiet dips between the revs and no digital silence. Then the firing slows (125 to 59 Hz) as it dies away. It has no cord pull, which suits a sound that plays just after `cord`. Its original has six identical channels, which add up in Blender's mono mix, so it needs -16 dB.
+**The engine start and run (ADR 0028, 2026-10-12).** The owner wrote, after playing the preview, "the generator sound when it starts does not sound like a successful start", accepted ADR 0028, and chose the ElSchorscho Husqvarna 445 recordings ("Go with the 2 instead"). Before that, `start` was esperri 118971 (three revs dying away), and before that damsur 443239 (two short tries split by digital silence).
+
+- `start` is 2.84–6.80 s of 871136: from just before the first firing (2.86 s; the two pulls before it are left out), through the surge (loudest about 5.3 s), to the settle at idle loudness. A 3 s cut was tried and dropped: it ended at the top of the surge, 9.6 dB above the idle, so the loop would have come in as a sudden drop.
+- `run` is 1.15–3.62 s of 871135, even idle, and the game repeats 0.110229 to 2.358750 s into the file (`RUN_LOOP` in `game/src/app/moments.ts`, `loopStart` and `loopEnd` in `sounds.json`).
+  - The points were found by scoring upward zero crossings by how well the 20 ms either side of them match.
+  - They were then placed again on the decoded file, which lines up with the original to within 1 sample.
+  - Across the seam the step is 0.00101, against the loop's median step of 0.00354, and 0.00024 when resampled for a 44.1 kHz phone. The 20 ms either side correlate at 0.785, and the level 5 ms either side is -35.9 / -36.6 dB.
+- Levels: the catch's tail before its fade and the loop both measure -28.9 dB RMS, so the loop takes over at the catch's loudness. The two recordings differ by 10 dB, hence +4.5 and +14.5 dB.
+- **Re-encoding `run.ogg` moves its samples slightly** (Opus is not byte-stable). After `npm run audio`, check the seam again on the decoded file and move the loop points to the nearest upward zero crossings if they have drifted, in both `sounds.json` and `RUN_LOOP`. A test holds the two together. `npm run audio` re-encodes every file, so restore the ones you did not mean to change from git.
 
 ## What to listen for
 
@@ -35,7 +44,7 @@ Nobody has listened to these yet. When the owner does, check:
 - `give-unbolt`: the clack is quiet in the original (peak -26 dBFS), so it is raised 18 dB. Hiss may be audible in its 50 ms tail.
 - `turn`: the original is stereo with its two channels partly out of phase (correlation -0.32). Blender's mono mix loses some of the click.
 - `fail`: picked from the waveform as the stretch after the last pull that sounds lower and more broken up than the pulls. It may not be a cough.
-- `start`: picked from the waveform as the engine already running. Check that it sounds like a start and not three separate pulls. The original touches full scale on 10 samples.
+- `start` and `run`: picked from the waveforms. Check that the catch sounds like a start, that the crossfade into the idle is smooth, and that the 2.25 s idle loop does not sound repetitive or click. Both are a chainsaw, not a TG950.
 - `seat`: the author recorded it on an iPhone. The noise floor is about -65 dB in the original, which is fine.
 
 ## How to change them

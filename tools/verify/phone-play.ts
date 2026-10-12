@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { removalOrder } from "../../game/src/core/rules.ts";
 import type { FaultFile, Machine, ScoreBreakdown } from "../../game/src/core/types.ts";
 import { shareText } from "../../game/src/ui/format.ts";
+import { MOMENTS } from "../../game/src/platform/interfaces/index.ts";
 import { SILENT_AUDIO_SOURCE } from "./silent-audio.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -744,7 +745,7 @@ function sound(ok: boolean, passed: string, failed: string): void {
   if (ok) soundChecks.push(passed);
   else failures.push(`sound: ${failed}`);
 }
-const MOMENT_FILES = 10;
+const MOMENT_FILES = MOMENTS.length; // one file per moment, run.ogg included (ADR 0028)
 let soundFiles = 0;
 try {
   await load(url.replace("?diag", "?diag&patience=600"));
@@ -866,7 +867,14 @@ try {
   await load(url.replace("?diag", "?diag&patience=600"));
   await toBriefing();
   await beginRound();
-  await solveRound();
+  // Watch the customer pay and leave rather than skip it (solveRound skips by default): a skip would cut the engine
+  // at once, as ADR 0028 says, and the run would never be heard.
+  watchEnding = true;
+  try {
+    await solveRound();
+  } finally {
+    watchEnding = false;
+  }
   await sleep(1000);
   h = await heardNow();
   v = await vibrationsNow();
@@ -878,8 +886,29 @@ try {
     `the winning pull ended with ${JSON.stringify(last)} and vibrated ${JSON.stringify(startBuzz)}`,
   );
   if (soundFiles > 0) sound(h.every((x) => x.audible), "every moment could be heard", "some moments could not be heard with their files decoded");
+
+  // ADR 0028: after the catch the engine runs on (run.ogg on repeat) while the customer pays and leaves, and on under
+  // the result for a moment, then winds down by itself; nothing is left looping once the result is left.
+  type LoopEvent = { moment: string; playing: boolean; audible: boolean; at: number };
+  const loopLog = () => evaluate<LoopEvent[]>("window.__openAmDevAudio?.loops() ?? []");
+  const loopingNow = () => evaluate<string[]>("window.__openAmDevAudio?.looping() ?? []");
+  const atResult = await loopingNow();
+  const cordAt = (await evaluate<Array<{ moment: string; at: number }>>("window.__openAmDevAudio?.log() ?? []")).filter((x) => x.moment === "cord").at(-1)?.at ?? 0;
+  await waitFor("the engine to wind down", async () => (await loopingNow()).length === 0, 8000).catch(() => false);
+  const runs = (await loopLog()).filter((l) => l.moment === "run");
+  const runStart = runs.find((l) => l.playing);
+  const runStop = runs.find((l) => !l.playing);
+  // The loop comes in 0.3 s before the 0.6 s cord and the catch (start.ogg, about 4 s) are over: it must have been
+  // running a while before the stop for it to have been heard at all.
+  const ranFor = runStart && runStop ? (runStop.at - cordAt) / 1000 : 0;
+  sound(
+    !!runStart && runStart.audible === soundFiles > 0 && atResult.includes("run") && !!runStop && ranFor > 4.6 && (await loopingNow()).length === 0,
+    `the winning pull plays start, then run loops (still running as the result shows) and winds down by itself ${ranFor.toFixed(1)} s after the cord`,
+    `the engine run: started ${JSON.stringify(runStart)}, all ${JSON.stringify(runs)}, at the result looping ${JSON.stringify(atResult)}, stopped ${JSON.stringify(runStop)} ${ranFor.toFixed(1)} s after the cord, looping now ${JSON.stringify(await loopingNow())}`,
+  );
   await tapSelector(".result .primary");
   await atStart();
+  sound((await loopingNow()).length === 0, "nothing loops after the result screen", `still looping after the result screen: ${JSON.stringify(await loopingNow())}`);
 } catch (e) {
   failures.push(`sound: ${(e as Error).message}`);
   await screenshot("fail-sound");
