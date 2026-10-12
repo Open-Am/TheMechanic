@@ -1,7 +1,10 @@
 // Validator for machine.json and faults.json (ADR 0003 section "Validation", ADR 0008).
 // Never throws. Returns every issue found so a data author sees them all at once.
 
-import { CUSTOMER_MOMENTS, FASTENER_KINDS, MOTION_TYPES, SYMPTOMS, type CustomerFile, type FaultFile, type Machine, type ValidationIssue, type ValidationResult, type Vec3 } from "./types.ts";
+import { CHECK_IDS, CUSTOMER_MOMENTS, DIFFICULTIES, FASTENER_KINDS, MOTION_TYPES, SYMPTOMS, type CheckNeeds, type CustomerFile, type Fault, type FaultFile, type Machine, type ValidationIssue, type ValidationResult, type Vec3 } from "./types.ts";
+
+/** The fault file's schema this build reads (ADR 0029: schema 2 brought the clues). */
+export const FAULT_SCHEMA = 2;
 
 function result(issues: ValidationIssue[]): ValidationResult {
   return { ok: !issues.some((i) => i.level === "error"), issues };
@@ -94,7 +97,49 @@ export function validateMachine(machine: Machine): ValidationResult {
   const cycle = findRequiresCycle(machine);
   if (cycle) issues.push(error("requires_cycle", `Cycle in requires: ${cycle.join(" -> ")}.`));
 
+  issues.push(...checkIssues(machine, partIds));
+
   return result(issues);
+}
+
+/** The machine's `checks` (ADR 0029): all six, no others, each naming only parts, never asking a part to be off and on. */
+function checkIssues(machine: Machine, partIds: ReadonlySet<string>): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const checks: unknown = (machine as { checks?: unknown }).checks;
+  if (typeof checks !== "object" || checks === null || Array.isArray(checks)) {
+    issues.push(error("no_checks", `The machine has no checks; it needs all of ${CHECK_IDS.join(", ")}.`));
+    return issues;
+  }
+  const entries = checks as Record<string, CheckNeeds | undefined>;
+  for (const id of CHECK_IDS) if (!(id in entries)) issues.push(error("missing_check", `The machine has no check "${id}".`));
+  for (const [id, needs] of Object.entries(entries)) {
+    if (!(CHECK_IDS as readonly string[]).includes(id)) {
+      issues.push(error("unknown_check", `Check "${id}" is not one of ${CHECK_IDS.join(", ")}.`));
+      continue;
+    }
+    if (typeof needs !== "object" || needs === null) {
+      issues.push(error("bad_check", `Check "${id}" must be an object of needs.`));
+      continue;
+    }
+    for (const key of ["off", "on"] as const) {
+      const list: unknown = needs[key];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || !list.every((x) => typeof x === "string")) {
+        issues.push(error("bad_check", `Check "${id}" has "${key}" that is not a list of part IDs.`));
+        continue;
+      }
+      for (const part of list) if (!partIds.has(part)) issues.push(error("unknown_check_part", `Check "${id}" needs "${part}" ${key}, which is not a part.`));
+    }
+    if (needs.allOn !== undefined && typeof needs.allOn !== "boolean") issues.push(error("bad_check", `Check "${id}" has "allOn" that is not true or false.`));
+    if (needs.tool !== undefined && (typeof needs.tool !== "string" || !needs.tool)) issues.push(error("bad_check", `Check "${id}" has a "tool" that is not a name.`));
+    const off = Array.isArray(needs.off) ? needs.off : [];
+    const on = Array.isArray(needs.on) ? needs.on : [];
+    for (const part of off) {
+      if (on.includes(part)) issues.push(error("check_contradiction", `Check "${id}" needs "${part}" both off and on.`));
+      else if (needs.allOn === true) issues.push(error("check_contradiction", `Check "${id}" needs every part on and "${part}" off.`));
+    }
+  }
+  return issues;
 }
 
 export function validateFaults(file: FaultFile, machine: Machine): ValidationResult {
@@ -105,15 +150,43 @@ export function validateFaults(file: FaultFile, machine: Machine): ValidationRes
   if (file.machine !== machine.id) {
     issues.push(error("machine_mismatch", `Faults are for "${file.machine}" but the machine is "${machine.id}".`));
   }
+  // ADR 0029: the clues came with schema 2, and the shipped data is the only data, so only schema 2 is read.
+  if (file.schema !== FAULT_SCHEMA) issues.push(error("bad_schema", `The fault file is schema ${String(file.schema)}; this build reads schema ${FAULT_SCHEMA}.`));
   for (const f of file.faults) {
     if (seen.has(f.id)) issues.push(error("duplicate_id", `Duplicate fault ID "${f.id}".`));
     seen.add(f.id);
     if (!partIds.has(f.culprit)) issues.push(error("unknown_culprit", `Fault "${f.id}" blames "${f.culprit}", which is not a part.`));
     if (!(SYMPTOMS as readonly string[]).includes(f.symptom)) issues.push(error("unknown_symptom", `Fault "${f.id}" has symptom "${f.symptom}", which is not one of ${SYMPTOMS.join(", ")}.`));
+    if (!(DIFFICULTIES as readonly unknown[]).includes(f.difficulty)) issues.push(error("bad_difficulty", `Fault "${f.id}" has difficulty ${String(f.difficulty)}; it must be 1, 2 or 3.`));
+    issues.push(...clueIssues(f, machine));
   }
   if (file.faults.length === 0) issues.push(error("no_faults", "The fault file has no faults."));
 
   return result(issues);
+}
+
+/**
+ * A fault's clues (ADR 0029): one non-empty line for every check, and no other keys, so a missing line can never itself
+ * be a clue. A line that names the bad part is a warning: the text describes what is seen, heard or measured.
+ */
+function clueIssues(f: Fault, machine: Machine): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const clues: unknown = (f as { clues?: unknown }).clues;
+  if (typeof clues !== "object" || clues === null || Array.isArray(clues)) {
+    issues.push(error("no_clues", `Fault "${f.id}" has no clues; it needs a line for each of ${CHECK_IDS.join(", ")}.`));
+    return issues;
+  }
+  const lines = clues as Record<string, unknown>;
+  for (const id of CHECK_IDS) {
+    const line = lines[id];
+    if (typeof line !== "string" || !line.trim()) issues.push(error("missing_clue", `Fault "${f.id}" has no clue for "${id}".`));
+  }
+  const culprit = machine.parts.find((p) => p.id === f.culprit)?.name.toLowerCase();
+  for (const [id, line] of Object.entries(lines)) {
+    if (!(CHECK_IDS as readonly string[]).includes(id)) issues.push(error("unknown_clue", `Fault "${f.id}" has a clue for "${id}", which is not a check.`));
+    else if (culprit && typeof line === "string" && line.toLowerCase().includes(culprit)) issues.push(warning("clue_names_culprit", `Fault "${f.id}": the "${id}" clue names the bad part ("${culprit}").`));
+  }
+  return issues;
 }
 
 /** Validates both files together. The fault check is skipped if the machine is invalid. */

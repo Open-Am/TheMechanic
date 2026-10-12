@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateAll, validateFaults, validateMachine } from "../src/core/validate.ts";
-import type { Machine } from "../src/core/types.ts";
+import { CHECK_IDS, type Machine } from "../src/core/types.ts";
+import { FAULT_SCHEMA } from "../src/core/validate.ts";
 import { loadFaults, loadMachine } from "./helpers.ts";
 
 const machine = loadMachine();
@@ -103,9 +104,10 @@ describe("validateFaults rejections", () => {
   });
 
   it("never throws on empty input", () => {
-    const empty = { id: "x", name: "x", schema: 1, verified: false, size: [0, 0, 0], base: [], parts: [] } as Machine;
+    const empty = { id: "x", name: "x", schema: 1, verified: false, size: [0, 0, 0], base: [], parts: [] } as unknown as Machine;
     expect(() => validateMachine(empty)).not.toThrow();
     expect(validateFaults({ machine: "x", schema: 1, faults: [] }, empty).ok).toBe(false);
+    expect(() => validateFaults({ machine: "x", schema: 2, faults: [{} as never] }, empty)).not.toThrow();
   });
 });
 
@@ -142,5 +144,130 @@ describe("fasteners (ADR 0020, plan 0011)", () => {
     expect(validateMachine(m).ok).toBe(true);
     (m.parts[0] as unknown as { fasteners: unknown }).fasteners = "four bolts";
     expect(codes(m)).toContain("bad_fasteners");
+  });
+});
+
+describe("checks in machine.json (ADR 0029)", () => {
+  const codes = (m: Machine) => validateMachine(m).issues.map((i) => i.code);
+
+  it("the shipped machine has all six checks and no issue with them", () => {
+    expect(Object.keys(machine.checks).sort()).toEqual([...CHECK_IDS].sort());
+    expect(validateMachine(machine).issues.filter((i) => i.code.includes("check"))).toEqual([]);
+  });
+
+  it("rejects a machine with no checks", () => {
+    const m = clone(machine) as Partial<Machine>;
+    delete m.checks;
+    expect(codes(m as Machine)).toContain("no_checks");
+  });
+
+  it("rejects a machine that leaves out any of the six", () => {
+    for (const id of CHECK_IDS) {
+      const m = clone(machine);
+      delete (m.checks as Record<string, unknown>)[id];
+      const r = validateMachine(m);
+      expect(r.ok, id).toBe(false);
+      expect(r.issues.find((i) => i.code === "missing_check")?.message).toContain(id);
+    }
+  });
+
+  it("rejects an unknown check id", () => {
+    const m = clone(machine);
+    (m.checks as Record<string, unknown>)["compression"] = { allOn: true };
+    expect(codes(m)).toContain("unknown_check");
+  });
+
+  it("rejects a part id that is not a part", () => {
+    const m = clone(machine);
+    m.checks.look_plug = { off: ["ghost"] };
+    expect(codes(m)).toContain("unknown_check_part");
+    const n = clone(machine);
+    n.checks.spark_test = { off: ["spark_plug"], on: ["ghost"] };
+    expect(codes(n)).toContain("unknown_check_part");
+  });
+
+  it("rejects needs of the wrong shape", () => {
+    const m = clone(machine);
+    (m.checks as Record<string, unknown>)["look_plug"] = { off: "spark_plug" };
+    expect(codes(m)).toContain("bad_check");
+    const n = clone(machine);
+    (n.checks as Record<string, unknown>)["listen_pull"] = { allOn: "yes" };
+    expect(codes(n)).toContain("bad_check");
+    const o = clone(machine);
+    (o.checks as Record<string, unknown>)["volts_test"] = null;
+    expect(codes(o)).toContain("bad_check");
+  });
+
+  it("rejects a check that could never be done", () => {
+    const m = clone(machine);
+    m.checks.look_plug = { off: ["spark_plug"], on: ["spark_plug"] };
+    expect(codes(m)).toContain("check_contradiction");
+    const n = clone(machine);
+    n.checks.listen_pull = { allOn: true, off: ["muffler"] };
+    expect(codes(n)).toContain("check_contradiction");
+  });
+});
+
+describe("clues and difficulty in faults.json (ADR 0029, ADR 0030)", () => {
+  const codes = (f: typeof faults) => validateFaults(f, machine).issues.map((i) => i.code);
+
+  it("the shipped faults are schema 2, each with a difficulty and a line for every check", () => {
+    expect(faults.schema).toBe(FAULT_SCHEMA);
+    expect(FAULT_SCHEMA).toBe(2);
+    for (const f of faults.faults) {
+      expect([1, 2, 3], f.id).toContain(f.difficulty);
+      expect(Object.keys(f.clues).sort(), f.id).toEqual([...CHECK_IDS].sort());
+      for (const id of CHECK_IDS) expect(f.clues[id].trim().length, `${f.id} ${id}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("no shipped line names the fault's bad part, and every one is still an unverified draft", () => {
+    expect(validateFaults(faults, machine).issues).toEqual([]);
+    for (const f of faults.faults) expect(f.verified, f.id).toBe(false);
+  });
+
+  it("only schema 2 is read", () => {
+    for (const schema of [1, 3]) {
+      const f = clone(faults);
+      f.schema = schema;
+      expect(codes(f)).toContain("bad_schema");
+    }
+  });
+
+  it("rejects a fault missing a check's line, or with an empty one", () => {
+    for (const id of CHECK_IDS) {
+      const f = clone(faults);
+      delete (f.faults[0]!.clues as Record<string, unknown>)[id];
+      expect(validateFaults(f, machine).issues.find((i) => i.code === "missing_clue")?.message, id).toContain(id);
+    }
+    const g = clone(faults);
+    g.faults[1]!.clues.look_smoke = "   ";
+    expect(codes(g)).toContain("missing_clue");
+  });
+
+  it("rejects a fault with no clues, or a line for an unknown check", () => {
+    const f = clone(faults);
+    delete (f.faults[0] as Partial<(typeof f.faults)[0]>).clues;
+    expect(codes(f)).toContain("no_clues");
+    const g = clone(faults);
+    (g.faults[0]!.clues as Record<string, string>)["compression"] = "Good.";
+    expect(codes(g)).toContain("unknown_clue");
+  });
+
+  it("warns, and still accepts, when a line names the bad part", () => {
+    const f = clone(faults);
+    const plug = f.faults.find((x) => x.culprit === "spark_plug")!;
+    plug.clues.look_plug = "The spark plug is black.";
+    const r = validateFaults(f, machine);
+    expect(r.ok).toBe(true);
+    expect(r.issues.map((i) => i.code)).toContain("clue_names_culprit");
+  });
+
+  it("rejects a difficulty that is not 1, 2 or 3", () => {
+    for (const bad of [0, 4, 1.5, "2", undefined]) {
+      const f = clone(faults);
+      (f.faults[0] as unknown as Record<string, unknown>)["difficulty"] = bad;
+      expect(codes(f), String(bad)).toContain("bad_difficulty");
+    }
   });
 });

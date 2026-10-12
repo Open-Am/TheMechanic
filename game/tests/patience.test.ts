@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { FAILED_PULL_PATIENCE_COST, PATIENCE_THRESHOLDS } from "../src/core/constants.ts";
+import { CHECK_SECONDS, FAILED_PULL_PATIENCE_COST, PATIENCE_THRESHOLDS } from "../src/core/constants.ts";
 import { dailyCustomerId } from "../src/core/daily.ts";
 import { hasWalked, moodFor, patienceAt, walkOutTime } from "../src/core/patience.ts";
 import { apply, initialState } from "../src/core/reducer.ts";
@@ -167,5 +167,41 @@ describe("daily customer (ADR 0005, ADR 0015)", () => {
     for (let d = 0; d < 60; d++) seen.add(dailyCustomerId(customersFile.customers, d));
     expect(seen.size).toBe(customersFile.customers.length);
     expect(() => dailyCustomerId([], 1)).toThrow();
+  });
+});
+
+describe("checks cost patience (ADR 0029, changing ADR 0015)", () => {
+  it("each check takes its cost in seconds from the customer's patience", () => {
+    const c = withPatience(80);
+    for (const id of ["listen_pull", "look_smoke", "volts_test"] as const) {
+      const s = run([{ t: 1000, type: "check", checkId: id }], c);
+      expect(walkOutTime(s, c), id).toBe((80 - CHECK_SECONDS[id]) * 1000);
+      expect(patienceAt(s, c, 1000), id).toBeCloseTo((80 - CHECK_SECONDS[id] - 1) / 80);
+    }
+  });
+
+  it("costs add up with failed pulls", () => {
+    const c = withPatience(80);
+    const s = run([{ t: 1000, type: "check", checkId: "listen_pull" }, { t: 2000, type: "pull" }, { t: 3000, type: "check", checkId: "volts_test" }], c);
+    expect(walkOutTime(s, c)).toBe((80 - CHECK_SECONDS.listen_pull - FAILED_PULL_PATIENCE_COST - CHECK_SECONDS.volts_test) * 1000);
+  });
+
+  it("a check that empties the meter makes the customer leave at that check", () => {
+    const c = withPatience(5);
+    const s = run([{ t: 3000, type: "check", checkId: "volts_test" }], c);
+    expect(walkOutTime(s, c)).toBe(3000);
+    expect(hasWalked(s, c, 3000)).toBe(true);
+    const next = apply(machine, plug, s, { t: 3000, type: "check", checkId: "listen_pull" }, c);
+    expect(next.ok).toBe(false);
+    if (!next.ok) expect(next.refusal.reason).toBe("customer_left");
+  });
+
+  it("a walked round with checks is scored at the earlier walk-out", () => {
+    const c = withPatience(40);
+    const log: Action[] = [{ t: 1000, type: "check", checkId: "look_smoke" }];
+    const s = score(machine, plug, log, c, 60_000);
+    expect(s.outcome).toBe("walked");
+    expect(s.elapsedSeconds).toBe(40 - CHECK_SECONDS.look_smoke);
+    expect(s.clean).toBe(false);
   });
 });

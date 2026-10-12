@@ -1,6 +1,49 @@
-// Removal and install rules (ADR 0004). Pure functions over machine data and a round state.
+// Removal and install rules (ADR 0004), and when a check is possible (ADR 0029). Pure functions over machine data and a
+// round state.
 
-import type { Fault, Machine, PartId, RoundState } from "./types.ts";
+import { CHECK_SECONDS } from "./constants.ts";
+import { CHECK_IDS, type CheckId, type Fault, type Machine, type PartId, type RoundState } from "./types.ts";
+
+/** What a check still needs before it can be done: parts to take off, parts to put on, or every part on. */
+export interface UnmetNeeds {
+  /** Parts still on that must be off. */
+  off: PartId[];
+  /** Parts off that must be on. */
+  on: PartId[];
+  /** The check needs every part on, and some are off. */
+  allOn: boolean;
+}
+
+export function isCheckId(id: unknown): id is CheckId {
+  return typeof id === "string" && (CHECK_IDS as readonly string[]).includes(id);
+}
+
+/**
+ * What a check still needs, from the machine's `checks` data alone (ADR 0029): facts the player can see, never anything
+ * about the fault. Null for an id that is not a check of this machine.
+ */
+export function unmetNeeds(machine: Machine, state: RoundState, checkId: CheckId): UnmetNeeds | null {
+  const needs = isCheckId(checkId) ? machine.checks?.[checkId] : undefined;
+  if (!needs) return null;
+  return {
+    off: (needs.off ?? []).filter((id) => state.installed.has(id)),
+    on: (needs.on ?? []).filter((id) => !state.installed.has(id)),
+    allOn: needs.allOn === true && machine.parts.some((p) => !state.installed.has(p.id)),
+  };
+}
+
+/** True when the machine is in the state a check needs. Says nothing about whether it was done or the fault is fixed. */
+export function checkPossible(machine: Machine, state: RoundState, checkId: CheckId): boolean {
+  const n = unmetNeeds(machine, state, checkId);
+  return n !== null && n.off.length === 0 && n.on.length === 0 && !n.allOn;
+}
+
+/** Seconds the checks done so far cost (ADR 0029). */
+export function checkSeconds(checks: readonly CheckId[]): number {
+  let total = 0;
+  for (const id of checks) total += CHECK_SECONDS[id] ?? 0;
+  return total;
+}
 
 export function partById(machine: Machine, id: PartId) {
   return machine.parts.find((p) => p.id === id);

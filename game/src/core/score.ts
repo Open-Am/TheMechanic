@@ -1,9 +1,10 @@
-// Score as a pure function of the action log (ADR 0004).
+// Score as a pure function of the action log (ADR 0004, extended by ADR 0029):
+// elapsed seconds + 10 per wrong part + 15 per failed pull + the checks' seconds - the clean bonus, never below 0.
 
-import { FAILED_PULL_PENALTY, STAR_THRESHOLDS, WRONG_PART_PENALTY } from "./constants.ts";
+import { CLEAN_BONUS, FAILED_PULL_PENALTY, STAR_THRESHOLDS, WRONG_PART_PENALTY } from "./constants.ts";
 import { hasWalked, walkOutTime } from "./patience.ts";
 import { replay } from "./replay.ts";
-import { necessarySet } from "./rules.ts";
+import { checkSeconds, necessarySet } from "./rules.ts";
 import type { Action, Customer, Fault, Machine, RoundState, ScoreBreakdown } from "./types.ts";
 
 export function stars(total: number): 1 | 2 | 3 {
@@ -23,12 +24,18 @@ export function scoreState(machine: Machine, fault: Fault, state: RoundState, el
   const walked = customer !== undefined && hasWalked(state, customer, elapsedMs);
   const endMs = walked ? walkOutTime(state, customer) : elapsedMs;
   const elapsedSeconds = Math.round(endMs / 1000);
-  const total = elapsedSeconds + WRONG_PART_PENALTY * wrongParts + FAILED_PULL_PENALTY * state.failedPulls;
   const fixed = state.endedAt !== null;
+  const checks = checkSeconds(state.checksDone);
+  // ADR 0029: a clean diagnosis is a fixed round with no wrong parts and no failed pulls.
+  const clean = fixed && wrongParts === 0 && state.failedPulls === 0;
+  const raw = elapsedSeconds + WRONG_PART_PENALTY * wrongParts + FAILED_PULL_PENALTY * state.failedPulls + checks - (clean ? CLEAN_BONUS : 0);
+  const total = Math.max(0, raw);
   return {
     elapsedSeconds,
     wrongParts,
     failedPulls: state.failedPulls,
+    checkSeconds: checks,
+    clean,
     total,
     stars: walked ? 0 : stars(total),
     complete: fixed,

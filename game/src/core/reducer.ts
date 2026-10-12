@@ -2,8 +2,8 @@
 // `apply` is pure: same inputs, same output. Time comes from the action, never from a clock.
 
 import { walkOutTime } from "./patience.ts";
-import { blockers, hiders, missingDependents } from "./rules.ts";
-import type { Action, ApplyResult, Customer, Fault, Machine, PartId, Refusal, RoundState } from "./types.ts";
+import { blockers, checkPossible, hiders, isCheckId, missingDependents } from "./rules.ts";
+import type { Action, ApplyResult, CheckId, Customer, Fault, Machine, PartId, Refusal, RoundState } from "./types.ts";
 
 export function initialState(machine: Machine): RoundState {
   return {
@@ -12,6 +12,7 @@ export function initialState(machine: Machine): RoundState {
     removedEver: new Set(),
     fixed: false,
     failedPulls: 0,
+    checksDone: [],
     t: 0,
     endedAt: null,
   };
@@ -81,7 +82,24 @@ export function apply(machine: Machine, fault: Fault, state: RoundState, action:
       if (state.fixed) return withTime(state, action.t, { endedAt: action.t });
       return withTime(state, action.t, { failedPulls: state.failedPulls + 1 });
     }
+
+    // ADR 0029: possible now (the machine's checks data), not yet done this round, and the fault not yet fixed.
+    case "check": {
+      const id = action.checkId;
+      if (!isCheckId(id) || !machine.checks?.[id]) return refuse(action, "check_unavailable");
+      if (state.fixed) return refuse(action, "already_fixed");
+      if (state.checksDone.includes(id)) return refuse(action, "already_checked");
+      if (!checkPossible(machine, state, id)) return refuse(action, "check_unavailable");
+      return withTime(state, action.t, { checksDone: [...state.checksDone, id] });
+    }
   }
+}
+
+/** What a check showed: the fault's line for it, once the check has been done this round, otherwise null (ADR 0029).
+ *  This is the only path to clue text; app wraps it as resultOf. */
+export function clueText(fault: Fault, state: RoundState, checkId: CheckId): string | null {
+  if (!isCheckId(checkId) || !state.checksDone.includes(checkId)) return null;
+  return fault.clues?.[checkId] ?? null;
 }
 
 /** What the player reads when inspecting a part: the fault's bad text while the culprit is unfixed, otherwise the part's ok text.

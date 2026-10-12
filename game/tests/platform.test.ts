@@ -449,7 +449,7 @@ describe("score store (ADR 0005, ADR 0022, ADR 0024)", () => {
       faultId,
       day: opts.day ?? null,
       log: [{ t: 1000, type: "pull" }],
-      score: { elapsedSeconds: total, wrongParts: 0, failedPulls: 0, total, stars: outcome === "walked" ? 0 : 1, complete: outcome === "fixed", outcome },
+      score: { elapsedSeconds: total, wrongParts: 0, failedPulls: 0, checkSeconds: 0, clean: false, total, stars: outcome === "walked" ? 0 : 1, complete: outcome === "fixed", outcome },
       playedAt: "2026-10-11T08:00:00.000Z",
     };
     if (opts.unfinished) r.unfinished = true;

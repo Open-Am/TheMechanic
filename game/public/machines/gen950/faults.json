@@ -1,6 +1,6 @@
 {
   "machine": "gen950",
-  "schema": 1,
+  "schema": 2,
   "faults": [
     {
       "id": "fouled_plug",
@@ -9,6 +9,15 @@
       "culprit": "spark_plug",
       "inspectBad": "Tip is black and oily. No spark can jump.",
       "fix": "Clean the plug",
+      "difficulty": 1,
+      "clues": {
+        "listen_pull": "It turns over freely but never fires. Not even a cough.",
+        "look_smoke": "No smoke at all. Only a smell of raw petrol.",
+        "look_plug": "The tip is black, oily and wet.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "No reading. It will not start."
+      },
       "author": "core",
       "verified": false
     },
@@ -19,6 +28,15 @@
       "culprit": "carburetor",
       "inspectBad": "Sticky gum in the bowl. The jet is blocked.",
       "fix": "Clean the bowl and jet",
+      "difficulty": 2,
+      "clues": {
+        "listen_pull": "It fires and runs a few seconds, then dies.",
+        "look_smoke": "A puff of pale smoke, then nothing as it dies.",
+        "look_plug": "The tip is dry and pale. Little fuel has burned on it.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "Full voltage for a moment, then it fades as the engine dies."
+      },
       "author": "core",
       "verified": false
     },
@@ -29,6 +47,15 @@
       "culprit": "fuel_tap",
       "inspectBad": "Strainer is packed with dirt. Fuel only drips.",
       "fix": "Clean the strainer",
+      "difficulty": 2,
+      "clues": {
+        "listen_pull": "It fires and runs a few seconds, then dies.",
+        "look_smoke": "A puff of pale smoke, then nothing as it dies.",
+        "look_plug": "The tip is dry and pale. Little fuel has burned on it.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel only drips into the bottle, a drop at a time.",
+        "volts_test": "Full voltage for a moment, then it fades as the engine dies."
+      },
       "author": "core",
       "verified": false
     },
@@ -39,6 +66,15 @@
       "culprit": "capacitor",
       "inspectBad": "Case is swollen. It holds no charge.",
       "fix": "Fit a new capacitor",
+      "difficulty": 2,
+      "clues": {
+        "listen_pull": "It starts at once and runs smoothly.",
+        "look_smoke": "Clear. Hardly any smoke.",
+        "look_plug": "The tip is light brown and dry.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "The bulb stays dark. There is no voltage at the socket."
+      },
       "author": "core",
       "verified": false
     },
@@ -49,6 +85,15 @@
       "culprit": "muffler",
       "inspectBad": "Outlet is caked with hard carbon.",
       "fix": "Clear the carbon",
+      "difficulty": 1,
+      "clues": {
+        "listen_pull": "It starts, but it sounds flat and muffled and will not rev up.",
+        "look_smoke": "Only a weak puff at the outlet, though the engine labours.",
+        "look_plug": "The tip is dark brown and a little sooty.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "Low, and it sags further whenever the engine labours."
+      },
       "author": "core",
       "verified": false
     },
@@ -59,6 +104,15 @@
       "culprit": "air_filter",
       "inspectBad": "Clogged with dust and oil. Air can barely pass.",
       "fix": "Wash the filter",
+      "difficulty": 1,
+      "clues": {
+        "listen_pull": "It starts, but runs rough and heavy, as if it is choking.",
+        "look_smoke": "Thick black smoke from the exhaust.",
+        "look_plug": "The tip is black with dry, fluffy soot.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "Low and unsteady."
+      },
       "author": "core",
       "verified": false
     }

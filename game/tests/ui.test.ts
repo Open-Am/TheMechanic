@@ -76,7 +76,9 @@ describe("share text (ADR 0005)", () => {
     elapsedSeconds,
     wrongParts,
     failedPulls: 0,
-    total: elapsedSeconds + 10 * wrongParts,
+    checkSeconds: 0,
+    clean: wrongParts === 0,
+    total: Math.max(0, elapsedSeconds + 10 * wrongParts - (wrongParts === 0 ? 10 : 0)),
     stars,
     complete: true,
     outcome: "fixed",
@@ -108,7 +110,7 @@ describe("share text (ADR 0005)", () => {
 });
 
 describe("start screen text (plan 0014 readings 1, 5; ADR 0024)", () => {
-  const sc = (total: number, outcome: "fixed" | "walked", stars: 0 | 1 | 2 | 3): ScoreBreakdown => ({ elapsedSeconds: total, wrongParts: 0, failedPulls: 0, total, stars, complete: outcome === "fixed", outcome });
+  const sc = (total: number, outcome: "fixed" | "walked", stars: 0 | 1 | 2 | 3): ScoreBreakdown => ({ elapsedSeconds: total, wrongParts: 0, failedPulls: 0, checkSeconds: 0, clean: false, total, stars, complete: outcome === "fixed", outcome });
 
   it("offers today's day until the attempt is used, then practice", () => {
     expect(dailyButtonText({ day: 10, attempted: false, result: null })).toBe("Today's fault · Day 10");

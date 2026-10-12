@@ -1,15 +1,16 @@
 // Text-mode player (plan 0001). Plays every fault to completion from an action log and prints each step and the score.
-// Run from the repository root with `npm run play`, or `node tools/play/play.ts [machineId]`.
+// Run from the repository root with `npm run play`, or `node tools/play/play.ts [machineId]`. Each play checks first and
+// prints what every check shows (ADR 0029).
 // Node 22.6 or later strips the types itself; no build step.
 
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { apply, initialState, conditionText } from "../../game/src/core/reducer.ts";
-import { isVisible, removalOrder, removableNow } from "../../game/src/core/rules.ts";
+import { apply, initialState, clueText, conditionText } from "../../game/src/core/reducer.ts";
+import { checkPossible, isVisible, removalOrder, removableNow } from "../../game/src/core/rules.ts";
 import { scoreState } from "../../game/src/core/score.ts";
 import { validateAll } from "../../game/src/core/validate.ts";
-import type { Action, ActionType, CustomerFile, Fault, FaultFile, Machine, PartId, RoundState } from "../../game/src/core/types.ts";
+import { CHECK_IDS, type Action, type ActionType, type CheckId, type CustomerFile, type Fault, type FaultFile, type Machine, type PartId, type RoundState } from "../../game/src/core/types.ts";
 import { walkOutTime } from "../../game/src/core/patience.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -26,17 +27,40 @@ if (!v.ok) {
 }
 
 /** The shortest correct play, with timestamps that make the score readable.
- *  It opens by looking at the first part on the removal path where it sits (ADR 0011), as a mechanic would. */
+ *  It opens with a check (ADR 0029): the first one possible with every part on, as a mechanic would listen first. Then
+ *  it looks at the first part on the removal path where it sits (ADR 0011), and does every other check that becomes
+ *  possible on the way in. */
 function perfectPlay(fault: Fault, stepMs: number): Action[] {
   const order = removalOrder(machine, fault);
-  const steps: Array<[ActionType, PartId?]> = [];
-  const look = order.find((id) => isVisible(machine, initialState(machine), id));
+  const steps: Array<[ActionType, PartId | CheckId | undefined]> = [];
+  let state = initialState(machine);
+  const done = new Set<CheckId>();
+  const checksNow = (all: boolean) => {
+    for (const id of CHECK_IDS) {
+      if (done.has(id) || !checkPossible(machine, state, id)) continue;
+      done.add(id);
+      steps.push(["check", id]);
+      if (!all) return;
+    }
+  };
+  checksNow(false);
+  const look = order.find((id) => isVisible(machine, state, id));
   if (look) steps.push(["inspect", look]);
-  for (const id of order) steps.push(["remove", id]);
+  for (const id of order) {
+    steps.push(["remove", id]);
+    const installed = new Set(state.installed);
+    installed.delete(id);
+    state = { ...state, installed, tray: [...state.tray, id] };
+    checksNow(true);
+  }
   steps.push(["inspect", fault.culprit], ["fix", fault.culprit]);
   for (const id of [...order].reverse()) steps.push(["install", id]);
-  steps.push(["pull"]);
-  return steps.map(([type, partId], i) => (partId ? { t: (i + 1) * stepMs, type, partId } : { t: (i + 1) * stepMs, type }));
+  steps.push(["pull", undefined]);
+  return steps.map(([type, id], i) => {
+    const t = (i + 1) * stepMs;
+    if (type === "check") return { t, type, checkId: id as CheckId };
+    return id ? { t, type, partId: id } : { t, type };
+  });
 }
 
 function describe(fault: Fault, state: RoundState, action: Action): string {
@@ -47,6 +71,7 @@ function describe(fault: Fault, state: RoundState, action: Action): string {
     case "fix": return `fix ${who}: ${fault.fix}`;
     case "install": return `put back ${who}`;
     case "pull": return "pull the cord";
+    case "check": return `check ${action.checkId}`;
   }
 }
 
@@ -64,11 +89,13 @@ for (const fault of faultFile.faults) {
       break;
     }
     state = r.state;
-    const extra = action.type === "pull" ? (state.endedAt !== null ? "  -> the engine starts" : "  -> failed pull") : "";
+    const extra =
+      action.type === "pull" ? (state.endedAt !== null ? "  -> the engine starts" : "  -> failed pull") : action.type === "check" ? `: "${clueText(fault, state, action.checkId!)}"` : "";
     console.log(`   ${String(action.t / 1000).padStart(3)}s  ${line}${extra}`);
   }
   const s = scoreState(machine, fault, state, state.endedAt ?? state.t);
-  console.log(`   score ${s.total} (${s.elapsedSeconds}s + ${s.wrongParts} wrong + ${s.failedPulls} failed pulls)  ${"★".repeat(s.stars)}  ${s.complete ? "complete" : "INCOMPLETE"}`);
+  console.log(`   score ${s.total} (${s.elapsedSeconds}s + ${s.wrongParts} wrong + ${s.failedPulls} failed pulls + ${s.checkSeconds}s of checks${s.clean ? " - clean job" : ""})  ${"★".repeat(s.stars)}  ${s.complete ? "complete" : "INCOMPLETE"}`);
+  if (state.checksDone.length === 0) allOk = false;
   if (!s.complete) allOk = false;
 }
 

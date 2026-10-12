@@ -62,6 +62,24 @@ export interface Part {
   fasteners?: Fastener[];
 }
 
+// ---- Diagnosis checks (ADR 0029) ----
+
+/** The six checks, a fixed vocabulary like the symptoms. */
+export const CHECK_IDS = ["listen_pull", "look_smoke", "look_plug", "spark_test", "fuel_flow", "volts_test"] as const;
+export type CheckId = (typeof CHECK_IDS)[number];
+
+/** When a check is possible, as data in machine.json (ADR 0029). */
+export interface CheckNeeds {
+  /** Parts that must be off the machine (in the tray). */
+  off?: PartId[];
+  /** Parts that must be on the machine. */
+  on?: PartId[];
+  /** Every part must be on. */
+  allOn?: boolean;
+  /** The tester the hand fetches from the toolbox, if any. A visual only. */
+  tool?: string;
+}
+
 export interface Machine {
   id: string;
   name: string;
@@ -70,7 +88,13 @@ export interface Machine {
   size: Vec3;
   base: BasePiece[];
   parts: Part[];
+  /** Every check of CHECK_IDS, keyed by id (ADR 0029). */
+  checks: Record<CheckId, CheckNeeds>;
 }
+
+/** How hard a fault is (ADR 0030): how deep the bad part sits and how much another fault looks like it. */
+export const DIFFICULTIES = [1, 2, 3] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
 
 export interface Fault {
   id: FaultId;
@@ -79,6 +103,10 @@ export interface Fault {
   culprit: PartId;
   inspectBad: string;
   fix: string;
+  /** 1, 2 or 3 (ADR 0030). */
+  difficulty: Difficulty;
+  /** What each check shows, one line of player text per check (ADR 0029). Never names the bad part. */
+  clues: Record<CheckId, string>;
   author: string;
   verified: boolean;
 }
@@ -116,7 +144,7 @@ export type RoundOutcome = "fixed" | "walked";
 
 // ---- Round (ADR 0004) ----
 
-export const ACTION_TYPES = ["remove", "inspect", "fix", "install", "pull"] as const;
+export const ACTION_TYPES = ["remove", "inspect", "fix", "install", "pull", "check"] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
 /** One entry in the action log. `t` is milliseconds since the timer started. */
@@ -124,6 +152,8 @@ export interface Action {
   t: number;
   type: ActionType;
   partId?: PartId;
+  /** For a check (ADR 0029): which one. */
+  checkId?: CheckId;
 }
 
 export interface RoundState {
@@ -135,6 +165,8 @@ export interface RoundState {
   removedEver: ReadonlySet<PartId>;
   fixed: boolean;
   failedPulls: number;
+  /** Checks done this round, in the order they were done (ADR 0029). Each at most once. */
+  checksDone: readonly CheckId[];
   /** Time of the last applied action, in ms. */
   t: number;
   /** Set when the engine starts. The round is over. */
@@ -153,7 +185,9 @@ export type RefusalReason =
   | "already_fixed"
   | "parts_missing"
   | "time_went_backwards"
-  | "customer_left";
+  | "customer_left"
+  | "check_unavailable"
+  | "already_checked";
 
 export interface Refusal {
   reason: RefusalReason;
@@ -168,6 +202,11 @@ export interface ScoreBreakdown {
   elapsedSeconds: number;
   wrongParts: number;
   failedPulls: number;
+  /** The sum of the costs of the checks done, in seconds (ADR 0029). */
+  checkSeconds: number;
+  /** Fixed with no wrong parts and no failed pulls: earns CLEAN_BONUS (ADR 0029). */
+  clean: boolean;
+  /** Never below 0. */
   total: number;
   /** 0 for a round the customer walked out of (ADR 0015). */
   stars: 0 | 1 | 2 | 3;

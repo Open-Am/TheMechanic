@@ -101,7 +101,7 @@
       "name": "Spark plug",
       "does": "Makes the spark that lights the fuel.",
       "requires": ["plug_cap"],
-      "inspectOk": "Tip is light brown. Healthy.",
+      "inspectOk": "Electrodes are sound. The gap is right.",
       "placeholder": { "shape": "cylinder", "axis": "z", "size": [0.0184, 0.0679, 0.0679], "position": [0.06, 0.2016, -0.1466], "color": "#e8e8e8" },
       "explode": [0, 0.07, -0.07],
       "motion": { "type": "unscrew", "axis": "y", "turns": 3 }
@@ -164,5 +164,13 @@
       "explode": [-0.1, 0, 0],
       "motion": { "type": "unclip", "axis": "y" }
     }
-  ]
+  ],
+  "checks": {
+    "listen_pull": { "allOn": true },
+    "look_smoke": { "allOn": true },
+    "look_plug": { "off": ["spark_plug"] },
+    "spark_test": { "off": ["spark_plug"], "on": ["recoil_starter"], "tool": "spark_tester" },
+    "fuel_flow": { "off": ["fuel_hose"], "on": ["fuel_tank", "fuel_tap"], "tool": "bottle" },
+    "volts_test": { "allOn": true, "tool": "test_bulb" }
+  }
 }

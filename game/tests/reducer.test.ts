@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { apply, conditionText, initialState } from "../src/core/reducer.ts";
-import { blockers, canInstall, canRemove, hiders, isVisible, necessarySet, removableNow, removalOrder } from "../src/core/rules.ts";
+import { apply, clueText, conditionText, initialState } from "../src/core/reducer.ts";
+import { blockers, canInstall, canRemove, checkPossible, checkSeconds, hiders, isCheckId, isVisible, necessarySet, removableNow, removalOrder, unmetNeeds } from "../src/core/rules.ts";
 import { replay } from "../src/core/replay.ts";
 import { score } from "../src/core/score.ts";
-import type { Action, RoundState } from "../src/core/types.ts";
+import { CHECK_IDS, type Action, type CheckId, type RoundState } from "../src/core/types.ts";
 import { faultById, loadFaults, loadMachine, perfectPlay } from "./helpers.ts";
 
 const machine = loadMachine();
@@ -184,7 +184,7 @@ describe("inspect and fix", () => {
     s = step(s, { t: 1, type: "remove", partId: "plug_cap" });
     s = step(s, { t: 2, type: "remove", partId: "spark_plug" });
     s = step(s, { t: 3, type: "fix", partId: "spark_plug" });
-    expect(conditionText(machine, fouledPlug, s, "spark_plug")).toBe("Tip is light brown. Healthy.");
+    expect(conditionText(machine, fouledPlug, s, "spark_plug")).toBe(machine.parts.find((p) => p.id === "spark_plug")!.inspectOk);
     expect(conditionText(machine, fouledPlug, s, "nothing")).toBeNull();
   });
 
@@ -304,5 +304,132 @@ describe("necessary set and removal order", () => {
       }
       expect(s.tray).toContain(f.culprit);
     }
+  });
+});
+
+describe("checks (ADR 0029)", () => {
+  const check = (t: number, checkId: string): Action => ({ t, type: "check", checkId: checkId as CheckId });
+  /** A state with these parts taken off, in an order the rules allow (the removal order of each, deps first). */
+  function without(...ids: string[]): RoundState {
+    let s = initialState(machine);
+    let t = 0;
+    const order: string[] = [];
+    const add = (id: string) => {
+      if (order.includes(id)) return;
+      for (const dep of machine.parts.find((p) => p.id === id)!.requires) add(dep);
+      order.push(id);
+    };
+    for (const id of ids) add(id);
+    for (const id of order) s = step(s, { t: ++t, type: "remove", partId: id });
+    return s;
+  }
+
+  it("the machine has all six checks, and the round starts with none done", () => {
+    expect(Object.keys(machine.checks).sort()).toEqual([...CHECK_IDS].sort());
+    expect(initialState(machine).checksDone).toEqual([]);
+  });
+
+  it("listen, look at the smoke and the volts test need every part on", () => {
+    for (const id of ["listen_pull", "look_smoke", "volts_test"] as const) {
+      expect(checkPossible(machine, initialState(machine), id), id).toBe(true);
+      const s = without("muffler");
+      expect(checkPossible(machine, s, id), id).toBe(false);
+      expect(unmetNeeds(machine, s, id)).toEqual({ off: [], on: [], allOn: true });
+      expect(refusal(s, check(10, id)).reason).toBe("check_unavailable");
+    }
+  });
+
+  it("reading the plug needs the spark plug in the tray", () => {
+    expect(checkPossible(machine, initialState(machine), "look_plug")).toBe(false);
+    expect(unmetNeeds(machine, initialState(machine), "look_plug")).toEqual({ off: ["spark_plug"], on: [], allOn: false });
+    expect(checkPossible(machine, without("plug_cap"), "look_plug")).toBe(false);
+    expect(checkPossible(machine, without("spark_plug"), "look_plug")).toBe(true);
+  });
+
+  it("the spark test needs the spark plug in the tray and the recoil starter on", () => {
+    expect(checkPossible(machine, without("spark_plug"), "spark_test")).toBe(true);
+    const s = without("spark_plug", "recoil_starter");
+    expect(checkPossible(machine, s, "spark_test")).toBe(false);
+    expect(unmetNeeds(machine, s, "spark_test")).toEqual({ off: [], on: ["recoil_starter"], allOn: false });
+  });
+
+  it("the fuel flow test needs the hose off and everything that feeds it on", () => {
+    expect(checkPossible(machine, initialState(machine), "fuel_flow")).toBe(false);
+    expect(checkPossible(machine, without("fuel_hose"), "fuel_flow")).toBe(true);
+    const feeds = machine.checks.fuel_flow.on ?? [];
+    expect(feeds).toEqual(expect.arrayContaining(["fuel_tank", "fuel_tap"]));
+    const s = without("fuel_tap");
+    expect(checkPossible(machine, s, "fuel_flow")).toBe(false);
+    expect(unmetNeeds(machine, s, "fuel_flow")!.on).toContain("fuel_tap");
+  });
+
+  it("is applied and logged in order, changing nothing else", () => {
+    const s0 = initialState(machine);
+    const s1 = step(s0, check(500, "listen_pull"));
+    expect(s1.checksDone).toEqual(["listen_pull"]);
+    expect(s1.t).toBe(500);
+    expect(s1.installed).toEqual(s0.installed);
+    expect(s1.failedPulls).toBe(0);
+    expect(s1.endedAt).toBeNull();
+    const s2 = step(s1, check(600, "volts_test"));
+    expect(s2.checksDone).toEqual(["listen_pull", "volts_test"]);
+  });
+
+  it("can be done once per round", () => {
+    const s = step(initialState(machine), check(1, "look_smoke"));
+    const r = refusal(s, check(2, "look_smoke"));
+    expect(r.reason).toBe("already_checked");
+  });
+
+  it("is refused once the fault is fixed", () => {
+    let s = without("spark_plug");
+    s = step(s, { t: 50, type: "fix", partId: "spark_plug" });
+    expect(refusal(s, check(51, "look_plug")).reason).toBe("already_fixed");
+  });
+
+  it("refuses an id that is not a check, or no id", () => {
+    expect(refusal(initialState(machine), check(1, "compression")).reason).toBe("check_unavailable");
+    expect(refusal(initialState(machine), { t: 1, type: "check" }).reason).toBe("check_unavailable");
+    expect(isCheckId("listen_pull")).toBe(true);
+    expect(isCheckId("compression")).toBe(false);
+    expect(isCheckId(undefined)).toBe(false);
+  });
+
+  it("is refused after the round is over, or with time going backwards", () => {
+    const ended = replay(machine, fouledPlug, perfectPlay(machine, fouledPlug)).state;
+    expect(refusal(ended, check(ended.t + 1, "listen_pull")).reason).toBe("round_over");
+    const s = step(initialState(machine), { t: 100, type: "remove", partId: "muffler" });
+    expect(refusal(s, check(50, "look_plug")).reason).toBe("time_went_backwards");
+  });
+
+  it("does not depend on the fault: the same check is possible or refused for every fault", () => {
+    const states = [initialState(machine), without("spark_plug"), without("fuel_hose"), without("muffler")];
+    for (const s of states) {
+      for (const id of CHECK_IDS) {
+        const results = faults.faults.map((f) => apply(machine, f, s, check(s.t + 1, id)).ok);
+        expect(new Set(results).size, id).toBe(1);
+      }
+    }
+  });
+
+  it("its result is the fault's line, and only after the check is done", () => {
+    let s = initialState(machine);
+    expect(clueText(fouledPlug, s, "listen_pull")).toBeNull();
+    s = step(s, check(1, "listen_pull"));
+    expect(clueText(fouledPlug, s, "listen_pull")).toBe(fouledPlug.clues.listen_pull);
+    expect(clueText(cloggedJet, s, "listen_pull")).toBe(cloggedJet.clues.listen_pull);
+    expect(clueText(fouledPlug, s, "look_smoke")).toBeNull();
+    expect(clueText(fouledPlug, s, "nothing" as CheckId)).toBeNull();
+  });
+
+  it("the checks' seconds add up from CHECK_SECONDS", () => {
+    expect(checkSeconds([])).toBe(0);
+    expect(checkSeconds(["listen_pull", "spark_test"])).toBe(7);
+    expect(checkSeconds([...CHECK_IDS])).toBe(19);
+  });
+
+  it("the same state and check always give the same result", () => {
+    const s = without("spark_plug");
+    expect(apply(machine, fouledPlug, s, check(99, "spark_test"))).toEqual(apply(machine, fouledPlug, s, check(99, "spark_test")));
   });
 });
