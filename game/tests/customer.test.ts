@@ -123,6 +123,10 @@ describe("bringing the generator, paying, storming off (plan 0017 step 2, ADR 00
     expect(notesShown("arrive", 1)).toBe(false);
     expect(p.notesTaken).toBeLessThan(p.hold);
     expect(p.hold).toBeLessThan(p.lifted);
+    // 2026-10-12 ("no money being exchanged"): the notes are out from 0.55 s to 2.2 s, the hold after they leave the
+    // hand, the generator lifted at 2.7 s, 4.3 s in all. customer.py's CLIP_TIMES and STATUS.md say the same.
+    expect(p).toEqual({ length: 4.3, notesShown: 0.55, notesTaken: 2.2, hold: 2.35, lifted: 2.7 });
+    expect(p.notesTaken - p.notesShown).toBeGreaterThan(1.5);
   });
 
   it("eases in over SETTLE seconds before it lands or is lifted, and the walk-out's parts snap home within 0.3 s", () => {

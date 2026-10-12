@@ -1342,6 +1342,8 @@ try {
   // The arrival, played out: the timer stays at 0:00 while the generator is carried, then the clock runs.
   await load(url.replace("?diag", "?diag&patience=600"));
   await toBriefing();
+  // The round's person downloads behind the briefing (ADR 0023); Start before it arrives plays no arrival, by design.
+  await waitFor("the customer's file", async () => ((await customerNow())?.look ? true : null), 30000);
   const t0 = Date.now();
   await tapSelector(".briefing .primary");
   const a = await watchStory("arrive", [0.2, 0.8, 1.4, 1.9, 2.3, 2.9], "arrive");
@@ -1356,7 +1358,7 @@ try {
   watchEnding = true;
   let pay = { timerDuring: new Set<string>(), notes: false, carried: false, bench: false, lastT: 0 };
   onWinningPull = async () => {
-    pay = await watchStory("pay_leave", [0.3, 0.9, 1.3, 1.8, 2.4, 3.2], "pay_leave");
+    pay = await watchStory("pay_leave", [0.3, 1.0, 1.6, 2.1, 3.0, 3.9], "pay_leave");
   };
   await solveRound();
   onWinningPull = null;

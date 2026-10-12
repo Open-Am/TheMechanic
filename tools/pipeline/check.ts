@@ -335,6 +335,9 @@ export const CUSTOMER_NODES = ["grip_r", "grip_l", "notes"] as const;
 /** Most triangles the notes prop may have (ADR 0026). */
 export const NOTES_TRIANGLES = 300;
 
+/** The face's morph targets every customer carries (2026-10-12: the smile while paying and when pleased). */
+export const CUSTOMER_MORPHS = ["smile"] as const;
+
 /**
  * One customer's file (ADRs 0015 and 0023, plan 0015 step 4): one root node customer_<look> for a look in
  * customers.json and nothing else; within the triangle, joint, texture and byte budgets; every clip present.
@@ -369,6 +372,8 @@ export function checkCustomer(glb: Glb, look: string, looks: readonly string[], 
     under.add(i);
     stack.push(...(nodes[i]?.children ?? []));
   }
+  const targets = new Set((glb.json.meshes ?? []).flatMap((m) => ((m as { extras?: { targetNames?: unknown } }).extras?.targetNames as string[] | undefined) ?? []));
+  for (const t of CUSTOMER_MORPHS) if (!targets.has(t)) errors.push(`${look} has no "${t}" morph target.`);
   for (const n of CUSTOMER_NODES) {
     const index = nodes.findIndex((x) => x.name === `${look}_${n}`);
     if (index < 0) errors.push(`${look} has no node "${look}_${n}".`);
