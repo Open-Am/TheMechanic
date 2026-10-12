@@ -204,13 +204,16 @@ async function down(x: number, y: number, clickCount = 1): Promise<void> {
   if (input === "mouse") await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount });
   else await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y, id: 1, radiusX: 6, radiusY: 6, force: 1 }] });
 }
-async function move(x: number, y: number): Promise<void> {
-  if (input === "mouse") await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
-  else await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y, id: 1, radiusX: 6, radiusY: 6, force: 1 }] });
+/** `at`: the event's own time stamp, seconds since the epoch, as a phone's touch screen stamps it; default now. */
+async function move(x: number, y: number, at?: number): Promise<void> {
+  const t = at === undefined ? {} : { timestamp: at };
+  if (input === "mouse") await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1, ...t });
+  else await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y, id: 1, radiusX: 6, radiusY: 6, force: 1 }], ...t });
 }
-async function up(x: number, y: number, clickCount = 1): Promise<void> {
-  if (input === "mouse") await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount });
-  else await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+async function up(x: number, y: number, clickCount = 1, at?: number): Promise<void> {
+  const t = at === undefined ? {} : { timestamp: at };
+  if (input === "mouse") await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount, ...t });
+  else await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [], ...t });
 }
 /** Two quick taps, the second landing a few pixels off the first, as a thumb does. */
 async function doubleTap(x: number, y: number): Promise<void> {
@@ -484,11 +487,12 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
       continue;
     }
     row.dropTries++;
+    if (DEBUG) await evaluate(`window.__lt = []; if (!window.__ltObs) { window.__ltObs = true; const rec = (l) => { for (const e of l.getEntries()) window.__lt.push([e.entryType, e.name, Math.round(e.startTime), Math.round(e.duration), Math.round((e.processingEnd ?? 0) - (e.processingStart ?? 0))]); }; new PerformanceObserver(rec).observe({ type: 'longtask' }); new PerformanceObserver(rec).observe({ type: 'event', durationThreshold: 16 }); } true`);
     const to = await dropPoint(place, start.x);
     const from = { x: start.x, y: start.y + 15 };
     if (place === "flick") {
       // Brought to 200 px above the release at a walk (up first if the part starts lower), then flicked down: five
-      // 40 px moves sent back to back, and the thumb lifts while still moving, so the release is reported above the zone.
+      // 40 px moves a few ms apart, and the thumb lifts while still moving, so the release is reported above the zone.
       const via = { x: to.x, y: Math.max(100, to.y - 200) };
       for (let i = 1; i <= 12; i++) {
         await move(from.x + ((via.x - from.x) * i) / 12, from.y + ((via.y - from.y) * i) / 12);
@@ -496,8 +500,12 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
       }
       await sleep(120); // a beat at the top, as a thumb gathers itself
       const flick = Math.max(4, Math.round((to.y - via.y) / 40));
-      for (let i = 1; i <= flick; i++) await move(to.x, via.y + ((to.y - via.y) * i) / flick);
-      await up(to.x, to.y);
+      // Stamped 8 ms apart, as a 120 Hz touch screen stamps them: the page can take a frame or more to handle each one
+      // (the hand's collision check while carrying is slow in headless Edge), and the stamps, not the handling, are
+      // what the game measures, on a phone too.
+      const t0 = Date.now() / 1000;
+      for (let i = 1; i <= flick; i++) await move(to.x, via.y + ((to.y - via.y) * i) / flick, t0 + (i * 8) / 1000);
+      await up(to.x, to.y, 1, t0 + ((flick + 1) * 8) / 1000);
     } else {
       const steps = 24;
       for (let i = 1; i <= steps; i++) {
@@ -508,6 +516,7 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
       await sleep(30);
       await up(to.x, to.y);
     }
+    if (DEBUG) { await sleep(300); console.log(`   long tasks ${JSON.stringify(await evaluate("window.__lt"))}`); }
     if (DEBUG) console.log(`   released at ${JSON.stringify(to)} flick ${JSON.stringify(await evaluate("window.__openAmDevRender.lastFlick ? window.__openAmDevRender.lastFlick() : null"))}`);
     if (await waitFor("in the tray", () => trayHas(id), 2000).catch(() => false)) {
       row.how = String((await evaluate<string | null>(`window.__openAmDevRender.lastDrop ? window.__openAmDevRender.lastDrop() : null`)) ?? "?");
