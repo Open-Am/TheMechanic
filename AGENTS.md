@@ -71,7 +71,7 @@ Unit tests are part of every piece of work, written while the code is written. A
 
 ## Do not build these
 
-Accounts, backend, leaderboards, community-submitted content, moderation, money, shop upgrades, tools, haggling, more machines, a learn mode, multiplayer. If the owner wants one, it starts as an ADR.
+Accounts, backend, leaderboards, community-submitted content, moderation, haggling, more machines, a learn mode, multiplayer. Money and tools that save time exist only as ADR 0033 decides (earned and bought in the workshop day; no real money, no ads, no purchases). If the owner wants one, it starts as an ADR.
 
 ## Commands
 

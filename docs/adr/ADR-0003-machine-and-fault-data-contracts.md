@@ -31,3 +31,4 @@ Artists and future contributors can rely on the format. Agents must route any sc
 
 - 2026-10-10: proposed by Claude, from the brief.
 - 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.
+- 2026-10-12: ADRs 0029 (checks in machine.json, clues in faults.json, schema 2) and 0030 (three new parts, fault difficulty) extend these contracts; no id or field is renamed.

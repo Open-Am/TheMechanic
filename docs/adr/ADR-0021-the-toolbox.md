@@ -47,3 +47,4 @@ Work this creates, for a plan: the toolbox model and its place in the scene, and
 - 2026-10-11: proposed by Claude, from the owner's message quoted above.
 - 2026-10-11: accepted by the owner, who wrote "I approve ADR 21."
 - 2026-10-12: ADR 0025 (the workbench) moves the toolbox from the ground to the left end of the bench. The rest of this ADR stands.
+- 2026-10-12: ADR 0033 replaces "There is no tool to choose, buy, upgrade or lose": in the workshop day tools can be bought and are shown in the toolbox. The rest stands.

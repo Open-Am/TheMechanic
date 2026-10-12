@@ -33,3 +33,4 @@ Leaderboards and replays become possible later without changing the game. The in
 
 - 2026-10-10: proposed by Claude, from the brief.
 - 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.
+- 2026-10-12: ADR 0029 adds the `check` action and the clean-job bonus to the score; ADR 0033 makes the kit an input to the reducer and score in the workshop day. The rest stands.

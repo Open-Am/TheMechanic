@@ -32,3 +32,4 @@ The saved data stays small (about one short record a day) and a format change ca
 
 - 2026-10-11: proposed by Claude, from the gap found while drafting plan 0014.
 - 2026-10-11: accepted by the owner, who wrote "Plan 12, 15 and adr 22 is approved."
+- 2026-10-12: ADR 0031 moves saved data to `openam.scores.v2`; v1 is left in storage and not read. The rest of this ADR's rules carry over to v2.

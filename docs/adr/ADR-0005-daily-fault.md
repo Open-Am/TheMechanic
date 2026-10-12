@@ -38,3 +38,4 @@ Any client that implements the same hash and epoch produces the same daily. A se
 
 - 2026-10-10: proposed by Claude, from the brief.
 - 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.
+- 2026-10-12: ADR 0031 may add a fourth line to the share text naming a new badge; ADR 0030's new faults change which fault each day picks from the release day on.

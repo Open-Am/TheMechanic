@@ -38,3 +38,4 @@ Any feature request outside this list starts as a proposed ADR that supersedes t
 
 - 2026-10-10: proposed by Claude, from the brief.
 - 2026-10-10: accepted by the owner, who wrote "I accept all the ADRs as is", with ADR 0002 held back for an architecture discussion.
+- 2026-10-12: ADRs 0030 (twelve faults), 0032 (a workshop day mode) and 0033 (money and tools that save time, in the workshop day only) change parts of this scope list; see each. The rest stands.

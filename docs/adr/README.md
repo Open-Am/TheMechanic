@@ -34,3 +34,8 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0026](ADR-0026-customer-arrives-pays-and-leaves.md) | The customer brings the generator, and pays or storms off with it | accepted |
 | [0027](ADR-0027-pulling-the-cord-on-screen.md) | The mechanic pulls the cord on screen, and the engine runs | accepted |
 | [0028](ADR-0028-the-engine-running-sound.md) | The engine's sound runs as long as the engine does | accepted |
+| [0029](ADR-0029-diagnosis-checks.md) | Diagnosis checks before and while taking parts off | accepted |
+| [0030](ADR-0030-more-faults.md) | Six more faults, and three new parts to carry them | accepted |
+| [0031](ADR-0031-badges-and-records.md) | Badges and personal records, and the second saved format | accepted |
+| [0032](ADR-0032-workshop-day.md) | A workshop day of five customers, with reputation | accepted |
+| [0033](ADR-0033-earn-and-upgrade.md) | Earning naira in the workshop day, and tools that save time | accepted |
