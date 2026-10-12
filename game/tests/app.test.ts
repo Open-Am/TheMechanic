@@ -11,8 +11,8 @@ import { conditionText } from "../src/core/reducer.ts";
 import { removalOrder } from "../src/core/rules.ts";
 import { score } from "../src/core/score.ts";
 import type { CustomerFile } from "../src/core/types.ts";
-import type { Moment, ScoreStore, StoredResult, VibrationPattern } from "../src/platform/interfaces/index.ts";
-import { CORD_SECONDS, MOMENTS, VIBRATION, giveMoment, playMoment } from "../src/app/moments.ts";
+import type { LoopOptions, Moment, ScoreStore, StoredResult, VibrationPattern } from "../src/platform/interfaces/index.ts";
+import { CORD_SECONDS, CUES, MOMENTS, RUN, RUN_LOOP, VIBRATION, giveMoment, playCue, playMoment } from "../src/app/moments.ts";
 import { MOTION_TYPES } from "../src/core/types.ts";
 import { createDailyProvider } from "../src/platform/local/daily.ts";
 import { loadFaults, loadMachine } from "./helpers.ts";
@@ -30,18 +30,21 @@ function recorder() {
   const sounds: Moment[] = [];
   const calls: Array<[Moment, number]> = [];
   const vibrations: Array<[VibrationPattern, number]> = [];
+  const loops: Array<["start", Moment, LoopOptions] | ["stop", Moment, number]> = [];
   const audio = {
     play: (m: Moment, delay = 0) => void (sounds.push(m), calls.push([m, delay])),
     vibrate: (p: VibrationPattern, delay = 0) => void vibrations.push([p, delay]),
+    startLoop: (m: Moment, o: LoopOptions = {}) => void loops.push(["start", m, o]),
+    stopLoop: (m: Moment, o: { fadeOutSeconds?: number } = {}) => void loops.push(["stop", m, o.fadeOutSeconds ?? 0]),
   };
-  return { audio, sounds, calls, vibrations };
+  return { audio, sounds, calls, vibrations, loops };
 }
-const silent = { play: () => {}, vibrate: () => {} };
+const silent = { play: () => {}, vibrate: () => {}, startLoop: () => {}, stopLoop: () => {} };
 
 /** A game whose random always picks the fault with this ID. */
 function setup(faultId: string) {
   const clock = fakeClock();
-  const { audio, sounds, calls, vibrations } = recorder();
+  const { audio, sounds, calls, vibrations, loops } = recorder();
   const index = faults.faults.findIndex((f) => f.id === faultId);
   const random = () => (index + 0.5) / faults.faults.length;
   const game = createGame({ machine, faults, clock, audio, random });
@@ -49,7 +52,7 @@ function setup(faultId: string) {
   for (const name of ["started", "removed", "installed", "inspected", "fixed", "pulled", "refused", "ended"] as const) {
     game.events.on(name, () => seen.push(name));
   }
-  return { game, clock, sounds, calls, vibrations, seen };
+  return { game, clock, sounds, calls, vibrations, seen, loops };
 }
 
 describe("emitter", () => {
@@ -141,8 +144,9 @@ describe("game", () => {
   });
 
   it("a failed pull plays the cord then fail and continues; a good pull ends the round with the log's score", () => {
-    const { game, clock, sounds, calls, vibrations } = setup("fouled_plug");
+    const { game, clock, sounds, calls, vibrations, loops } = setup("fouled_plug");
     game.newRound();
+    expect(loops).toEqual([["stop", "run", 0]]); // a new round cuts any engine still running (ADR 0028)
     game.begin();
     let ended: GameEvents["ended"] | null = null;
     game.events.on("ended", (e) => (ended = e));
@@ -150,6 +154,7 @@ describe("game", () => {
     game.propose({ type: "pull" });
     expect(calls).toEqual([["cord", 0], ["fail", CORD_SECONDS]]);
     expect(vibrations).toEqual([[40, CORD_SECONDS]]);
+    expect(loops.filter((l) => l[0] === "start")).toEqual([]); // a failed start does not run
     expect(game.running).toBe(true);
     for (const [type, partId] of [["remove", "plug_cap"], ["remove", "spark_plug"], ["fix", "spark_plug"], ["install", "spark_plug"], ["install", "plug_cap"]] as const) {
       clock.advance(1000);
@@ -160,6 +165,8 @@ describe("game", () => {
     expect(sounds.slice(-2)).toEqual(["cord", "start"]);
     expect(calls.at(-1)).toEqual(["start", CORD_SECONDS]);
     expect(vibrations.at(-1)).toEqual([VIBRATION.start, CORD_SECONDS]);
+    // ADR 0028: the engine runs on after the catch, looping until render's ending stops it.
+    expect(loops.at(-1)).toEqual(["start", "run", { after: "start", delaySeconds: CORD_SECONDS, fadeInSeconds: RUN.crossfadeSeconds, loopStart: RUN_LOOP.start, loopEnd: RUN_LOOP.end }]);
     expect(sounds.filter((m) => m === "seat")).toEqual([]); // the seat comes from render, when the part reaches home
     expect(game.running).toBe(false);
     expect(ended).not.toBeNull();
@@ -609,8 +616,30 @@ describe("today's fault and saved results (ADR 0005, ADR 0022, ADR 0024)", () =>
 });
 
 describe("moments (ADR 0018, plan 0013 step 2)", () => {
-  it("has the ten moments of plan 0013, one file name each", () => {
-    expect([...MOMENTS]).toEqual(["turn", "give-unbolt", "give-unclip", "give-pull", "give-scrape", "land", "seat", "cord", "fail", "start"]);
+  it("has the ten moments of plan 0013 and the engine running of ADR 0028, one file name each", () => {
+    expect([...MOMENTS]).toEqual(["turn", "give-unbolt", "give-unclip", "give-pull", "give-scrape", "land", "seat", "cord", "fail", "start", "run"]);
+    expect(VIBRATION.run).toBeNull(); // ADR 0028: the vibration is the catch's pattern only
+  });
+
+  it("the engine cues: run-start follows the catch with a crossfade and loops; run-stop fades over 0.8 s; run-cut stops at once (ADR 0028)", () => {
+    expect([...CUES]).toEqual(["run-start", "run-stop", "run-cut"]);
+    const { audio, sounds, loops, vibrations } = recorder();
+    playCue(audio, "run-start", CORD_SECONDS);
+    playCue(audio, "run-stop");
+    playCue(audio, "run-cut");
+    playCue(audio, "seat");
+    expect(loops).toEqual([
+      ["start", "run", { after: "start", delaySeconds: CORD_SECONDS, fadeInSeconds: RUN.crossfadeSeconds, loopStart: RUN_LOOP.start, loopEnd: RUN_LOOP.end }],
+      ["stop", "run", 0.8],
+      ["stop", "run", 0],
+    ]);
+    expect(RUN.fadeOutSeconds).toBe(0.8);
+    // Until plan 0018 stops it at the switch: it runs on 2 s after the ending, about 6 s from the pull in all (ADR 0027).
+    expect(RUN.runOnSeconds).toBe(2);
+    expect(sounds).toEqual(["seat"]);
+    expect(vibrations).toEqual([[15, 0]]);
+    expect(RUN_LOOP.end - RUN_LOOP.start).toBeGreaterThanOrEqual(1);
+    expect(RUN_LOOP.end - RUN_LOOP.start).toBeLessThanOrEqual(3);
   });
 
   it("vibrates as ADR 0018's table says: gives and seat about 15 ms, fail about 40 ms, start a pattern under 300 ms", () => {

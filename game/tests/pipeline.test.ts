@@ -3,7 +3,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MOMENTS } from "../src/platform/interfaces/index.ts";
-import { checkAudio, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
+import { RUN_LOOP } from "../src/app/moments.ts";
+import { checkAudio, checkLoop, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
 import { CUSTOMER_CLIPS, CUSTOMER_NODES, checkBench, checkCustomer, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
@@ -433,7 +434,7 @@ describe("sounds (ADR 0018, plan 0013 step 4)", () => {
     // Once any file ships, every file is required, as in npm run audio.
     const result = checkAudio(files, licence, MOMENTS, budgets.audioBytes, files.length > 0);
     expect(result.errors).toEqual([]);
-    if (files.length === 0) expect(result.warnings).toEqual([`10 of 10 sound files are missing: ${names().join(", ")}. Until they are added, those moments are silent.`]);
+    if (files.length === 0) expect(result.warnings).toEqual([`${MOMENTS.length} of ${MOMENTS.length} sound files are missing: ${names().join(", ")}. Until they are added, those moments are silent.`]);
     expect(budgets.audioBytes).toBe(250_000);
   });
 
@@ -482,7 +483,7 @@ describe("sounds (ADR 0018, plan 0013 step 4)", () => {
 
   it("fails a missing moment in the release check, and only warns in the game's own tests", () => {
     const files = all().filter((f) => f.name !== "cord.ogg");
-    const missing = "1 of 10 sound files are missing: cord.ogg. Until they are added, those moments are silent.";
+    const missing = `1 of ${MOMENTS.length} sound files are missing: cord.ogg. Until they are added, those moments are silent.`;
     expect(check(files).errors).toEqual([missing]);
     const relaxed = check(files, cc0(), budgets.audioBytes, false);
     expect(relaxed.errors).toEqual([]);
@@ -523,7 +524,50 @@ describe("sounds (ADR 0018, plan 0013 step 4)", () => {
     for (const [m, s] of Object.entries(file.sounds)) {
       if (s.licence !== null) expect(["CC0 1.0", "own recording"], m).toContain(s.licence);
       if (s.source !== null) expect(s.end, m).toBeGreaterThan(s.start);
+      expect(checkLoop(m, s), m).toEqual([]);
+      expect(s.loop === true, m).toBe(m === "run"); // only the engine running loops (ADR 0028)
     }
+  });
+
+  it("the game loops run.ogg where sounds.json says, in seconds into the encoded file (ADR 0028)", () => {
+    const run = (JSON.parse(readFileSync(join(root, "assets", "audio", "sounds.json"), "utf8")) as { sounds: Record<string, SoundSource> }).sounds.run!;
+    expect(RUN_LOOP.start).toBeCloseTo(run.loopStart! - run.start, 6);
+    expect(RUN_LOOP.end).toBeCloseTo(run.loopEnd! - run.start, 6);
+  });
+
+  describe("checkLoop (ADR 0028: a seamless loop of 1 to 3 s)", () => {
+    const base: SoundSource = { source: "a.wav", url: "u", author: "x", licence: "CC0 1.0", fetched: "2026-10-12", start: 1, end: 4, fadeIn: 0, fadeOut: 0, gainDb: 0, loop: true, loopStart: 1.1, loopEnd: 3.6 };
+    it("passes a loop inside its trim, 1 to 3 s long, with no fade reaching it", () => {
+      expect(checkLoop("run", base)).toEqual([]);
+      expect(checkLoop("run", { ...base, fadeIn: 0.1, fadeOut: 0.4 })).toEqual([]);
+    });
+    it("passes a row that does not loop and has no loop points", () => {
+      const { loop: _l, loopStart: _s, loopEnd: _e, ...plain } = base;
+      expect(checkLoop("turn", plain)).toEqual([]);
+    });
+    it("refuses loop points outside the trim, in the wrong order, or missing", () => {
+      expect(checkLoop("run", { ...base, loopStart: 0.9 })).toHaveLength(1);
+      expect(checkLoop("run", { ...base, loopEnd: 4.1 })).toHaveLength(1);
+      expect(checkLoop("run", { ...base, loopStart: 3.6, loopEnd: 1.1 }).length).toBeGreaterThan(0);
+      const { loopEnd: _e, ...missing } = base;
+      expect(checkLoop("run", missing)).toHaveLength(1);
+    });
+    it("refuses a loop shorter than 1 s or longer than 3 s", () => {
+      expect(checkLoop("run", { ...base, loopEnd: 2.0 })).toHaveLength(1);
+      expect(checkLoop("run", { ...base, start: 0, end: 5, loopStart: 0.5, loopEnd: 3.6 })).toHaveLength(1);
+    });
+    it("refuses a fade that reaches into the loop, which would dip at every seam", () => {
+      expect(checkLoop("run", { ...base, fadeIn: 0.2 })).toHaveLength(1);
+      expect(checkLoop("run", { ...base, fadeOut: 0.5 })).toHaveLength(1);
+    });
+    it("refuses loop points on a row that does not loop", () => {
+      expect(checkLoop("turn", { ...base, loop: false })).toHaveLength(1);
+    });
+  });
+
+  it("LICENCE.md says where a looping sound loops", () => {
+    const row: SoundSource = { source: "a.wav", url: "https://freesound.org/people/x/sounds/1/", author: "x", licence: "CC0 1.0", fetched: "2026-10-12", start: 1.15, end: 3.62, fadeIn: 0, fadeOut: 0, gainDb: 0, loop: true, loopStart: 1.260227, loopEnd: 3.50873 };
+    expect(licenceText({ run: row }, ["run"])).toContain("| run.ogg | https://freesound.org/people/x/sounds/1/ | x | CC0 1.0 | 2026-10-12 | 1.15–3.62 s, loops 1.260227–3.508730 s |");
   });
 });
 
