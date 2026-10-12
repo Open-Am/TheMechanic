@@ -12,7 +12,7 @@ Accepted on the owner's advance approval ("Build all four directions", 2026-10-1
 
 | Branch | Worktree | State |
 | --- | --- | --- |
-| `fix/easier-drop` | `TheMechanic-drop2` | Drop is near the generator, by proximity, flicks count, onto other parts, the tray re-flows. 336/336 drops first time, but the frame rate fell as parts came off in two full runs; its agent is measuring and fixing that. Merge only when two drop runs hold the frame rate. |
+| `fix/easier-drop` | `TheMechanic-drop2` | Drop is near the generator, by proximity, flicks count, onto other parts, the tray re-flows. 336/336 drops first time. The "frame rate fell" failures were the check reading one noisy second per round; it now takes the median of three (80b5afa). Carry moves made cheaper (2078015); no resting cost against main. Closing checks NOT run (machine on battery, throttled): run verify:drop twice and verify:phone once under the lock on mains power, then merge. |
 | `plan/0018-pulling-the-cord` | `TheMechanic-0018` | The pull, the engine running, the customer paying into the mechanic's hand, the switch, the wind-down; both checks passed earlier. Being fixed so the arm reaches the notes from the lower left instead of across the generator. Merge after its checks. |
 | `plan/0019-diagnosis-and-faults` | `TheMechanic-0019` | Plans 0019 and 0020 without the Blender models: the `check` action, clues, the six new faults and three new parts as data and placeholders. The new parts' models wait for plan 0018 to merge (both edit `gen950.blend`). |
 
