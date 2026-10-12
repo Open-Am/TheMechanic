@@ -1,15 +1,25 @@
-// Browser check for removal (ADR 0020, release 0.9.3): takes all twelve parts off one after another, as a player does,
-// and records how many tries each step needed. No dependencies: drives Edge or Chrome over the DevTools protocol.
+// Browser check for removal (ADR 0020, releases 0.9.3 and 0.15.1): takes all twelve parts off one after another, as a
+// player does, and records how many tries each step needed. No dependencies: drives Edge or Chrome over the DevTools
+// protocol.
 //
-//   node tools/verify/drop-play.ts [--out <dir>] [--browser <path>] [--input mouse,touch] [--drop chips,above-cord,bottom,cord]
-//                                [--viewport 390x844]
+//   node tools/verify/drop-play.ts [--out <dir>] [--browser <path>] [--input mouse,touch]
+//                                [--drop below,bench,mid-controls,hint,flick,magnet,chips] [--viewport 390x844,360x640]
 //   npm run verify:drop -- --out <dir>
 //   OPEN_AM_PORT=5299 OPEN_AM_DEBUG_PORT=9433 run it beside another copy (defaults 5199 and 9333). The browser profile is
 //   a fresh temporary folder on every run.
 //
-// For every input (mouse events, or touch events with touch emulation so pointerType is "touch") and every drop place
-// (on the tray chips, just above the pull cord, at the very bottom of the screen, on the pull cord button) it plays one
-// round, taking the twelve parts off in an order the rules allow. Each removal is:
+// For every screen size, every input (mouse events, or touch events with touch emulation so pointerType is "touch") and
+// every drop place a real thumb uses (release 0.15.1) it plays one round, taking the twelve parts off in an order the
+// rules allow. The drop places:
+//   below         just below the generator's lowest point on screen;
+//   bench         on the bench top's near edge, below the generator;
+//   mid-controls  half-way down the controls (pull cord and tray);
+//   hint          on the "Drop it here" label;
+//   flick         a fast flick downward, released over the generator a little above the zone (it counts where it was
+//                 heading);
+//   magnet        released beside the generator, a little above the zone, within the magnet's reach;
+//   chips         right on top of the chips already in the tray (on the last one).
+// Each removal is:
 //   1. a double tap (double click) where a player would aim: the visible point of the part nearest the middle of its
 //      picture, not a point searched out of its hit volume;
 //   2. a press on the loose part, again where it shows, and a drag; the carry must start on that press;
@@ -18,9 +28,11 @@
 // turning the machine first, which is not counted as a try; one that never shows (the capacitor) is aimed at through
 // its hit volume. It prints a table per round (tries for each step, what the finger landed on, the controls' top edge
 // and the machine's lowest point on screen, the double tap's lift-to-lift time and input lag as the page saw them, the
-// frame rate from the diagnostic overlay, running tweens), saves screenshots after 0, 4, 8, 11 and 12 removals, and
-// exits 1 unless every step of every removal worked on the first try, the machine never went under the controls, the
-// frame rate held, and the console stayed clean. DROP_DEBUG=1 prints every aim, press and pointer event.
+// frame rate from the diagnostic overlay, running tweens, how the drop counted), saves screenshots after 0, 4, 8, 11 and
+// 12 removals and one while carrying, and exits 1 unless every step of every removal worked on the first try, the tray
+// showed every chip with none overlapping or hidden after every drop, a part released over the generator itself went
+// back (removals 1 and 7 of every round try that first), the machine never went under the controls, the frame rate held,
+// and the console stayed clean. DROP_DEBUG=1 prints every aim, press and pointer event.
 // The game must be the development build: it reads the dev hook window.__openAmDevRender.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -53,9 +65,9 @@ if (!browserPath) {
 }
 
 type Input = "mouse" | "touch";
-type DropPlace = "chips" | "above-cord" | "bottom" | "cord";
+type DropPlace = "below" | "bench" | "mid-controls" | "hint" | "flick" | "magnet" | "chips";
 const INPUTS = (arg("--input") ?? "mouse,touch").split(",") as Input[];
-const DROPS = (arg("--drop") ?? "chips,above-cord,bottom,cord").split(",") as DropPlace[];
+const DROPS = (arg("--drop") ?? "below,bench,mid-controls,hint,flick,magnet,chips").split(",") as DropPlace[];
 
 const machine = JSON.parse(readFileSync(join(root, "game", "public", "machines", "gen950", "machine.json"), "utf8")) as Machine;
 /** Every part, each after the parts it requires. */
@@ -72,12 +84,14 @@ const ORDER: string[] = (() => {
 
 const PORT = Number(process.env.OPEN_AM_PORT) || 5199;
 const DEBUG_PORT = Number(process.env.OPEN_AM_DEBUG_PORT) || 9333;
-const VIEWPORT = (() => {
-  const m = /^(\d+)x(\d+)$/.exec(arg("--viewport") ?? "");
-  return m ? { width: Number(m[1]), height: Number(m[2]) } : { width: 390, height: 844 };
-})();
+const VIEWPORTS = (arg("--viewport") ?? "390x844,360x640").split(",").map((v) => {
+  const m = /^(\d+)x(\d+)$/.exec(v.trim());
+  if (!m) throw new Error(`--viewport: ${v} is not WIDTHxHEIGHT`);
+  return { width: Number(m[1]), height: Number(m[2]) };
+});
+let VIEWPORT = VIEWPORTS[0]!;
 /** A camera drag on empty background, to bring a hidden part into view. */
-const ROTATE = { x0: Math.round(VIEWPORT.width * 0.6), y0: 140, x1: Math.min(VIEWPORT.width - 5, Math.round(VIEWPORT.width * 0.6) + 140), y1: 140 };
+const rotateDrag = () => ({ x0: Math.round(VIEWPORT.width * 0.6), y0: 140, x1: Math.min(VIEWPORT.width - 5, Math.round(VIEWPORT.width * 0.6) + 140), y1: 140 });
 const TRIES = 5;
 /** DROP_DEBUG=1 prints every try's aim point and the pointer events the page saw. */
 const DEBUG = !!process.env.DROP_DEBUG;
@@ -241,22 +255,73 @@ async function tapSelector(selector: string): Promise<void> {
   await up(x, y);
 }
 
+type Box = { top: number; bottom: number; left: number; right: number };
+/** The generator's bounds on screen as the drop zone sees them; before 0.15.1 only its lowest point is known. */
+async function machineBox(): Promise<Box | null> {
+  const box = await evaluate<Box | null>(`window.__openAmDevRender.machineBox ? window.__openAmDevRender.machineBox() : null`);
+  if (box) return box;
+  const low = await evaluate<{ y: number } | null>(hook("machineBottom()"));
+  return low ? { top: 0, bottom: low.y, left: VIEWPORT.width * 0.2, right: VIEWPORT.width * 0.8 } : null;
+}
+/** The magnet's reach for this screen (game/src/ui/format.ts, magnetPx). */
+const magnet = () => Math.min(80, Math.max(56, Math.round(VIEWPORT.height * 0.09)));
+/** The zone's top edge (game/src/ui/format.ts, dropLine): 8 px below the generator, never below the controls' top. */
+const zoneLine = (machine: Box | null, controls: Box) => (machine ? Math.min(machine.bottom + 8, controls.top) : controls.top - 64);
+
 /** The drop point for a place, read while the part is carried (the controls are laid out for carrying then). */
 async function dropPoint(place: DropPlace, x: number): Promise<{ x: number; y: number }> {
-  const pull = (await rect(".pull"))!;
-  const tray = (await rect(".tray-host"))!;
+  const controls = (await rect(".controls"))!;
+  const machine = await machineBox();
+  const line = zoneLine(machine, controls);
   const dx = Math.min(VIEWPORT.width - 30, Math.max(30, x));
+  const mid = machine ? (machine.left + machine.right) / 2 : VIEWPORT.width / 2;
   switch (place) {
-    case "chips":
-      return { x: dx, y: (tray.top + tray.bottom) / 2 };
-    case "above-cord":
-      return { x: dx, y: pull.top - 24 };
-    case "bottom":
-      return { x: dx, y: VIEWPORT.height - 2 };
-    case "cord":
-      return { x: (pull.left + pull.right) / 2, y: (pull.top + pull.bottom) / 2 };
+    case "below":
+      return { x: mid, y: (machine?.bottom ?? line) + 14 };
+    case "bench": {
+      const e = await evaluate<{ x: number; y: number } | null>(`window.__openAmDevRender.benchEdge ? window.__openAmDevRender.benchEdge() : null`);
+      return e ? { x: Math.min(VIEWPORT.width - 30, Math.max(30, e.x)), y: e.y } : { x: dx, y: line + 30 };
+    }
+    case "mid-controls":
+      return { x: dx, y: (controls.top + controls.bottom) / 2 };
+    case "hint": {
+      const h = await rect(".drop-label");
+      return h && h.bottom > h.top ? { x: (h.left + h.right) / 2, y: (h.top + h.bottom) / 2 } : { x: dx, y: (controls.top + controls.bottom) / 2 };
+    }
+    case "flick":
+      return { x: mid, y: line - 40 };
+    case "magnet": {
+      // Beside the generator, on the side with more room, 60 percent of the magnet's reach above the zone.
+      const left = machine ? machine.left : 0;
+      const right = machine ? VIEWPORT.width - machine.right : 0;
+      return { x: left >= right ? Math.max(8, left / 2) : Math.min(VIEWPORT.width - 8, VIEWPORT.width - right / 2), y: line - Math.round(magnet() * 0.6) };
+    }
+    case "chips": {
+      const last = await rect(".tray .chip:last-child");
+      const tray = (await rect(".tray-host"))!;
+      return last ? { x: (last.left + last.right) / 2, y: (last.top + last.bottom) / 2 } : { x: dx, y: (tray.top + tray.bottom) / 2 };
+    }
   }
 }
+
+/** After a drop: every chip in the tray on screen, none overlapping another, none hidden under anything. */
+const trayLayout = () =>
+  evaluate<{ n: number; bad: string[] }>(`(() => {
+    const cs = [...document.querySelectorAll(".tray .chip")];
+    const r = cs.map((c) => c.getBoundingClientRect());
+    const bad = [];
+    r.forEach((a, i) => {
+      const id = cs[i].dataset.part;
+      if (a.left < -0.5 || a.right > innerWidth + 0.5 || a.top < -0.5 || a.bottom > innerHeight + 0.5) bad.push(id + " off screen");
+      const e = document.elementFromPoint((a.left + a.right) / 2, (a.top + a.bottom) / 2);
+      if (!e || e.closest(".chip") !== cs[i]) bad.push(id + " hidden");
+      for (let j = i + 1; j < r.length; j++) {
+        const b = r[j];
+        if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) bad.push(id + "/" + cs[j].dataset.part + " overlap");
+      }
+    });
+    return { n: cs.length, bad };
+  })()`);
 
 interface Row {
   n: number;
@@ -278,6 +343,12 @@ interface Row {
   lag: number;
   fps: number;
   tweens: number;
+  /** How the drop counted: "finger" (the finger or the part in reach), "flick", or "back". */
+  how: string;
+  /** "ok", "-" when not tried, or what went wrong, for a release over the generator itself. */
+  back: string;
+  /** "ok" or what is wrong with the tray's chips after the drop. */
+  layout: string;
   ok: boolean;
   note: string;
 }
@@ -298,13 +369,50 @@ async function bringIntoView(id: string): Promise<{ at: Aim | null; turns: numbe
       const p = await evaluate<{ x: number; y: number } | null>(hook(`probe(${JSON.stringify(id)})`));
       if (p && p.y > 90 && (await landsOn(p.x, p.y)) === "canvas") return { at: { x: p.x, y: p.y, pick: id, solid: false, hidden: true }, turns };
     }
-    await drag(ROTATE.x0, ROTATE.y0, ROTATE.x1, ROTATE.y1);
+    const r = rotateDrag();
+    await drag(r.x0, r.y0, r.x1, r.y1);
   }
   return { at: null, turns };
 }
 
+/** Carries the loose part to the generator's middle, holds still, and lets go there: it must go back, still loose. */
+async function releaseOverMachine(id: string): Promise<string> {
+  await idle();
+  const v = await bringIntoView(id);
+  if (!v.at) return "out of view";
+  const start = v.at;
+  await down(start.x, start.y);
+  await sleep(20);
+  for (let i = 1; i <= 3; i++) {
+    await move(start.x, start.y + 5 * i);
+    await sleep(16);
+  }
+  if ((await carrying()) !== id) {
+    await up(start.x, start.y + 15);
+    return "carry did not start";
+  }
+  const m = await machineBox();
+  const to = m ? { x: (m.left + m.right) / 2, y: m.top + (m.bottom - m.top) * 0.45 } : { x: start.x, y: start.y };
+  for (let i = 1; i <= 16; i++) {
+    await move(start.x + ((to.x - start.x) * i) / 16, start.y + 15 + ((to.y - start.y - 15) * i) / 16);
+    await sleep(16);
+  }
+  await sleep(200);
+  await up(to.x, to.y);
+  await sleep(100);
+  if (await trayHas(id)) return `removed when released over the generator at (${Math.round(to.x)}, ${Math.round(to.y)})`;
+  await idle();
+  if (!(await looseNow()).includes(id)) return "not loose after going back";
+  return "ok";
+}
+
+/** Removals with a screenshot taken while the part is carried into the zone. */
+const SHOT_CARRY = new Set([2]);
+let carryShot: string | null = null;
+let shotPrefix = "";
+
 async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> {
-  const row: Row = { n, id, turns: 0, loosenTries: 0, carryTries: 0, dropTries: 0, landed: "", spot: "", pickedOther: "", controlsTop: Math.round((await rect(".controls"))!.top), machineBottom: 0, gap: 0, lag: 0, fps: await steadyFps(), tweens: await evaluate<number>(hook("tweenCount()")), ok: false, note: "" };
+  const row: Row = { n, id, turns: 0, loosenTries: 0, carryTries: 0, dropTries: 0, landed: "", spot: "", pickedOther: "", controlsTop: Math.round((await rect(".controls"))!.top), machineBottom: 0, gap: 0, lag: 0, fps: await steadyFps(), tweens: await evaluate<number>(hook("tweenCount()")), how: "", back: "-", layout: "", ok: false, note: "" };
   const low = await evaluate<{ y: number; part: string | null } | null>(hook("machineBottom()"));
   row.machineBottom = low?.y ?? 0;
   if (low && low.y > row.controlsTop) row.note = `under the controls: ${low.part ?? "base"}; `;
@@ -340,6 +448,8 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
     row.note += "did not loosen";
     return row;
   }
+  // Released over the generator itself, the part goes back, loose (ADR 0020). Tried first on removals 1 and 7.
+  if (n === 1 || n === 7) row.back = await releaseOverMachine(id);
   // 2 and 3. Carry and drop.
   while (row.dropTries < TRIES) {
     await idle();
@@ -368,15 +478,37 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
     row.dropTries++;
     const to = await dropPoint(place, start.x);
     const from = { x: start.x, y: start.y + 15 };
-    const steps = 24;
-    for (let i = 1; i <= steps; i++) {
-      await move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
-      await sleep(16);
+    if (place === "flick") {
+      // Brought to 160 px above the release at a walk, then flicked down: four 40 px moves 8 ms apart, and the thumb
+      // lifts while still moving, so the release is reported above the zone.
+      const via = { x: to.x, y: Math.max(from.y, to.y - 160) };
+      for (let i = 1; i <= 12; i++) {
+        await move(from.x + ((via.x - from.x) * i) / 12, from.y + ((via.y - from.y) * i) / 12);
+        await sleep(16);
+      }
+      const flick = Math.max(4, Math.round((to.y - via.y) / 40));
+      for (let i = 1; i <= flick; i++) {
+        await move(to.x, via.y + ((to.y - via.y) * i) / flick);
+        await sleep(8);
+      }
+      await up(to.x, to.y);
+    } else {
+      const steps = 24;
+      for (let i = 1; i <= steps; i++) {
+        await move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
+        await sleep(16);
+        if (i === steps - 2 && SHOT_CARRY.has(n) && !carryShot) carryShot = await screenshot(`${shotPrefix}-carrying-${n}`);
+      }
+      await sleep(30);
+      await up(to.x, to.y);
     }
-    await sleep(30);
-    await up(to.x, to.y);
     if (await waitFor("in the tray", () => trayHas(id), 2000).catch(() => false)) {
-      row.ok = row.loosenTries === 1 && row.carryTries === 1 && row.dropTries === 1;
+      row.how = String((await evaluate<string | null>(`window.__openAmDevRender.lastDrop ? window.__openAmDevRender.lastDrop() : null`)) ?? "?");
+      // Let the chips glide into their new rows, then check every chip shows (release 0.15.1).
+      await sleep(350);
+      const lay = await trayLayout();
+      row.layout = lay.n !== n ? `${lay.n} chips for ${n} parts` : lay.bad.length ? lay.bad.join(", ") : "ok";
+      row.ok = row.loosenTries === 1 && row.carryTries === 1 && row.dropTries === 1 && row.layout === "ok" && (row.back === "-" || row.back === "ok");
       return row;
     }
     if (!(await looseNow()).includes(id)) {
@@ -396,8 +528,6 @@ await send("Page.enable");
 // The real sounds play through the speakers (the owner prefers to hear them, 2026-10-12). OPEN_AM_SILENT=1 routes them
 // through a zero gain instead, so the machine stays quiet. Never --mute-audio: see silent-audio.ts.
 if (process.env.OPEN_AM_SILENT === "1") await send("Page.addScriptToEvaluateOnNewDocument", { source: SILENT_AUDIO_SOURCE });
-await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
-
 const SHOTS = new Set([0, 4, 8, 11]);
 const summary: string[] = [];
 let allOk = true;
@@ -405,10 +535,17 @@ let allOk = true;
 let covered = 0;
 const fpsSeen: number[][] = [];
 
+const carryShots: string[] = [];
+for (const vp of VIEWPORTS) {
+VIEWPORT = vp;
+const size = `${vp.width}x${vp.height}`;
+await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
 for (const inp of INPUTS) {
   input = inp;
   await send("Emulation.setTouchEmulationEnabled", { enabled: inp === "touch", maxTouchPoints: 5 });
   for (const place of DROPS) {
+    shotPrefix = `${size}-${inp}-${place}`;
+    carryShot = null;
     await send("Page.navigate", { url });
     await tapSelector(".start .free"); // the start screen (plan 0014): free play
     await waitFor("the briefing", () => evaluate<boolean>("!!document.querySelector('.briefing')"), 20000);
@@ -428,7 +565,7 @@ for (const inp of INPUTS) {
     const rows: Row[] = [];
     const roundFps: number[] = [];
     for (let i = 0; i < ORDER.length; i++) {
-      if (SHOTS.has(i)) console.log(`   screenshot ${await screenshot(`${inp}-${place}-after-${i}`)}`);
+      if (SHOTS.has(i)) console.log(`   screenshot ${await screenshot(`${shotPrefix}-after-${i}`)}`);
       const row = await removeOne(i + 1, ORDER[i]!, place);
       rows.push(row);
       roundFps.push(row.fps);
@@ -436,18 +573,28 @@ for (const inp of INPUTS) {
       if (row.machineBottom > row.controlsTop) covered++;
       if (!(await trayHas(ORDER[i]!))) break; // the rest depend on it, or the round is broken
     }
-    if (rows.length === ORDER.length && rows[rows.length - 1]!.ok) console.log(`   screenshot ${await screenshot(`${inp}-${place}-after-12`)}`);
+    if (rows.length === ORDER.length && rows[rows.length - 1]!.ok) console.log(`   screenshot ${await screenshot(`${shotPrefix}-after-12`)}`);
+    if (carryShot) {
+      console.log(`   screenshot while carrying ${carryShot}`);
+      carryShots.push(carryShot);
+    }
     fpsSeen.push(roundFps);
-    console.log(`\n${inp}, dropped ${place}:`);
-    console.log(" #  part              spot  turns loosen carry drop  lands on  picks      ctrl-top mach-bot  gap  lag fps tweens  result");
+    console.log(`\n${size}, ${inp}, dropped ${place}:`);
+    console.log(" #  part              spot  turns loosen carry drop  lands on  picks      ctrl-top mach-bot  gap  lag fps tweens how    back layout  result");
     for (const r of rows) {
       console.log(
-        `${String(r.n).padStart(2)}  ${r.id.padEnd(17)} ${r.spot.padEnd(5)} ${String(r.turns).padStart(5)} ${String(r.loosenTries).padStart(6)} ${String(r.carryTries).padStart(5)} ${String(r.dropTries).padStart(4)}  ${r.landed.padEnd(9)} ${(r.pickedOther || "-").padEnd(10)} ${String(r.controlsTop).padStart(8)} ${String(r.machineBottom).padStart(8)} ${String(r.gap).padStart(4)} ${String(r.lag).padStart(4)} ${String(r.fps).padStart(3)} ${String(r.tweens).padStart(6)}  ${r.ok ? `ok ${r.note}` : `RETRY ${r.note}`}`,
+        `${String(r.n).padStart(2)}  ${r.id.padEnd(17)} ${r.spot.padEnd(5)} ${String(r.turns).padStart(5)} ${String(r.loosenTries).padStart(6)} ${String(r.carryTries).padStart(5)} ${String(r.dropTries).padStart(4)}  ${r.landed.padEnd(9)} ${(r.pickedOther || "-").padEnd(10)} ${String(r.controlsTop).padStart(8)} ${String(r.machineBottom).padStart(8)} ${String(r.gap).padStart(4)} ${String(r.lag).padStart(4)} ${String(r.fps).padStart(3)} ${String(r.tweens).padStart(6)} ${(r.how || "-").padEnd(6)} ${r.back.padEnd(4)} ${(r.layout || "-").padEnd(7)} ${r.ok ? `ok ${r.note}` : `RETRY ${r.note}`}`,
       );
     }
     const first = rows.filter((r) => r.ok).length;
-    summary.push(`${inp.padEnd(5)} ${place.padEnd(10)} ${first} of ${ORDER.length} removals worked first time${rows.length < ORDER.length ? `, stopped after ${rows.length}` : ""}`);
+    const flicks = rows.filter((r) => r.how === "flick").length;
+    const backs = rows.filter((r) => r.back !== "-");
+    summary.push(
+      `${size.padEnd(7)} ${inp.padEnd(5)} ${place.padEnd(12)} ${first} of ${ORDER.length} removals worked first time${rows.length < ORDER.length ? `, stopped after ${rows.length}` : ""}` +
+        `${place === "flick" ? `, ${flicks} counted as a flick` : ""}; over the generator: ${backs.map((r) => r.back).join(", ") || "not tried"}`,
+    );
   }
+}
 }
 
 // The frame rate must not fall as parts come off: the median of the last third of each round against the first third.
@@ -466,6 +613,7 @@ for (const all of fpsSeen) {
 
 console.log("\nSummary:");
 for (const s of summary) console.log(`   ${s}`);
+if (carryShots.length) console.log(`Carrying screenshots: ${carryShots.join(", ")}`);
 console.log(`Machine under the controls: at the start of ${covered} removal${covered === 1 ? "" : "s"}`);
 console.log(`Frame rate: ${fpsOk ? "held through every round" : "FELL as parts came off"}`);
 console.log(`Console errors: ${consoleErrors.length}`);
