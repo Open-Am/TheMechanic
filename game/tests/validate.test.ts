@@ -123,7 +123,7 @@ describe("fasteners (ADR 0020, plan 0011)", () => {
   it("the shipped draft fasteners are valid, and only on parts that are held on by them", () => {
     expect(validateMachine(machine).issues.filter((i) => i.code.includes("fastener"))).toEqual([]);
     const held = machine.parts.filter((p) => (p.fasteners ?? []).length > 0).map((p) => p.id).sort();
-    expect(held).toEqual(["air_filter_cover", "alternator_cover", "carburetor", "fuel_tank", "muffler", "recoil_starter"]);
+    expect(held).toEqual(["air_filter_cover", "alternator_cover", "carburetor", "fuel_tank", "ignition_coil", "muffler", "recoil_starter"]);
   });
 
   it("ids must be written <part id>.<name> and be unique across the machine", () => {
@@ -269,5 +269,37 @@ describe("clues and difficulty in faults.json (ADR 0029, ADR 0030)", () => {
       (f.faults[0] as unknown as Record<string, unknown>)["difficulty"] = bad;
       expect(codes(f), String(bad)).toContain("bad_difficulty");
     }
+  });
+});
+
+describe("the twelve faults are fair puzzles (ADR 0029, ADR 0030)", () => {
+  it("every two faults differ in at least one check's line", () => {
+    const all = faults.faults;
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const a = all[i]!;
+        const b = all[j]!;
+        expect(CHECK_IDS.some((id) => a.clues[id] !== b.clues[id]), `${a.id} and ${b.id}`).toBe(true);
+      }
+    }
+  });
+
+  it("has the twelve faults of ADR 0030 with their culprits and draft difficulty", () => {
+    const want: Record<string, [string, number]> = {
+      fouled_plug: ["spark_plug", 1],
+      clogged_jet: ["carburetor", 2],
+      blocked_fuel_tap: ["fuel_tap", 2],
+      dead_capacitor: ["capacitor", 2],
+      choked_muffler: ["muffler", 1],
+      dirty_air_filter: ["air_filter", 1],
+      fuel_cap_vent_blocked: ["fuel_cap", 1],
+      fuel_filter_or_pickup_blocked: ["fuel_filter", 2],
+      float_stuck_or_needle_leak: ["carburetor", 3],
+      recoil_rope_or_spring: ["recoil_starter", 1],
+      weak_capacitor_low_output: ["capacitor", 2],
+      ignition_coil_or_magneto: ["ignition_coil", 3],
+    };
+    expect(Object.fromEntries(faults.faults.map((f) => [f.id, [f.culprit, f.difficulty]]))).toEqual(want);
+    expect(machine.parts).toHaveLength(15);
   });
 });

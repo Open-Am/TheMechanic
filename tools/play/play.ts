@@ -122,7 +122,8 @@ for (const action of walkLog) {
   ws = r.state;
   console.log(`   ${label}  (leaves at ${walkOutTime(ws, impatient) / 1000}s)`);
 }
-const walked = scoreState(machine, walkFault, ws, 60_000, impatient);
+// Scored a second after the walk-out, whatever the patience (since release 0.11 customers wait minutes, not seconds).
+const walked = scoreState(machine, walkFault, ws, walkOutTime(ws, impatient) + 1000, impatient);
 console.log(`   ${impatient.name} took the generator away at ${walked.elapsedSeconds}s: outcome ${walked.outcome}, ${walked.stars} stars`);
 if (walked.outcome !== "walked") allOk = false;
 

@@ -52,3 +52,19 @@ describe("dailyFaultId", () => {
     expect(new Set([a, b, c]).size).toBe(3);
   });
 });
+
+describe("the daily over twelve faults (ADR 0030)", () => {
+  it("draws from all twelve shipped faults", () => {
+    expect(faults).toHaveLength(12);
+    const seen = new Set<string>();
+    for (let d = 0; d < 120; d++) seen.add(dailyFaultId(faults, d));
+    expect([...seen].sort()).toEqual(faults.map((f) => f.id).sort());
+  });
+
+  it("indexes over the whole list, so the six old faults alone would give other days (accepted by ADR 0030)", () => {
+    const old = faults.slice(0, 6);
+    let differ = 0;
+    for (let d = 0; d < 30; d++) if (dailyFaultId(old, d) !== dailyFaultId(faults, d)) differ++;
+    expect(differ).toBeGreaterThan(0);
+  });
+});

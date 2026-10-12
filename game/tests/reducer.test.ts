@@ -225,19 +225,39 @@ describe("install", () => {
     expect(r.parts).toEqual(["spark_plug"]);
   });
 
-  it("the fuel hose cannot go back until both the carburetor and the tap are on", () => {
+  it("the fuel hose cannot go back until the carburetor, the filter and the tap are on (ADR 0030)", () => {
     let s = initialState(machine);
     s = step(s, { t: 1, type: "remove", partId: "fuel_hose" });
-    s = step(s, { t: 2, type: "remove", partId: "fuel_tap" });
-    s = step(s, { t: 3, type: "remove", partId: "air_filter_cover" });
-    s = step(s, { t: 4, type: "remove", partId: "air_filter" });
-    s = step(s, { t: 5, type: "remove", partId: "carburetor" });
-    expect(refusal(s, { t: 6, type: "install", partId: "fuel_hose" }).parts?.sort()).toEqual(["carburetor", "fuel_tap"]);
-    s = step(s, { t: 6, type: "install", partId: "carburetor" });
-    expect(refusal(s, { t: 7, type: "install", partId: "fuel_hose" }).parts).toEqual(["fuel_tap"]);
-    s = step(s, { t: 7, type: "install", partId: "fuel_tap" });
-    s = step(s, { t: 8, type: "install", partId: "fuel_hose" });
+    s = step(s, { t: 2, type: "remove", partId: "fuel_filter" });
+    s = step(s, { t: 3, type: "remove", partId: "fuel_tap" });
+    s = step(s, { t: 4, type: "remove", partId: "air_filter_cover" });
+    s = step(s, { t: 5, type: "remove", partId: "air_filter" });
+    s = step(s, { t: 6, type: "remove", partId: "carburetor" });
+    expect(refusal(s, { t: 7, type: "install", partId: "fuel_hose" }).parts?.sort()).toEqual(["carburetor", "fuel_filter", "fuel_tap"]);
+    s = step(s, { t: 7, type: "install", partId: "carburetor" });
+    // The filter sits on the tap's outlet: the tap goes back first, then the filter, then the hose.
+    expect(refusal(s, { t: 8, type: "install", partId: "fuel_filter" }).parts).toEqual(["fuel_tap"]);
+    s = step(s, { t: 8, type: "install", partId: "fuel_tap" });
+    expect(refusal(s, { t: 9, type: "install", partId: "fuel_hose" }).parts).toEqual(["fuel_filter"]);
+    s = step(s, { t: 9, type: "install", partId: "fuel_filter" });
+    s = step(s, { t: 10, type: "install", partId: "fuel_hose" });
     expect(s.installed.has("fuel_hose")).toBe(true);
+  });
+
+  it("the new parts' removal orders (ADR 0030): the tank needs the cap off, the tap the filter, the coil the starter", () => {
+    const s = initialState(machine);
+    expect(blockers(machine, s, "fuel_cap")).toEqual([]);
+    expect(blockers(machine, s, "fuel_filter")).toEqual(["fuel_hose"]);
+    expect(blockers(machine, s, "fuel_tap").sort()).toEqual(["fuel_filter", "fuel_hose"]);
+    expect(blockers(machine, s, "fuel_tank").sort()).toEqual(["fuel_cap", "fuel_tap"]);
+    expect(blockers(machine, s, "ignition_coil")).toEqual(["recoil_starter"]);
+    expect(hiders(machine, s, "ignition_coil")).toEqual(["recoil_starter"]);
+    const byId = (id: string) => faults.faults.find((f) => f.culprit === id && f.id !== "clogged_jet" && f.id !== "dead_capacitor")!;
+    expect(removalOrder(machine, byId("fuel_cap"))).toEqual(["fuel_cap"]);
+    expect(removalOrder(machine, byId("fuel_filter"))).toEqual(["fuel_hose", "fuel_filter"]);
+    expect(removalOrder(machine, byId("fuel_tap"))).toEqual(["fuel_hose", "fuel_filter", "fuel_tap"]);
+    expect(removalOrder(machine, byId("ignition_coil"))).toEqual(["recoil_starter", "ignition_coil"]);
+    expect(removalOrder(machine, byId("recoil_starter"))).toEqual(["recoil_starter"]);
   });
 
   it("refuses a part that is not in the tray", () => {

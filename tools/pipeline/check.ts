@@ -132,7 +132,12 @@ export interface MachineIds {
   fasteners?: Record<string, string[]>;
 }
 
-/** The model contract (brief section 8) and the ADR 0014 budgets. */
+/**
+ * The model contract (brief section 8) and the ADR 0014 budgets. A part in machine.json with no node in the model is a
+ * warning that names it, not an error (plan 0020): the game draws it from its placeholder, so the data can carry parts
+ * the model has not caught up with (the fuel cap, fuel filter and ignition coil until plan 0020's model step). A missing
+ * base node, a duplicate, a stray node or a fastener missing from a part the model does have are still errors.
+ */
 export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -140,9 +145,11 @@ export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckRe
   const expected = [...ids.parts, ...ids.base];
   const seen = new Map<string, number>();
   for (const r of roots) seen.set(r.name, (seen.get(r.name) ?? 0) + 1);
+  const partIds = new Set(ids.parts);
   for (const id of expected) {
     const n = seen.get(id) ?? 0;
-    if (n === 0) errors.push(`No node named "${id}". The game would fall back to its placeholder.`);
+    if (n === 0 && partIds.has(id)) warnings.push(`No node named "${id}": the game draws it from its placeholder in machine.json until the model has it.`);
+    else if (n === 0) errors.push(`No node named "${id}". The game would fall back to its placeholder.`);
     if (n > 1) errors.push(`${n} nodes named "${id}"; there must be exactly one.`);
   }
   for (const r of roots) {
@@ -168,7 +175,9 @@ export function checkModel(glb: Glb, ids: MachineIds, budgets: Budgets): CheckRe
     for (const id of list) {
       const index = nodes.findIndex((n) => n.name === id);
       if (index < 0) {
-        errors.push(`No node named "${id}" (a fastener of "${part}").`);
+        // A part the model does not have yet brings its fasteners as placeholders too (warned above).
+        if (root) errors.push(`No node named "${id}" (a fastener of "${part}").`);
+        else warnings.push(`No node named "${id}" (a fastener of "${part}", which the model does not have yet).`);
         continue;
       }
       if (root && !under(root.index, index)) errors.push(`Fastener "${id}" must be a node under "${part}", so it moves with it.`);

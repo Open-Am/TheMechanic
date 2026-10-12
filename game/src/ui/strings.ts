@@ -6,7 +6,7 @@ import type { CheckId, Symptom } from "../core/index.ts";
 export const SYMPTOM_TEXT: Record<Symptom, string> = {
   no_start: "You pull the cord. Nothing. Not even a cough.",
   starts_then_dies: "It fires, runs a few seconds, then dies.",
-  runs_no_output: "The engine runs sweetly. The bulb stays dark.",
+  runs_no_output: "The engine runs sweetly. The bulb gives no proper light.",
   runs_weak: "It runs, but it smokes and struggles under load.",
 };
 

@@ -22,20 +22,40 @@
       "motion": { "type": "pull" }
     },
     {
+      "id": "fuel_filter",
+      "name": "Fuel filter",
+      "does": "Catches dirt in the fuel on its way from the tap to the hose.",
+      "requires": ["fuel_hose"],
+      "inspectOk": "Clear inside. Fuel passes freely.",
+      "placeholder": { "shape": "cylinder", "axis": "y", "size": [0.018, 0.032, 0.018], "position": [-0.192, 0.178, 0.118], "color": "#d9c48a" },
+      "explode": [-0.08, -0.02, 0.04],
+      "motion": { "type": "pull" }
+    },
+    {
       "id": "fuel_tap",
       "name": "Fuel tap",
       "does": "Turns the fuel on and off. Its strainer catches dirt.",
-      "requires": ["fuel_hose"],
+      "requires": ["fuel_hose", "fuel_filter"],
       "inspectOk": "Strainer is clean. Fuel runs freely.",
       "placeholder": { "shape": "box", "size": [0.0213, 0.0556, 0.051], "position": [-0.1736, 0.2227, 0.11], "color": "#b9b8b2" },
       "explode": [-0.08, 0, 0],
       "motion": { "type": "unscrew", "axis": "y", "turns": 1 }
     },
     {
+      "id": "fuel_cap",
+      "name": "Fuel cap",
+      "does": "Closes the tank. A small hole in it lets air in as the fuel runs out.",
+      "requires": [],
+      "inspectOk": "The breather hole is clear. The seal is soft and whole.",
+      "placeholder": { "shape": "cylinder", "axis": "y", "size": [0.05, 0.018, 0.05], "position": [0.05, 0.405, 0.04], "color": "#1a1a1a" },
+      "explode": [0, 0.08, 0],
+      "motion": { "type": "unscrew", "axis": "y", "turns": 2 }
+    },
+    {
       "id": "fuel_tank",
       "name": "Fuel tank",
       "does": "Holds the petrol and oil mix.",
-      "requires": ["fuel_tap"],
+      "requires": ["fuel_tap", "fuel_cap"],
       "hiddenBy": [],
       "inspectOk": "Clean inside. Fuel smells fresh.",
       "placeholder": { "shape": "box", "size": [0.338, 0.1561, 0.293], "position": [0, 0.321, 0], "color": "#2456b4" },
@@ -123,6 +143,21 @@
       ]
     },
     {
+      "id": "ignition_coil",
+      "name": "Ignition coil",
+      "does": "Makes the high voltage for the spark as the flywheel's magnet sweeps past it.",
+      "requires": ["recoil_starter"],
+      "hiddenBy": ["recoil_starter"],
+      "inspectOk": "The lead is sound. No cracks or burns on the core.",
+      "placeholder": { "shape": "box", "size": [0.022, 0.04, 0.05], "position": [0.131, 0.19, -0.075], "color": "#151515" },
+      "explode": [0.1, 0, 0],
+      "motion": { "type": "unbolt", "axis": "x" },
+      "fasteners": [
+        {"id": "ignition_coil.bolt_1", "kind": "bolt", "position": [0.142, 0.204, -0.075], "axis": [1, 0, 0]},
+        {"id": "ignition_coil.bolt_2", "kind": "bolt", "position": [0.142, 0.176, -0.075], "axis": [1, 0, 0]}
+      ]
+    },
+    {
       "id": "muffler",
       "name": "Muffler",
       "does": "Quiets the exhaust and lets the smoke out.",
@@ -170,7 +205,7 @@
     "look_smoke": { "allOn": true },
     "look_plug": { "off": ["spark_plug"] },
     "spark_test": { "off": ["spark_plug"], "on": ["recoil_starter"], "tool": "spark_tester" },
-    "fuel_flow": { "off": ["fuel_hose"], "on": ["fuel_tank", "fuel_tap"], "tool": "bottle" },
+    "fuel_flow": { "off": ["fuel_hose"], "on": ["fuel_tank", "fuel_tap", "fuel_cap", "fuel_filter"], "tool": "bottle" },
     "volts_test": { "allOn": true, "tool": "test_bulb" }
   }
 }

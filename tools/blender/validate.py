@@ -2,9 +2,10 @@
 
     node tools/run-blender.mjs tools/blender/validate.py --blend assets/gen950/blend/gen950.blend
 
-Errors (exit 1): an object missing or extra in `parts` or `base`, a name that is not an ID, a non-mesh object,
-rotation or scale not applied, origin not at the geometry centre, a mesh without a material, an object over its
-triangle allocation, the total over 60,000. Warnings: an object more than 2 cm from its placeholder position.
+Errors (exit 1): an object missing from `base`, or extra in `parts` or `base`, a name that is not an ID, a non-mesh
+object, rotation or scale not applied, origin not at the geometry centre, a mesh without a material, an object over
+its triangle allocation, the total over 60,000. Warnings: an object more than 2 cm from its placeholder position, and
+a part in machine.json with no object yet (plan 0020: the game draws it from its placeholder), with its fasteners.
 """
 
 import os
@@ -23,6 +24,9 @@ placeholders = {p["id"]: p["placeholder"] for p in machine["parts"] + machine["b
 errors, warnings = [], []
 
 
+missing_parts = set()
+
+
 def check_collection(name, expected):
     col = bpy.data.collections.get(name)
     if col is None:
@@ -30,7 +34,10 @@ def check_collection(name, expected):
         return []
     names = [o.name for o in col.objects]
     for e in expected:
-        if e not in names:
+        if e not in names and name == "parts":
+            missing_parts.add(e)
+            warnings.append(f"'{e}' is missing from 'parts': the game draws it from its placeholder until it is modelled.")
+        elif e not in names:
             errors.append(f"'{e}' is missing from '{name}'.")
     for n in names:
         if n not in expected:
@@ -73,7 +80,9 @@ fcol = bpy.data.collections.get("fasteners")
 fobjs = list(fcol.objects) if fcol else []
 present = {o.name for o in fobjs}
 for fid in specs:
-    if fid not in present:
+    if fid not in present and specs[fid][0] in missing_parts:
+        warnings.append(f"Fastener '{fid}' is missing, with its part '{specs[fid][0]}'.")
+    elif fid not in present:
         errors.append(f"Fastener '{fid}' is missing from 'fasteners'. Run model.py for its part.")
 ftotal = 0
 for o in fobjs:

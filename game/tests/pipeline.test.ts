@@ -49,12 +49,14 @@ function modelJson(names: string[], tris = 10) {
 }
 
 const all = [...ids.parts, ...ids.base];
+/** Parts in machine.json the shipped model does not have yet: plan 0020's model step waits for plan 0018's branch. */
+const NOT_YET_MODELLED = ["fuel_cap", "fuel_filter", "ignition_coil"];
 const glbOf = (json: object): Glb => readGlb(makeGlb(json));
 
 describe("GLB reading", () => {
   it("reads the shipped model and finds one root node per ID", () => {
     const glb = readGlb(new Uint8Array(readFileSync(join(root, "game", "public", "machines", "gen950", "model.glb"))));
-    expect(rootNodes(glb.json).map((n) => n.name).sort()).toEqual([...all].sort());
+    expect(rootNodes(glb.json).map((n) => n.name).sort()).toEqual(all.filter((id) => !NOT_YET_MODELLED.includes(id)).sort());
   });
 
   it("rejects a file that is not a GLB", () => {
@@ -74,12 +76,29 @@ describe("GLB reading", () => {
 describe("the model contract and budgets (ADR 0014)", () => {
   it("the shipped model passes", () => {
     const glb = readGlb(new Uint8Array(readFileSync(join(root, "game", "public", "machines", "gen950", "model.glb"))));
-    expect(checkModel(glb, ids, budgets).errors).toEqual([]);
+    const fasteners = Object.fromEntries(machine.parts.filter((p) => p.fasteners?.length).map((p) => [p.id, p.fasteners!.map((f) => f.id)]));
+    const r = checkModel(glb, { ...ids, fasteners }, budgets);
+    expect(r.errors).toEqual([]);
+    // Plan 0020: the three new parts are drawn from their placeholders until the model has them, and the check names them.
+    for (const id of NOT_YET_MODELLED) expect(r.warnings.join(" ")).toContain(`No node named "${id}"`);
   });
 
-  it("a missing part node is an error", () => {
+  it("a missing part node is a warning naming it, not an error: the game draws its placeholder (plan 0020)", () => {
     const r = checkModel(glbOf(modelJson(all.filter((n) => n !== "spark_plug"))), ids, budgets);
-    expect(r.errors.join(" ")).toMatch(/No node named "spark_plug"/);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.join(" ")).toContain(`No node named "spark_plug": the game draws it from its placeholder`);
+  });
+
+  it("a missing base node is still an error", () => {
+    const r = checkModel(glbOf(modelJson(all.filter((n) => n !== "base_engine"))), ids, budgets);
+    expect(r.errors.join(" ")).toContain(`No node named "base_engine"`);
+  });
+
+  it("a part the model lacks takes its fasteners with it as warnings; a part it has must have them", () => {
+    const withBolts = { ...ids, fasteners: { muffler: ["muffler.nut_1"], ignition_coil: ["ignition_coil.bolt_1"] } };
+    const r = checkModel(glbOf(modelJson(all.filter((n) => n !== "ignition_coil"))), withBolts, budgets);
+    expect(r.warnings.join(" ")).toContain(`"ignition_coil.bolt_1" (a fastener of "ignition_coil", which the model does not have yet)`);
+    expect(r.errors.join(" ")).toContain(`No node named "muffler.nut_1" (a fastener of "muffler")`);
   });
 
   it("an extra or misnamed node is an error", () => {

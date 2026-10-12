@@ -115,6 +115,120 @@
       },
       "author": "core",
       "verified": false
+    },
+    {
+      "id": "fuel_cap_vent_blocked",
+      "complaint": "E go run small, then e go off. If I open the tank cover, e go start again.",
+      "symptom": "starts_then_dies",
+      "culprit": "fuel_cap",
+      "inspectBad": "The breather hole in the cap is packed with dirt. No air can get in.",
+      "fix": "Clear the vent hole",
+      "difficulty": 1,
+      "clues": {
+        "listen_pull": "It fires and runs, then slows and dies.",
+        "look_smoke": "A little pale smoke, then nothing as it dies.",
+        "look_plug": "The tip is dry and light brown.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "It runs, then slows to a trickle. Loosen the cap and it runs again.",
+        "volts_test": "Full voltage at first, then it fades as the engine dies."
+      },
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "fuel_filter_or_pickup_blocked",
+      "complaint": "E dey work like ten minutes, then e quench. I go wait before e start again.",
+      "symptom": "starts_then_dies",
+      "culprit": "fuel_filter",
+      "inspectBad": "The filter is dark with dirt. Fuel can barely pass.",
+      "fix": "Fit a new filter",
+      "difficulty": 2,
+      "clues": {
+        "listen_pull": "It fires and runs, then dies.",
+        "look_smoke": "A little pale smoke, then nothing as it dies.",
+        "look_plug": "The tip is dry and pale.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "A thin, weak stream from the start.",
+        "volts_test": "Full voltage at first, then it fades as the engine dies."
+      },
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "float_stuck_or_needle_leak",
+      "complaint": "E dey smell fuel, black smoke dey comot, fuel dey drip after I off am.",
+      "symptom": "runs_weak",
+      "culprit": "carburetor",
+      "inspectBad": "The float is stuck and the needle does not seat. The bowl overflows.",
+      "fix": "Free the float, clean the needle seat",
+      "difficulty": 3,
+      "clues": {
+        "listen_pull": "Hard to start, then it runs rough and rich.",
+        "look_smoke": "Thick black smoke and a smell of raw petrol.",
+        "look_plug": "The tip is black and wet with petrol.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "Low and unsteady."
+      },
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "recoil_rope_or_spring",
+      "complaint": "The rope no dey go back inside. E hard to pull.",
+      "symptom": "no_start",
+      "culprit": "recoil_starter",
+      "inspectBad": "The recoil spring is broken. The rope cannot wind back.",
+      "fix": "Fit a new recoil spring",
+      "difficulty": 1,
+      "clues": {
+        "listen_pull": "The rope comes out and stays out. No fire.",
+        "look_smoke": "No smoke at all.",
+        "look_plug": "The tip is clean and light brown.",
+        "spark_test": "The rope stays out after one pull, too slow for a spark.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "No reading. It will not start."
+      },
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "weak_capacitor_low_output",
+      "complaint": "Gen dey work but the light no bright. E just dey glow small.",
+      "symptom": "runs_no_output",
+      "culprit": "capacitor",
+      "inspectBad": "It holds far less charge than the value printed on its case.",
+      "fix": "Fit a new capacitor",
+      "difficulty": 2,
+      "clues": {
+        "listen_pull": "It starts at once and runs smoothly.",
+        "look_smoke": "Clear. Hardly any smoke.",
+        "look_plug": "The tip is light brown and dry.",
+        "spark_test": "A strong blue spark jumps the tester's gap every pull.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "The bulb glows faintly: about 25 V, not 230."
+      },
+      "author": "core",
+      "verified": false
+    },
+    {
+      "id": "ignition_coil_or_magneto",
+      "complaint": "E no gree start. I don change plug sef, nothing.",
+      "symptom": "no_start",
+      "culprit": "ignition_coil",
+      "inspectBad": "The coil's lead is cracked and burnt at the core. No spark reaches the plug.",
+      "fix": "Fit a new ignition coil",
+      "difficulty": 3,
+      "clues": {
+        "listen_pull": "It turns over, but there is no fire at all.",
+        "look_smoke": "No smoke. A smell of raw petrol.",
+        "look_plug": "The tip is clean but wet with petrol.",
+        "spark_test": "No spark jumps the tester's gap.",
+        "fuel_flow": "Fuel runs freely into the bottle.",
+        "volts_test": "No reading. It will not start."
+      },
+      "author": "core",
+      "verified": false
     }
   ]
 }

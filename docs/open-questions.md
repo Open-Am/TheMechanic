@@ -51,6 +51,24 @@ From `reference/more-faults-research.md`, compiled from web search snippets on o
 - The fuel cap vent design, and whether there is an in-line fuel filter or only a tank screen.
 - Whether bad fuel, water in fuel and the wrong oil mix should be faults of their own or causes behind the existing ones.
 
+## Checks and the six new faults (ADRs 0029 and 0030, plans 0019 and 0020, 2026-10-12)
+
+Everything below went into `machine.json` and `faults.json` as drafts, `verified: false`. For the mechanic and the owner:
+
+- The 72 clue lines (six checks for each of twelve faults). Drafted from `reference/more-faults-research.md`, the existing `inspectBad` lines and ADR 0030's table, not from a mechanic. In particular: the plug readings (dry and pale for a starved engine, black and dry soot for a choked air filter, black and wet for a stuck float or a dead coil); whether a fouled plug still shows a strong spark at the tester (the game says yes: the tester replaces the plug); whether a choked muffler really pulls the voltage down; whether the drip, thin stream and trickle at the fuel flow test tell a blocked tap, a blocked filter and a blocked cap vent apart.
+- Whether a spark test needs the plug cap off as well as the plug (the data says only "the spark plug in the tray"), and where the tester clips (ADR 0029).
+- Whether the fuel flow test is done at the hose's carburettor end, as the data has it (hose off; tank, tap, cap and filter on).
+- The weak capacitor's "about 25 V" is from one TG950 forum thread whose capacitor tested fine; the cause there is open.
+- The check costs (listen 3, smoke 3, plug 2, spark 4, fuel 3, volts 4 seconds) and the clean bonus of 10 are the proposal's numbers, not tuned by play.
+- The difficulty levels (ADR 0030) are drafts for the owner and the mechanic to tune.
+- The six new complaints are drafts in Pidgin for the owner to correct.
+- Whether the clones have an in-line fuel filter at all, or only a screen in the tank or the tap. The data has a filter on the tap's outlet under the hose.
+- The fuel cap's vent: a hole, a valve or a slot, and whether it blocks often enough to be a fault.
+- Where the ignition coil sits, and whether it is a coil or a CDI unit; the data puts it behind the recoil starter with two bolts.
+- Whether the recoil spring alone fails often enough to be the fault, or the rope does too (one fault, one culprit: the data has the spring).
+- The three new parts are drawn from placeholders until plan 0020's model step (it waits for plan 0018's branch, which edits `gen950.blend`). Their placeholder sizes and places are guesses from the model's bounds: the cap on the tank's top, the filter left of the tap under it, the coil inside the recoil starter's housing on the engine side.
+- The spark plug's condition when healthy now reads "Electrodes are sound. The gap is right." (plan 0019 reading 5), since some faults' plug readings describe a wet or sooty tip from the engine.
+
 ## Owner decisions pending
 
 - Choosing between sounds: the owner wants players to be able to choose between alternative sounds later. On 2026-10-12 the owner wrote: "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". This changes scope (what is built), so it needs an ADR first (ADR 0001). The alternatives the owner downloaded are kept locally in `assets/audio/source/`, which is git-ignored, so they exist on this machine only. Their pages are listed in `docs/reference/sound-shortlist.md`.
