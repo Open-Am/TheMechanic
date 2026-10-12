@@ -152,3 +152,37 @@ Local copies in `assets/customers/reference/` (git-ignored, reference only). Eve
 | `street-3.jpg` | `A_food_seller,_seller_food_to_people_in_Lagos_Nigeria.jpg` | Food stall on a dirt road: casual T-shirts, jerseys, wrappers. | Oreoluwa Adetimehin | CC BY-SA 4.0 |
 
 Gaps: no clean standing full-body photo of a woman of about 50 in an everyday wrapper, blouse and head tie; of a man of about 55 in a plain kaftan and cap; or of a young man in a T-shirt, jeans and slides. Photos the owner takes, or ones he chooses, would be the best check. The people's shape and proportions come from MakeHuman's CC0 base body; sources and licences are in `assets/customers/LICENCE.md`.
+
+### The cap (round 8, 2026-10-12)
+
+Gathered after the owner wrote "it is worse. the cap is too big for his head, search the web for humans with that kind of cap and fix the cap". Local copies in `assets/customers/reference/caps/` (git-ignored), from Wikimedia Commons, used only to measure the cap's shape and proportion against the head. The measurements are in `assets/customers/STATUS.md` round 8.
+
+| Local file | Commons file | Shows | Author | Licence |
+| --- | --- | --- | --- | --- |
+| `cap-15.jpg` | `Muhammadu_Buhari,_President_of_the_Federal_Republic_of_Nigeria_(cropped).jpg` | An older man, front, in an embroidered hula with a white kaftan. The clearest front view. | Bayo Omoboriowo | CC BY-SA 4.0 |
+| `cap-16.jpg` | `Mike_Pompeo_with_Muhammadu_Buhari_in_New_York_City_-_2018_(44974167761).jpg` | The same kind of cap with a long brown kaftan, seated, small in frame. | U.S. Department of State | Public domain |
+| `cap-04.jpg` | `Sheikh_Tahir_Yakasai_during_a_Kano_Emirate_gathering.jpg` | Left half: a young man in Kano, front, in a tall embroidered zanna with a kaftan. | Sheikh Gwani Tahir Yakasai | CC BY 4.0 |
+| `cap-05.jpg` | `A_Hausa_man_wearing_a_traditional_kaftan_and_holding_a_ceremonial_royal_staff,_symbolizing_Hausa_cultural_heritage_and_traditional_authority,_at_the_ABU_Zaria_Cultural_Carnival.jpg` | A man in a kaftan and embroidered cap, full body, front. | Halima Waziri | CC BY-SA 4.0 |
+| `cap-09.jpg` | `Alhaji_Abubakar_Tafawa_Balewa.jpg` | An elder in white babban riga and a small embroidered cap, tilted back. | Unknown author | Public domain |
+| `cap-10.jpg` | `Abubakar_Tafawa_Balewa_(1962).jpg` | The same man seated, a plain white rounded cap. | Abubakar | CC BY-SA 3.0 |
+| `cap-06.jpg` | `Hausa_Traditional_Cap.jpg` | Caps for sale on stands: straight sides, flat or slightly domed crowns, a knob on some. | Dev ammar | CC BY-SA 4.0 |
+| `cap-02.jpg` | `Traditional_cap_in_the_northan_Nigeria.jpg` | A cream cap with brown woven pattern, close up, the crown folded in. | Muhaishaq4 | CC BY-SA 4.0 |
+| `cap-07.jpg` | `Hausa_Cap.jpg` | Caps for sale in Daura. | Gwanki | CC BY-SA 4.0 |
+| `cap-11.jpg`, `cap-08.jpg` | `A_Yorùbá_man.jpg`, `Man_in_traditional_attire_standing.jpg` | Yoruba fila (soft, folded): a different cap, kept for contrast. | IamMKO; Zaynab05 | CC BY-SA 4.0 |
+
+Downloaded and not used (no cap worn, or a turban): `cap-01`, `cap-03`, `cap-12`, `cap-14`, `cap-17` to `cap-19`.
+
+### Footwear (round 9, 2026-10-12)
+
+Gathered after the owner wrote "Also lets give everyone of them footware. The sandals on tunde's leg looks more like shadow". Local copies in `assets/customers/reference/feet/` (git-ignored).
+
+| Local file | Commons file | Shows | Author | Licence |
+| --- | --- | --- | --- | --- |
+| `feet-01.jpg` | `Array_of_Rubber_Slippers,_Badagry.jpg` | A wall of rubber slides for sale in Badagry, Lagos State: dark soles, broad straps, many with white or red straps. For Tunde. | Amboluwaseun | CC BY-SA 4.0 |
+| `feet-02.jpg` | `Rubber_Slippers.jpg` | Rubber and plastic slippers for sale at a Lagos market (Mile 12): flat soles, wide bands, black, red, patterned. For Mama Ngozi. | Zubaidabta12 | CC BY-SA 4.0 |
+| `feet-03.jpg` | `Market_Lady,_Lekki,_Lagos.jpg` | Market women in Lekki, Lagos: a woman in a print dress wearing flat brown strap sandals. | Oritsetsemaye Jemide | CC BY-SA 4.0 |
+| `feet-04.jpg` | `The_Market_women_at_Oshodi_Lagos.jpg` | Oshodi market from above: a man in a white kaftan and cap with dark closed shoes; women in slippers. | Agbebiyi Adekunle (Tadek Photography) | CC BY-SA 4.0 |
+| `feet-06.jpg`, `feet-07.jpg` | `Choice_of_slippers_(2183385831).jpg`, `Babouches02.jpg` | Babouche slip-on mules (Morocco): the closed-toe, open-heel leather slipper shape worn with kaftans across West Africa too. For Alhaji Musa. | Lars Plougmann; Kattiel | CC BY-SA 2.0; CC BY-SA 4.0 |
+| `feet-08.jpg` | `Abdullahi_Bayero,_Emir_of_Kano.jpg` | The Emir of Kano in ceremonial dress and slippers (ceremonial, not everyday). | E. H. Duckworth | Public domain |
+
+Gap: no clear photo of an older Lagos man's everyday leather slippers under a kaftan; the mule shape is taken from the babouche photos and is a reading, not a match.

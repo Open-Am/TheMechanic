@@ -983,48 +983,112 @@ def build_sleeve(body, lm, rb, d, side, weights):
     return obj
 
 
+# The cap's proportions, measured on 2026-10-12 from photos of Nigerian men in the hula (assets/customers/STATUS.md
+# round 8): the rim about 2 to 3.5 cm above the eyebrows and above the tops of the ears, the cap no wider than the head
+# at the temples, its height 0.7 to 1.0 of the brow-to-chin length (an elder's everyday cap at the low end), straight
+# sides and a flat or slightly domed crown, sitting level or a little tilted back.
+KUFI = {"rim_above_brow": 0.024, "tilt": 0.012, "height": 0.7, "offset": 0.003, "taper": 0.03, "edge": 0.009, "dome": 0.005, "tris": 900}
+
+
 def build_kufi(body, lm):
-    """A close-fitting cap (third pass, 2026-10-12): its rim follows the skull just above the brow and the ears,
-    lower at the back; its sides rise close to the head, narrowing a little, to a crown about 7 cm above the rim at
-    the front that sits just over the top of the head, with a rounded edge. Patterned by kufi_pattern."""
-    co = np.array([v.co[:] for v in body.data.vertices])
-    c = lm.head_centre
-    front, back = lm.eye_z + 0.058, lm.eye_z + 0.02
-    z_top = lm.head_top + 0.008
-    seg = 32
-    theta = np.linspace(-math.pi, math.pi, seg, endpoint=False)
-    dirs = np.stack([np.cos(theta), np.sin(theta)], axis=1)
-    z_base = front + (back - front) * (np.sin(theta) + 1) / 2  # +Y is the back of the head
-    head = co[co[:, 2] > lm.eye_z]
-    centre = np.array([c.x, c.y])
+    """The cap (fourth pass, 2026-10-12), made from the head mesh itself so it cannot be bigger than the head: the
+    scalp's faces above the rim line are copied, and each vertex is moved by how high it sits between the rim and the
+    top of the head onto a cap whose rim is the scalp at the rim line plus a few millimetres, so the rim lies on the
+    head all the way round; the sides rise straight from it, narrowing a little, to a nearly flat crown."""
+    me = body.data
+    co = np.array([v.co[:] for v in me.vertices])
+    c = np.array([lm.head_centre.x, lm.head_centre.y])
+    brow = lm.eye_z + 0.021
+    brow_chin = brow - lm.chin_z
+    front = brow + KUFI["rim_above_brow"]
+    back = front - KUFI["tilt"]
+    height = KUFI["height"] * brow_chin
 
-    def skull(zj):
-        """The head's reach in each direction at heights zj (one per direction), smoothed round."""
-        r = np.zeros(seg)
-        for j in range(seg):
-            sl = head[np.abs(head[:, 2] - zj[j]) < 0.006]
-            r[j] = float(((sl[:, :2] - centre) @ dirs[j]).max()) if len(sl) else 0.0
-        for _ in range(4):
-            r = (np.roll(r, 1) + 2 * r + np.roll(r, -1)) / 4
-        return r
+    def rim_z(theta):
+        return front + (back - front) * (np.sin(theta) + 1) / 2  # +Y is the back of the head
 
-    rim = skull(z_base) + 0.004
-    rings = []
-    side_top = z_top - 0.02
-    for s in (0.0, 0.25, 0.5, 0.75, 1.0):
-        z = z_base + (side_top - z_base) * s
-        r = np.maximum(skull(z) + 0.004, rim * (1 - 0.1 * s))
-        rings.append((r, z))
-    r_top = rings[-1][0]
-    for t in (0.3, 0.55, 0.75, 0.92):  # a soft rounded edge and a nearly flat crown
-        rings.append((r_top * (1 - 0.22 * t * t) * (1 - 0.8 * max(0.0, t - 0.55)), side_top + 0.02 * math.sin(t * math.pi / 2)))
-    pts = [[V((c.x + r[j] * dirs[j, 0], c.y + r[j] * dirs[j, 1], float(z[j]) if np.ndim(z) else z)) for j in range(seg)] for r, z in rings]
-    pts.reverse()
-    obj = mesh_object(loft(pts, close_top=True, lip=0.005), "kufi", "headwear")
+    rel = co[:, :2] - c
+    theta = np.arctan2(rel[:, 1], rel[:, 0])
+    radius = np.linalg.norm(rel, axis=1)
+    above = (co[:, 2] > rim_z(theta)) & (co[:, 2] > lm.z_neck + 0.06)
+    # The rim: the scalp's own radius just above the rim line, in each direction (not a fitted circle or oval).
+    seg = 48
+    k = ((theta + math.pi) / (2 * math.pi) * seg).astype(int) % seg
+    band = above & (co[:, 2] < rim_z(theta) + 0.008)
+    prof = np.full(seg, np.nan)
+    for j in range(seg):
+        sel = band & (k == j)
+        if sel.any():
+            prof[j] = radius[sel].max()
+    good = ~np.isnan(prof)
+    prof = np.interp(np.arange(seg), np.arange(seg)[good], prof[good], period=seg)
+    for _ in range(2):
+        prof = (np.roll(prof, 1) + 2 * prof + np.roll(prof, -1)) / 4
+    prof += KUFI["offset"]
+
+    def rim_r(th):
+        x = (th + math.pi) / (2 * math.pi) * seg - 0.5
+        return np.interp(x, np.arange(seg), prof, period=seg)
+
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.verts.ensure_lookup_table()
+    keep = set(f.index for f in bm.faces if all(above[v.index] for v in f.verts))
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.index not in keep], context="FACES")
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
+    top = lm.head_top
+    wall_share = 0.72  # of the way from the rim to the top of the head that becomes the side wall
+    crown = []
+    for v in bm.verts:
+        x, y, z = v.co
+        th = math.atan2(y - c[1], x - c[0])
+        zr = float(rim_z(np.array(th)))
+        t = 0.0 if v.is_boundary else min(1.0, max(0.0, (z - zr) / max(0.02, top - zr)))
+        r0 = float(rim_r(np.array(th)))
+        wall_top = zr + height - KUFI["edge"]
+        if t <= wall_share:
+            f = t / wall_share
+            r = r0 * (1 - KUFI["taper"] * f)
+            zz = zr + (wall_top - zr) * f
+        else:
+            f = (t - wall_share) / (1 - wall_share)  # 0 at the edge, 1 at the middle of the crown
+            r_edge = r0 * (1 - KUFI["taper"])
+            r = r_edge * (1 - f) ** 0.85
+            zz = wall_top + KUFI["edge"] * math.sin(min(1.0, f * 3) * math.pi / 2) + KUFI["dome"] * f * f
+        v.co = V((c[0] + r * math.cos(th), c[1] + r * math.sin(th), zz))
+        if t > wall_share - 0.02:
+            crown.append(v)
+    # Relax the crown, where the scalp's vertices were gathered in, so it lies smooth with no creases.
+    for _ in range(8):
+        bmesh.ops.smooth_vert(bm, verts=crown, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=False)
+    me2 = bpy.data.meshes.new("kufi")
+    bm.to_mesh(me2)
+    bm.free()
+    for poly in me2.polygons:
+        poly.use_smooth = True
+    obj = bpy.data.objects.new("kufi", me2)
+    bpy.context.scene.collection.objects.link(obj)
+    obj["zone"] = "headwear"
+    for a in list(me2.attributes):
+        if a.name in ("zone",):
+            me2.attributes.remove(a)
+    tris = sum(len(p.vertices) - 2 for p in me2.polygons)
+    if tris > KUFI["tris"]:
+        mod = obj.modifiers.new("dec", "DECIMATE")
+        mod.ratio = KUFI["tris"] / tris
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.modifier_apply(modifier="dec")
+    obj.vertex_groups.clear()
     g = obj.vertex_groups.new(name="head")
     g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
-    lm.kufi = (c.x, c.y, front, back, float(z_top - (front + back) / 2))
-    print(f"Kufi: rim {front - lm.eye_z:.3f} m above the eyes at the front, {back - lm.eye_z:.3f} at the back; crown {z_top - front:.3f} m above the rim at the front; rim {2 * rim[seg // 2]:.3f} m wide")
+    lm.kufi = (float(c[0]), float(c[1]), front, back, float(height))
+    temples = 2 * float(rim_r(np.array(0.0)))
+    print(
+        f"Kufi: rim {front - brow:.3f} m above the brows at the front, {back - brow:.3f} at the back; {height:.3f} m tall "
+        f"({KUFI['height']} of brow to chin {brow_chin:.3f}); {temples:.3f} m wide at the rim; {common.triangle_count(obj)} triangles"
+    )
     return obj
 
 
@@ -1313,7 +1377,7 @@ def kufi_pattern(N, pos, sep, lm, mspec):
     v = N.math("DIVIDE", N.math("SUBTRACT", z, z_base), height)
     theta = N.math("ARCTAN2", dy, dx)
     u = N.math("MULTIPLY", theta, 22 / (2 * math.pi))
-    rows = N.math("MULTIPLY", N.math("SUBTRACT", v, 0.16), 3.2)
+    rows = N.math("MULTIPLY", N.math("SUBTRACT", v, 0.16), 3.6)
     fu = N.math("ABSOLUTE", N.math("SUBTRACT", N.math("FRACT", u), 0.5))
     fv = N.math("ABSOLUTE", N.math("SUBTRACT", N.math("FRACT", rows), 0.5))
     dd = N.math("ADD", fu, fv)
@@ -2081,17 +2145,35 @@ def renders(look, rig, body, out_dir, tag):
         "front": (V((0.0, -4.6, 1.0)), V((0, 0, 0.85))),
         "three-quarter": (V((2.9, -3.6, 1.15)), V((0, 0, 0.85))),
         "face": (V((0.35, -1.25, 1.55)), V((0, 0, 1.5 if top else 1.5))),
+        "face-front": None,
+        "face-three-quarter": None,
+        "feet": None,
     }
-    for view, (at, target) in views.items():
-        if view == "face":
-            cam.data.lens = 85
-            head = rig.matrix_world @ rig.pose.bones[f"{look}_head"].head
-            target = head + V((0, 0, 0.07))
-            at = target + V((0.35, -1.35, 0.02))
+    head = rig.matrix_world @ rig.pose.bones[f"{look}_head"].head
+    close = {
+        # Close-ups for judging the cap's proportions and the footwear (rounds 8 and 9).
+        "face": (V((0.35, -1.35, 0.02)), 0.07, 85),
+        "face-front": (V((0.0, -1.1, 0.0)), 0.06, 85),
+        "face-three-quarter": (V((0.8, -0.8, 0.05)), 0.06, 85),
+    }
+    for view, pair in views.items():
+        at, target = pair if pair else (None, None)
+        size = (600, 900)
+        if view in close:
+            off, up, lens = close[view]
+            cam.data.lens = lens
+            target = head + V((0, 0, up))
+            at = target + off
+            size = (500, 500)
+        elif view == "feet":
+            cam.data.lens = 50
+            target = V((0.0, -0.02, 0.06))
+            at = V((0.75, -0.95, 0.32))
+            size = (700, 500)
         else:
             cam.data.lens = 70
         aim_camera(cam, at, target)
-        render_to(os.path.join(out_dir, f"{look}-{view}{tag}.png"), 600 if view != "face" else 500, 900 if view != "face" else 500)
+        render_to(os.path.join(out_dir, f"{look}-{view}{tag}.png"), *size)
 
     # Clip strips.
     if os.environ.get("CUSTOMER_FAST"):
