@@ -31,10 +31,10 @@ import {
 import { giveMoment, type Moment } from "../app/moments.ts";
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.ts";
-import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
+import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, flickAhead, GESTURE, type PointerSample, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
 import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, overPath, pathLength, poseAt, resolveMotion, spannerSwing, TIMING, tripPlan, turnCounter, type Pose, type TripStep, type TripTool } from "./motion.ts";
 import { TURN, worldPerPixel } from "./orbit.ts";
-import { BENCH, cameraPose, clampStage, DEFAULT_STAGE, DEFAULT_YAW, frameBench, type Framing, projectMachinePoint, rotateStage, stageLimits, type StageLimits, type StageState, TOOLBOX_ON_BENCH, turnStageToward, zoomStage } from "./stage.ts";
+import { BENCH, BENCH_EDGES, cameraPose, clampStage, DEFAULT_STAGE, DEFAULT_YAW, frameBench, type Framing, projectMachinePoint, rotateStage, stageLimits, type StageLimits, type StageState, TOOLBOX_ON_BENCH, turnStageToward, zoomStage } from "./stage.ts";
 import { createBench } from "./bench.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
@@ -56,19 +56,36 @@ const OUTLINE_DIRECTIONS = 256;
 /** Seconds for the machine to settle halfway into its new place when the controls grow or shrink (release 0.9.3). */
 const REFRAME_HALF_LIFE = 0.08;
 
+/** A rectangle on screen, CSS px, y down. */
+export interface ScreenBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * True if a carried part released with the finger at `finger` and the part's middle at `part` (screen CSS px) drops
+ * into the tray. `machine` is the generator's bounds on screen as drawn now (release 0.15.1). Supplied by main.ts from ui.
+ */
+export type TrayTest = (finger: { x: number; y: number }, part: { x: number; y: number } | null, machine: ScreenBox | null) => boolean;
+
 export interface RenderView {
   /** A picture of one part as a data URL, for the tray. Null if it cannot be drawn. */
   partImage(partId: PartId): string | null;
-  /** Tells the view where the tray is: true if a screen point (CSS px) is over it. Supplied by main.ts from ui. */
-  setTrayTest(overTray: (x: number, y: number) => boolean): void;
+  /** Tells the view where the tray is. Supplied by main.ts from ui. */
+  setTrayTest(overTray: TrayTest): void;
   /** Tells the view how many CSS px at the bottom of the screen the controls cover; the machine is framed above them. */
   setBottomCover(px: number): void;
   /** A tray chip is being dragged at (x, y): the hand carries that part under the pointer (ADR 0020). */
   carryChip(partId: PartId, x: number, y: number): void;
   /** The chip drag ended; if the part did not go back on, it returns to the tray. */
   endChipCarry(partId: PartId): void;
-  /** Told whenever carrying a part to the tray starts, comes over the tray, leaves it, or ends. Supplied by main.ts. */
-  onCarry(fn: (state: "none" | "carrying" | "over") => void): void;
+  /**
+   * Told whenever carrying a part to the tray starts, comes near the tray, leaves it, or ends, and on every move while
+   * carrying, with the generator's bounds on screen so the drop zone can be drawn just below it. Supplied by main.ts.
+   */
+  onCarry(fn: (state: "none" | "carrying" | "over", machine: ScreenBox | null) => void): void;
   /**
    * Told of each moment the finger makes, as the picture shows it: a fastener's or unscrewed part's whole turn, a part
    * giving, a part seating home (ADR 0018, plan 0013 step 5). Supplied by main.ts, which plays them; render never
@@ -896,27 +913,81 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   // ---- Carrying a loose part to the tray ----
 
-  let carry: { id: PartId; pv: PartView; startX: number; startY: number; free: { offset: Vector3; depth: Vector3 } | null } | null = null;
-  let overTray: (x: number, y: number) => boolean = (_x, y) => y > container.getBoundingClientRect().bottom - container.clientHeight * 0.25;
-  let carryState: (state: "none" | "carrying" | "over") => void = () => {};
-  let lastCarryState: "none" | "carrying" | "over" = "none";
-  const tellCarry = (state: "none" | "carrying" | "over"): void => {
-    if (state !== lastCarryState) carryState(state);
-    lastCarryState = state;
-  };
+  let carry: {
+    id: PartId;
+    pv: PartView;
+    startX: number;
+    startY: number;
+    free: { offset: Vector3; depth: Vector3 } | null;
+    /** The part's middle in its own group's axes, to find it on screen. */
+    middle: Vector3;
+    /** Recent pointer moves, for a fast release (release 0.15.1). */
+    samples: PointerSample[];
+  } | null = null;
+  let overTray: TrayTest = (finger) => finger.y > container.getBoundingClientRect().bottom - container.clientHeight * 0.25;
+  let carryState: (state: "none" | "carrying" | "over", machine: ScreenBox | null) => void = () => {};
+  /** Every carry state change, and every move while carrying, so the drop zone follows the generator. */
+  const tellCarry = (state: "none" | "carrying" | "over", machine: ScreenBox | null = null): void => carryState(state, machine);
+
+  /** How the last carry ended, for the browser check. */
+  let lastDrop: "finger" | "flick" | "back" | null = null;
+
+  /** A world point on screen, CSS px. */
+  function toScreen(world: Vector3): { x: number; y: number } {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const v = world.clone().project(camera);
+    return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
+  }
+
+  /** The generator's bounds on screen as drawn now, from its outline points (release 0.15.1). */
+  function machineOnScreen(): ScreenBox | null {
+    view.root.updateMatrixWorld();
+    let box: ScreenBox | null = null;
+    const v = new Vector3();
+    for (const p of machinePoints) {
+      v.set(p[0], p[1], p[2]);
+      const at = toScreen(view.root.localToWorld(v));
+      if (!Number.isFinite(at.x) || !Number.isFinite(at.y)) continue;
+      box = box
+        ? { left: Math.min(box.left, at.x), top: Math.min(box.top, at.y), right: Math.max(box.right, at.x), bottom: Math.max(box.bottom, at.y) }
+        : { left: at.x, top: at.y, right: at.x, bottom: at.y };
+    }
+    return box;
+  }
+
+  /** The carried part's middle on screen. */
+  function carriedOnScreen(): { x: number; y: number } | null {
+    if (!carry) return null;
+    carry.pv.group.updateMatrixWorld();
+    return toScreen(carry.pv.group.localToWorld(carry.middle.clone()));
+  }
 
   function startCarry(id: PartId, x: number, y: number): void {
     const pv = view.parts.get(id);
     if (!pv) return;
     tweens.cancel(id);
-    carry = { id, pv, startX: x, startY: y, free: null };
+    pv.group.updateMatrixWorld(true);
+    const box = new Box3();
+    pv.group.traverse((o) => {
+      if ((o as Mesh).isMesh && !o.name.endsWith("__hit")) box.expandByObject(o);
+    });
+    const middle = box.isEmpty() ? new Vector3() : pv.group.worldToLocal(box.getCenter(new Vector3()));
+    carry = { id, pv, startX: x, startY: y, free: null, middle, samples: [] };
     hand?.attachTo(pv.group);
-    tellCarry("carrying");
+    tellCarry("carrying", machineOnScreen());
   }
 
-  function moveCarry(x: number, y: number): void {
+  function moveCarry(x: number, y: number, t = performance.now()): void {
     if (!carry) return;
-    tellCarry(overTray(x, y) ? "over" : "carrying");
+    carry.samples.push({ x, y, t });
+    if (carry.samples.length > 24) carry.samples.shift();
+    placeCarried(x, y);
+    const machine = machineOnScreen();
+    tellCarry(overTray({ x, y }, carriedOnScreen(), machine) ? "over" : "carrying", machine);
+  }
+
+  function placeCarried(x: number, y: number): void {
+    if (!carry) return;
     const part = partById(carry.id);
     const m = resolveMotion(part.motion);
     const c = carryProgress(Math.hypot(x - carry.startX, y - carry.startY));
@@ -933,12 +1004,25 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     carry.pv.group.position.copy(toPartFrame(carry.pv, pointAtDepth(x, y, carry.free.depth).add(carry.free.offset)));
   }
 
-  /** Drops the carried part: on the tray it is removed; anywhere else it flies back to its loose point. */
-  function dropCarry(x: number, y: number): void {
+  /**
+   * Drops the carried part: in or near the drop zone it is removed; anywhere else it flies back to its loose point. A
+   * quick flick down counts where it was heading (release 0.15.1). `t` is the release's time stamp; null for a release
+   * that is not the finger lifting (a cancel, a second finger), which is judged where the pointer last was.
+   */
+  function dropCarry(x: number, y: number, t: number | null = null): void {
     if (!carry) return;
     const c = carry;
+    const machine = machineOnScreen();
+    const partAt = carriedOnScreen();
+    let toTray = overTray({ x, y }, partAt, machine);
+    lastDrop = toTray ? "finger" : "back";
+    if (!toTray && t !== null) {
+      const ahead = flickAhead(c.samples, { x, y, t });
+      if (ahead) toTray = overTray(ahead, partAt ? { x: partAt.x + ahead.x - x, y: partAt.y + ahead.y - y } : null, machine);
+      if (toTray) lastDrop = "flick";
+    }
     tellCarry("none");
-    if (overTray(x, y) && game.propose({ type: "remove", partId: c.id })) return; // "removed" sinks it into the tray
+    if (toTray && game.propose({ type: "remove", partId: c.id })) return; // "removed" sinks it into the tray
     carry = null;
     const part = partById(c.id);
     const m = resolveMotion(part.motion);
@@ -1332,7 +1416,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         startTurn(e.clientX, e.clientY);
       }
     }
-    if (drag.mode === "carry") moveCarry(e.clientX, e.clientY);
+    if (drag.mode === "carry") moveCarry(e.clientX, e.clientY, e.timeStamp);
     else if (drag.mode === "turn") turnTo(e.clientX, e.clientY);
     drag.lastX = e.clientX;
     drag.lastY = e.clientY;
@@ -1347,8 +1431,11 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     }
     const d = drag;
     drag = null;
-    if (d.mode === "carry") dropCarry(e.clientX, e.clientY);
-    else if (d.mode === "pending") {
+    if (d.mode === "carry") {
+      // A cancelled pointer is judged where it last was: its own position may not be where the finger was (0.15.1).
+      if (e.type === "pointercancel") dropCarry(d.lastX, d.lastY);
+      else dropCarry(e.clientX, e.clientY, e.timeStamp);
+    } else if (d.mode === "pending") {
       // A tap. Two on the same part make a double tap, which loosens it (ADR 0020).
       // Timed by the events' own time stamps, so a slow frame cannot push a quick double tap out of the window (0.9.3).
       const under = lastTap?.part ? partsUnder(e.clientX, e.clientY) : [];
@@ -1485,6 +1572,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       probe,
       aim,
       carrying: () => carry?.id ?? null,
+      /** The generator's bounds on screen as the drop zone sees them, CSS px (release 0.15.1). */
+      machineBox: () => machineOnScreen(),
+      /** The middle of the bench top's near edge on screen, CSS px. */
+      benchEdge: () => toScreen(new Vector3(0, BENCH.top, BENCH_EDGES.near)),
+      /** How the last carry ended: "finger" or "flick" into the tray, or "back". */
+      lastDrop: () => lastDrop,
       /** The lowest screen y (CSS px) of any vertex of the machine still drawn, and the part it belongs to. */
       machineBottom: () => {
         view.root.updateMatrixWorld();

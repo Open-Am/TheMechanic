@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
+import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, FLICK, flickAhead, screenDirection } from "../src/render/gesture.ts";
 import { alongPath, CARRY, exitDistance, carryPose, carryProgress, FASTEN, fastenerPose, legSeconds, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, overPath, pathLength, poseAt, resolveMotion, segmentHitsBox, spannerSwing, TRIP, tripPlan, turnCounter, turnsCrossed, type Bounds } from "../src/render/motion.ts";
 import { fitDistance, position, worldPerPixel } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
@@ -987,5 +987,50 @@ describe("the machine's shadow on the bench top (plan 0016 step 2, ADR 0025)", (
     const bake = readFileSync(new URL("../../tools/blender/bake_ground.py", import.meta.url), "utf8");
     expect(Number(/^SPAN_FACTOR = ([0-9.]+)/m.exec(bake)?.[1])).toBe(SHADOW_SPAN);
     expect(shadowSpan([0.367, 0.375, 0.312])).toBeCloseTo(0.367 * SHADOW_SPAN, 9);
+  });
+});
+
+describe("a fast downward release counts where it was heading (release 0.15.1)", () => {
+  const path = (vy: number, from = 500, t0 = 1000, n = 6, step = 16) => Array.from({ length: n }, (_, i) => ({ x: 200, y: from + vy * step * i, t: t0 + step * i }));
+
+  it("projects a quick flick down a short time ahead", () => {
+    const s = path(2); // 2 px/ms, a thumb's flick
+    const last = s[s.length - 1]!;
+    const release = { x: last.x, y: last.y, t: last.t + 8 };
+    const p = flickAhead(s, release);
+    expect(p).not.toBeNull();
+    expect(p!.y).toBeGreaterThan(release.y + 2 * FLICK.aheadMs * 0.8);
+    expect(p!.x).toBeCloseTo(200);
+  });
+
+  it("ignores a slow, deliberate drag", () => {
+    const s = path(0.3);
+    const last = s[s.length - 1]!;
+    expect(flickAhead(s, { ...last, t: last.t + 8 })).toBeNull();
+  });
+
+  it("ignores a fast move that stopped before the release", () => {
+    const s = path(2);
+    const last = s[s.length - 1]!;
+    expect(flickAhead(s, { ...last, t: last.t + FLICK.windowMs + 20 })).toBeNull();
+  });
+
+  it("ignores a fast flick upward or sideways", () => {
+    const up = path(-2);
+    const last = up[up.length - 1]!;
+    expect(flickAhead(up, { ...last, t: last.t + 8 })).toBeNull();
+    const side = Array.from({ length: 6 }, (_, i) => ({ x: 100 + 32 * i, y: 500, t: 1000 + 16 * i }));
+    expect(flickAhead(side, { ...side[5]!, t: side[5]!.t + 8 })).toBeNull();
+  });
+
+  it("needs more than one sample in the window", () => {
+    expect(flickAhead([], { x: 0, y: 0, t: 0 })).toBeNull();
+    expect(flickAhead([{ x: 0, y: 0, t: 0 }], { x: 0, y: 0, t: 0 })).toBeNull();
+  });
+
+  it("gives the same answer for the same input", () => {
+    const s = path(1.5);
+    const r = { ...s[5]!, t: s[5]!.t + 5 };
+    expect(flickAhead(s, r)).toEqual(flickAhead(s, r));
   });
 });

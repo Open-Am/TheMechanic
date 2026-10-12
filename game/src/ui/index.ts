@@ -7,7 +7,7 @@ import type { ScoreBreakdown } from "../core/index.ts";
 import { briefingScreen, setBriefingLoading } from "./briefing.ts";
 import { createCard } from "./card.ts";
 import { el, speakerIcon } from "./dom.ts";
-import { formatTime, inDropZone, patienceMood, progressShare, shareOffered, shareText, soundButton } from "./format.ts";
+import { dropLine, dropTarget, formatTime, patienceMood, type ScreenRect, progressShare, shareOffered, shareText, soundButton } from "./format.ts";
 import { type ResultExtras, type ShareRoute, resultScreen } from "./result.ts";
 import { startScreen } from "./start.ts";
 import { STRINGS, SYMPTOM_TEXT, TEMPLATES } from "./strings.ts";
@@ -35,10 +35,16 @@ export interface UiOptions {
 }
 
 export interface Ui {
-  /** True if a screen point (CSS px) is over the tray, where a carried part is dropped to remove it (ADR 0020). */
-  overTray(x: number, y: number): boolean;
-  /** Shows where a carried part can be dropped: "carrying" lights the tray, "over" when the part is over it. */
-  setDropState(state: "none" | "carrying" | "over"): void;
+  /**
+   * True if a carried part released with the finger at `finger` (CSS px) and its middle at `part` drops into the tray,
+   * where it is removed (ADR 0020). `machine` is the generator's bounds on screen as drawn (release 0.15.1).
+   */
+  overTray(finger: { x: number; y: number }, part: { x: number; y: number } | null, machine: ScreenRect | null): boolean;
+  /**
+   * Shows where a carried part can be dropped: "carrying" lights the drop zone, the whole screen below the generator;
+   * "over" brightens it while the part is in it or near enough to drop. Called on every move while carrying.
+   */
+  setDropState(state: "none" | "carrying" | "over", machine: ScreenRect | null): void;
   /**
    * Tells `fn` how many CSS px at the bottom of the screen the controls (pull cord and tray) cover, now and whenever it
    * changes, so the machine can be framed above them (release 0.9.3). 0 while the HUD is hidden.
@@ -58,10 +64,13 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   const banner = el("div", { class: "banner", role: "status", hidden: "" });
   const pull = el("button", { class: "pull", type: "button", text: STRINGS.pullCord });
   const trayHost = el("div", { class: "tray-host" });
-  const dropHint = el("div", { class: "drop-hint", hidden: "", text: STRINGS.dropHere });
+  // While a part is carried, the drop zone: the whole screen from just below the generator down, over the controls
+  // (release 0.15.1). It takes no touches; the canvas holds the carrying pointer.
+  const dropLabel = el("div", { class: "drop-label", text: STRINGS.dropHere });
+  const dropZone = el("div", { class: "drop-zone", hidden: "" }, dropLabel);
   const controls = el("div", { class: "controls" }, banner, pull, trayHost);
   const mute = options.sound ? muteButton(options.sound) : null;
-  const hud = el("div", { class: "hud", hidden: "" }, timer, mute, meter, speech, controls);
+  const hud = el("div", { class: "hud", hidden: "" }, timer, mute, meter, speech, controls, dropZone);
   const overlays = el("div", { class: "overlays" });
   root.append(hud, overlays);
 
@@ -71,7 +80,6 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     return hit !== null && stage.contains(hit);
   };
   const tray = createTray(trayHost, game, card, overMachine, options.partImage ?? (() => null), options.carry ?? null);
-  trayHost.appendChild(dropHint); // shown inside the lit tray while a part is carried
 
   // How much of the screen the controls cover: they grow a row at a time as chips pile up in the tray.
   let coverFn: ((px: number) => void) | null = null;
@@ -100,9 +108,10 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     speechTimer = setTimeout(() => (speech.hidden = true), SPEECH_MS);
   }
 
+  let carrying = false;
   function update(): void {
     tray.refresh();
-    pull.disabled = !game.running || game.state.tray.length > 0;
+    pull.disabled = carrying || !game.running || game.state.tray.length > 0;
   }
 
   function showScreen(screen: HTMLElement): void {
@@ -221,14 +230,20 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   void showStart();
 
   return {
-    overTray(_x, y) {
+    overTray(finger, part, machine) {
       if (hud.hidden) return false;
-      return inDropZone(y, controls.getBoundingClientRect().top, window.innerHeight);
+      return dropTarget(finger, machine, { width: window.innerWidth, height: window.innerHeight }, controls.getBoundingClientRect(), part) === "tray";
     },
-    setDropState(state) {
-      controls.classList.toggle("carrying", state !== "none");
-      controls.classList.toggle("over", state === "over");
-      dropHint.hidden = state === "none";
+    setDropState(state, machine) {
+      const on = state !== "none";
+      controls.classList.toggle("carrying", on);
+      dropZone.classList.toggle("over", state === "over");
+      dropZone.hidden = !on;
+      if (on) dropZone.style.top = `${Math.max(0, Math.round(dropLine(machine, controls.getBoundingClientRect())))}px`;
+      if (on !== carrying) {
+        carrying = on;
+        pull.disabled = carrying || !game.running || game.state.tray.length > 0;
+      }
     },
     setLoading(done, total) {
       if (loading === null) return;

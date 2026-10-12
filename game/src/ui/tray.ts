@@ -9,6 +9,8 @@ import { STRINGS } from "./strings.ts";
 
 /** Movement under this is a tap, CSS px (docs/design/interface.md). */
 const TAP_SLOP = 8;
+/** How long chips glide to their new places when the tray re-flows, ms (release 0.15.1). */
+const CHIP_GLIDE_MS = 180;
 
 export interface Tray {
   refresh(): void;
@@ -98,9 +100,32 @@ export function createTray(
     const tray = game.state.tray;
     // Keep existing chips (a drag may be in progress on one); add and remove only what changed.
     const have = new Map([...list.children].map((c) => [(c as HTMLElement).dataset.part!, c as HTMLElement]));
+    // Where each chip was, so the rows re-flow with a short glide instead of a jump (release 0.15.1).
+    const before = new Map([...have].map(([id, node]) => [id, node.getBoundingClientRect()]));
+    const added: HTMLElement[] = [];
     for (const [id, node] of have) if (!tray.includes(id)) node.remove();
-    for (const id of tray) if (!have.has(id)) list.appendChild(chip(id));
+    for (const id of tray) {
+      if (have.has(id)) continue;
+      const node = chip(id);
+      list.appendChild(node);
+      added.push(node);
+    }
     empty.hidden = tray.length > 0 || !game.running;
+    if (added.length === 0 && before.size === list.children.length) return;
+    const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) return;
+    for (const node of list.children as HTMLCollectionOf<HTMLElement>) {
+      if (typeof node.animate !== "function" || node.classList.contains("lifted")) continue;
+      const was = before.get(node.dataset.part!);
+      if (was) {
+        const now = node.getBoundingClientRect();
+        const dx = was.left - now.left;
+        const dy = was.top - now.top;
+        if (dx !== 0 || dy !== 0) node.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: CHIP_GLIDE_MS, easing: "ease-out" });
+      } else if (added.includes(node)) {
+        node.animate([{ opacity: 0, transform: "scale(0.6)" }, { opacity: 1, transform: "none" }], { duration: CHIP_GLIDE_MS, easing: "ease-out" });
+      }
+    }
   }
 
   refresh();

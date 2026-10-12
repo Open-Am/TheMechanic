@@ -202,47 +202,49 @@ button.pull {
   transition: background-color 120ms, outline-color 120ms;
 }
 
-/* While a part is carried (ADR 0020): the whole strip from just above the pull cord down is the drop zone. */
-.controls.carrying {
-  background: linear-gradient(to top, rgb(0 0 0 / 0.7), rgb(0 0 0 / 0.15));
+/* While a part is carried (ADR 0020): the controls fade back so the carried part shows over them; the drop zone below
+   lies over them all (release 0.15.1). */
+.controls.carrying .pull,
+.controls.carrying .tray-host,
+.controls.carrying .banner {
+  opacity: 0.45;
+  transition: opacity 120ms;
 }
 
-.controls.carrying .tray-host {
-  outline: 2px dashed var(--accent);
-  outline-offset: 4px;
-  background: rgb(224 165 38 / 0.12);
-}
-
-.controls.over .tray-host {
-  outline-style: solid;
-  background: rgb(224 165 38 / 0.3);
-}
-
-.controls.carrying .tray-empty {
-  display: none;
-}
-
-/* Laid over the tray, not added below it: the controls keep their height while a part is carried (release 0.9.3). */
-.drop-hint {
+/* The drop zone: the whole screen from just below the generator (its top set by script) to the bottom, full width. */
+.drop-zone {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0;
-  border-radius: var(--radius);
-  background: rgb(46 38 22 / 0.88);
+  border-top: 2px dashed var(--accent);
+  background: linear-gradient(to bottom, rgb(224 165 38 / 0.16), rgb(224 165 38 / 0.08));
   pointer-events: none;
-  text-align: center;
+  transition: background-color 120ms, border-color 120ms;
+}
+
+/* Brighter as soon as the carried part is in the zone or near enough to drop. */
+.drop-zone.over {
+  border-top-style: solid;
+  background: linear-gradient(to bottom, rgb(224 165 38 / 0.38), rgb(224 165 38 / 0.22));
+}
+
+.drop-label {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgb(46 38 22 / 0.88);
   color: var(--accent);
   font-weight: 600;
-  font-size: 15px;
+  font-size: 16px;
+  white-space: nowrap;
   transition: background-color 120ms, color 120ms;
 }
 
-/* Brighter while the carried part is over the drop zone, as the tray itself does. */
-.controls.over .drop-hint {
-  background: rgb(150 108 22 / 0.92);
+.drop-zone.over .drop-label {
+  background: rgb(150 108 22 / 0.95);
   color: var(--text);
 }
 

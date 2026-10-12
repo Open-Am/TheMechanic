@@ -88,3 +88,34 @@ export function awaitingSecondTap(prev: Tap | null, now: number): boolean {
 export function dragMode(part: string | null, loose: (id: string) => boolean): "carry" | "turn" {
   return part !== null && loose(part) ? "carry" : "turn";
 }
+
+// ---- A fast release (release 0.15.1) ----
+
+/**
+ * A quick downward flick at release counts where it was heading: a thumb lifts while still moving, and the screen
+ * reports the last spot it touched, short of where the player meant. windowMs: the recent movement measured; minSpeed:
+ * the downward speed that counts as a flick, px per ms; aheadMs: how far ahead the release is projected.
+ */
+export const FLICK = { windowMs: 80, minSpeed: 0.8, aheadMs: 120 } as const;
+
+export interface PointerSample {
+  x: number;
+  y: number;
+  /** Event time stamp, ms. */
+  t: number;
+}
+
+/**
+ * Where a release was heading `FLICK.aheadMs` ahead, if the pointer was moving down at least `FLICK.minSpeed` over the
+ * last `FLICK.windowMs` before it; otherwise null. `samples` are the recent moves, oldest first.
+ */
+export function flickAhead(samples: readonly PointerSample[], release: PointerSample): { x: number; y: number } | null {
+  const from = samples.find((s) => s.t >= release.t - FLICK.windowMs && s.t < release.t);
+  if (!from) return null;
+  const dt = release.t - from.t;
+  if (dt < 8) return null;
+  const vx = (release.x - from.x) / dt;
+  const vy = (release.y - from.y) / dt;
+  if (vy < FLICK.minSpeed || Math.abs(vx) > vy * 2) return null;
+  return { x: release.x + vx * FLICK.aheadMs, y: release.y + vy * FLICK.aheadMs };
+}

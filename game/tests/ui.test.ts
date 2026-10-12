@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SYMPTOMS } from "../src/core/types.ts";
 import type { ScoreBreakdown } from "../src/core/types.ts";
-import { DROP_REACH, dailyButtonText, formatTime, inDropZone, patienceMood, shareOffered, shareText, shareUrl, soundButton, starText, todayResultText } from "../src/ui/format.ts";
+import { DROP, dailyButtonText, dropLine, dropTarget, formatTime, magnetPx, patienceMood, shareOffered, shareText, shareUrl, soundButton, starText, todayResultText } from "../src/ui/format.ts";
 import { SHARE, STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
 import { loadFaults } from "./helpers.ts";
 
@@ -59,15 +59,85 @@ describe("customers in the interface (ADR 0015)", () => {
   });
 });
 
-describe("the tray drop zone (ADR 0020)", () => {
-  it("is the whole strip from a little above the controls to the bottom of the screen", () => {
-    const top = 700;
-    const bottom = 844;
-    expect(inDropZone(top, top, bottom)).toBe(true);
-    expect(inDropZone(top - DROP_REACH, top, bottom)).toBe(true);
-    expect(inDropZone(top - DROP_REACH - 1, top, bottom)).toBe(false);
-    expect(inDropZone(bottom, top, bottom)).toBe(true);
-    expect(inDropZone(bottom + 1, top, bottom)).toBe(false);
+describe("the tray drop zone (ADR 0020, release 0.15.1)", () => {
+  // Measured at 390 by 844 with nothing off: the generator's lowest point at 650, the controls from 710.
+  const phone = { width: 390, height: 844 };
+  const machine = { left: 70, top: 250, right: 320, bottom: 650 };
+  const controls = { left: 0, top: 710, right: 390, bottom: 844 };
+  const line = dropLine(machine, controls);
+  const at = (x: number, y: number) => dropTarget({ x, y }, machine, phone, controls);
+
+  it("starts just below the generator's lowest point, not at the controls", () => {
+    expect(line).toBe(650 + DROP.margin);
+    expect(line).toBeLessThan(controls.top);
+  });
+
+  it("is the whole lower region, full width: just below the generator, the bench edge, the pull cord, the chips, the bottom", () => {
+    for (const x of [0, 30, 195, 360, 390]) {
+      expect(at(x, line)).toBe("tray");
+      expect(at(x, 690)).toBe("tray"); // the bench's front edge
+      expect(at(x, 740)).toBe("tray"); // the pull cord
+      expect(at(x, 800)).toBe("tray"); // the chips
+      expect(at(x, 844)).toBe("tray");
+    }
+  });
+
+  it("was missing the strip just below the generator before 0.15.1 (64 px above the controls was the edge)", () => {
+    // The owner's "it goes back to machine": the old edge sat 4 px above the generator's lowest point at 390 by 844, but
+    // on a shorter screen with the tray grown it was well below it. Here the controls are 150 px under the generator.
+    const lowControls = { ...controls, top: 800 };
+    expect(dropTarget({ x: 195, y: 700 }, machine, phone, lowControls)).toBe("tray");
+  });
+
+  it("over the generator itself puts the part back, even within the magnet's reach", () => {
+    expect(at(195, 400)).toBe("back");
+    expect(at(195, 640)).toBe("back");
+    expect(at(195, machine.bottom)).toBe("back");
+    expect(at(195, 100)).toBe("back"); // above the generator, far from the tray
+  });
+
+  it("counts a release close to the zone beside the generator (the magnet)", () => {
+    const m = magnetPx(phone.height);
+    expect(at(30, line - m + 1)).toBe("tray");
+    expect(at(30, line - m - 1)).toBe("back");
+    expect(at(360, line - 20)).toBe("tray");
+  });
+
+  it("judges the carried part's place as well as the finger's", () => {
+    // The finger still over the generator, the part hanging below it at the bench's edge: a drop.
+    expect(dropTarget({ x: 195, y: 600 }, machine, phone, controls, { x: 195, y: 690 })).toBe("tray");
+    // The finger in the zone counts whatever the part does.
+    expect(dropTarget({ x: 195, y: 760 }, machine, phone, controls, { x: 195, y: 500 })).toBe("tray");
+    // Both over the generator: back.
+    expect(dropTarget({ x: 195, y: 500 }, machine, phone, controls, { x: 200, y: 520 })).toBe("back");
+  });
+
+  it("the magnet reach scales with the screen: 56 to 80 px", () => {
+    expect(magnetPx(640)).toBeGreaterThanOrEqual(56);
+    expect(magnetPx(844)).toBeGreaterThan(magnetPx(640));
+    expect(magnetPx(2000)).toBe(80);
+    expect(magnetPx(300)).toBe(56);
+  });
+
+  it("the controls always count, even if the generator is drawn down over them (zoomed in)", () => {
+    const low = { ...machine, bottom: 760 };
+    expect(dropLine(low, controls)).toBe(controls.top);
+    expect(dropTarget({ x: 195, y: 720 }, low, phone, controls)).toBe("tray");
+    expect(dropTarget({ x: 195, y: 700 }, low, phone, controls)).toBe("back");
+  });
+
+  it("without the generator's bounds falls back to a strip above the controls", () => {
+    expect(dropLine(null, controls)).toBe(controls.top - DROP.reach);
+    expect(dropTarget({ x: 195, y: controls.top - DROP.reach }, null, phone, controls)).toBe("tray");
+    expect(dropTarget({ x: 195, y: 100 }, null, phone, controls)).toBe("back");
+  });
+
+  it("a point below the screen's bottom (a flick's point ahead) is in the zone", () => {
+    expect(at(195, 1000)).toBe("tray");
+  });
+
+  it("gives the same answer for the same input", () => {
+    expect(at(120, 655)).toBe(at(120, 655));
   });
 });
 

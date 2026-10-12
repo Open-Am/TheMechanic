@@ -24,15 +24,52 @@ export function todayResultText(s: DailyView): string | null {
   return TEMPLATES.todayFixed(s.day, r.score.total, starText(r.score.stars));
 }
 
-/** CSS px above the controls (pull cord and tray) that still count as dropping on the tray (ADR 0020 tuning). */
-export const DROP_REACH = 64;
+/** A rectangle on screen, CSS px, y down. */
+export interface ScreenRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
 
 /**
- * True if a screen point is in the tray's drop zone: the whole strip of the screen from a little above the controls to
- * the bottom, across its full width, so a carried part does not have to land on the tray itself.
+ * The tray's drop zone while a part is carried (ADR 0020 tuning, release 0.15.1). CSS px.
+ * - margin: how far below the generator's lowest point on screen the zone starts.
+ * - reach: without the generator's bounds, how far above the controls it starts (the old rule, before 0.15.1).
+ * - magnet: how close to the zone a release still counts, as a share of the screen's height, kept within min and max.
  */
-export function inDropZone(y: number, controlsTop: number, screenBottom: number): boolean {
-  return y >= controlsTop - DROP_REACH && y <= screenBottom;
+export const DROP = { margin: 8, reach: 64, magnetShare: 0.09, magnetMin: 56, magnetMax: 80 } as const;
+
+/** How close above the zone's edge a carried part still drops into the tray, for a screen this tall. */
+export function magnetPx(screenHeight: number): number {
+  return Math.min(DROP.magnetMax, Math.max(DROP.magnetMin, Math.round(screenHeight * DROP.magnetShare)));
+}
+
+/**
+ * The zone's top edge: just below the generator's lowest point on screen, and never below the controls' top, so the pull
+ * cord, the hint and the chips always count. Without the generator's bounds, a strip above the controls.
+ */
+export function dropLine(machine: ScreenRect | null, controls: ScreenRect): number {
+  if (!machine) return controls.top - DROP.reach;
+  return Math.min(machine.bottom + DROP.margin, controls.top);
+}
+
+/**
+ * Where a carried part released at `finger` goes: "tray" removes it, "back" sends it back to the machine, loose
+ * (ADR 0020). The zone is the whole width of the screen from `dropLine` down, past the bottom edge. A point within
+ * `magnetPx` above the zone counts too, unless it is over the generator itself (inside its bounds, above the
+ * controls). `part` is the carried part's middle on screen: the drop counts if either the finger or the part is in.
+ */
+export function dropTarget(finger: { x: number; y: number }, machine: ScreenRect | null, screen: { width: number; height: number }, controls: ScreenRect, part?: { x: number; y: number } | null): "tray" | "back" {
+  const line = dropLine(machine, controls);
+  const reach = line - magnetPx(screen.height);
+  const near = (p: { x: number; y: number }): boolean => {
+    if (p.y >= line) return true;
+    if (p.y < reach) return false;
+    const overMachine = machine !== null && p.x >= machine.left && p.x <= machine.right && p.y >= machine.top && p.y <= machine.bottom;
+    return !overMachine;
+  };
+  return near(finger) || (part ? near(part) : false) ? "tray" : "back";
 }
 
 /**
