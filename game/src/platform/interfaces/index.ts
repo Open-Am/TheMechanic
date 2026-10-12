@@ -33,7 +33,7 @@ export interface Share {
 }
 
 /** The moments that make a sound (ADR 0018, plan 0013 reading 1). One file each: game/public/audio/<moment>.ogg. */
-export const MOMENTS = ["turn", "give-unbolt", "give-unclip", "give-pull", "give-scrape", "land", "seat", "cord", "fail", "start"] as const;
+export const MOMENTS = ["turn", "give-unbolt", "give-unclip", "give-pull", "give-scrape", "land", "seat", "cord", "fail", "start", "run"] as const;
 export type Moment = (typeof MOMENTS)[number];
 
 /** A vibration: one length in ms, or on, off, on... lengths, as navigator.vibrate takes them. */
@@ -44,13 +44,8 @@ export type VibrationPattern = number | readonly number[];
  * whose file is missing, late or undecodable plays nothing (ADR 0023). Every failure is swallowed.
  */
 export interface Audio {
-  /**
-   * Plays a moment now, or after delaySeconds. With `loop` it plays to `loop.to` and then repeats from `loop.from` to
-   * `loop.to` (seconds into the file) until fade() (plan 0018: the engine running).
-   */
-  play(moment: Moment, delaySeconds?: number, loop?: { from: number; to: number }): void;
-  /** Fades out every playing copy of a moment over `seconds` and stops it. */
-  fade(moment: Moment, seconds: number): void;
+  /** Plays a moment now, or after delaySeconds. */
+  play(moment: Moment, delaySeconds?: number): void;
   /** Vibrates where the phone supports it, now or after delaySeconds. */
   vibrate(pattern: VibrationPattern, delaySeconds?: number): void;
   setMuted(muted: boolean): void;
@@ -58,6 +53,26 @@ export interface Audio {
   unlock(): void;
   /** Hands over a moment's downloaded file. Resolves to true once it can play, false if it cannot be decoded. */
   load(moment: Moment, data: ArrayBuffer): Promise<boolean>;
+  /**
+   * Plays a moment's file on repeat until stopLoop (ADR 0028: the engine running). One loop at a time: a new one stops
+   * the old at once. Starting the loop that is already playing does nothing. Muting stops it at once.
+   */
+  startLoop(moment: Moment, options?: LoopOptions): void;
+  /** Stops the loop, over fadeOutSeconds or at once. Does nothing if that loop is not playing. */
+  stopLoop(moment: Moment, options?: { fadeOutSeconds?: number }): void;
+}
+
+/** How a loop starts (ADR 0028). */
+export interface LoopOptions {
+  /** Seconds from now until `after` starts, or until the loop starts when there is no `after`. */
+  delaySeconds?: number;
+  /** A one-shot played at the same delay that the loop follows: the loop comes in as its file ends. */
+  after?: Moment;
+  /** Seconds the loop fades in over, overlapping the end of `after`: the crossfade from the catch to the run. */
+  fadeInSeconds?: number;
+  /** Where the repeat runs, seconds into the file; the whole file when absent. */
+  loopStart?: number;
+  loopEnd?: number;
 }
 
 export interface Clock {

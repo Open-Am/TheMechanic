@@ -5,7 +5,7 @@
 // the moments of accepted actions and render's moments are passed to playMoment here (ADR 0010).
 
 import { dailyStatus } from "./app/daily.ts";
-import { ENGINE_LOOP, MOMENTS, type Moment, playMoment, VIBRATION } from "./app/moments.ts";
+import { MOMENTS, type Moment, playCue } from "./app/moments.ts";
 import { createGame } from "./app/round.ts";
 import { dailyFaultId, dayNumber, validateAll, validateCustomers, type CustomerFile, type FaultFile, type Machine } from "./core/index.ts";
 import { browserContext, browserVibrate, createAudio, type LocalAudio } from "./platform/local/audio.ts";
@@ -121,8 +121,18 @@ async function start(): Promise<void> {
   // Sound and vibration (ADR 0018): on by default, the mute choice remembered under its own key.
   const muted = createFlag(safeStorage(), MUTED_KEY);
   const heard: Array<{ moment: Moment; audible: boolean; at: number }> = [];
+  const loops: Array<{ moment: Moment; playing: boolean; audible: boolean; at: number }> = [];
   const audio = createAudio(
-    { createContext: browserContext, vibrate: browserVibrate(navigator), ...(import.meta.env.DEV ? { onPlay: (moment: Moment, audible: boolean) => void heard.push({ moment, audible, at: Math.round(performance.now()) }) } : {}) },
+    {
+      createContext: browserContext,
+      vibrate: browserVibrate(navigator),
+      ...(import.meta.env.DEV
+        ? {
+            onPlay: (moment: Moment, audible: boolean) => void heard.push({ moment, audible, at: Math.round(performance.now()) }),
+            onLoop: (moment: Moment, playing: boolean, audible: boolean) => void loops.push({ moment, playing, audible, at: Math.round(performance.now()) }),
+          }
+        : {}),
+    },
     muted.get(),
   );
   const game = createGame({ ...data, clock, audio, random: Math.random, scores, ...(customers ? { customers } : {}) });
@@ -149,7 +159,10 @@ async function start(): Promise<void> {
     // Development only: what each moment asked for and whether it could be heard, for tools/verify (plan 0013 step 6).
     (window as unknown as Record<string, unknown>).__openAmDevAudio = {
       log: () => heard.map((h) => ({ ...h })),
-      clear: () => void (heard.length = 0),
+      clear: () => void ((heard.length = 0), (loops.length = 0)),
+      // ADR 0028: each loop start and stop, and the loop playing now.
+      loops: () => loops.map((l) => ({ ...l })),
+      looping: () => audio.looping(),
       state: () => audio.contextState(),
       loaded: () => audio.loaded(),
       muted: () => audio.muted(),
@@ -164,7 +177,13 @@ async function start(): Promise<void> {
     carry: { move: (id, x, y) => view?.carryChip(id, x, y), end: (id) => view?.endChipCarry(id), busy: () => view?.busy() ?? false },
     daily: () => dailyStatus(daily, scores),
     share: { send: (text) => share.share(text), sheet: hasShareSheet(navigator), url: shareUrl(location.href, import.meta.env.BASE_URL) },
-    ending: () => view?.ending() ?? Promise.resolve(),
+    // Plan 0018: render winds the engine down at the switch press ("run-stop") and cuts it on a skip or a new round
+    // ("run-cut"). Nothing may loop under the result: once the ending is over, any loop still playing stops.
+    ending: () => {
+      const over = view?.ending() ?? Promise.resolve();
+      void over.then(() => playCue(audio, "run-cut"));
+      return over;
+    },
     sound: {
       muted: muted.get(),
       setMuted: (m) => {
@@ -187,17 +206,11 @@ async function start(): Promise<void> {
   mounted.ready();
   view.setTrayTest(mounted.overTray);
   view.onCarry(mounted.setDropState);
-  view.onMoment((m) => playMoment(audio, m));
-  // The pull plays on screen (plan 0018): render plays the cord and the engine's answer as the animation reaches them,
-  // and the running engine's sound loops until the mechanic switches it off.
+  // render's moments and the engine cues ("run-start", "run-stop", "run-cut": ADR 0028) go to the audio here. The pull
+  // plays on screen (plan 0018): render sends the cord, the catch and the engine's start and stop as the animation
+  // reaches them, so app leaves them to it.
+  view.onMoment((m) => playCue(audio, m));
   game.setPullSoundsByRender(true);
-  view.onEngine((e) => {
-    if (e.type === "run") {
-      audio.play("start", 0, ENGINE_LOOP);
-      const buzz = VIBRATION.start;
-      if (buzz !== null) audio.vibrate(buzz);
-    } else audio.fade("start", e.seconds);
-  });
   // Start pressed: the customer brings the generator; the clock starts when it lands (plan 0017 reading 1).
   game.events.on("arriving", () => (view ? view.playArrival(() => game.begin()) : game.begin()));
   mounted.onCover(view.setBottomCover);

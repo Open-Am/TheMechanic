@@ -28,7 +28,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from "three";
-import { giveMoment, type Moment } from "../app/moments.ts";
+import { type Cue, giveMoment, type Moment } from "../app/moments.ts";
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.ts";
 import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
@@ -77,7 +77,7 @@ export interface RenderView {
    * giving, a part seating home (ADR 0018, plan 0013 step 5). Supplied by main.ts, which plays them; render never
    * imports platform (ADR 0010). A part that cannot come off makes none.
    */
-  onMoment(fn: (moment: Moment) => void): void;
+  onMoment(fn: (moment: Moment | Cue) => void): void;
   /** True while the hand plays a loosening or doing-up sequence: a new put-back is ignored until it ends (ADR 0021). */
   busy(): boolean;
   /**
@@ -92,12 +92,6 @@ export interface RenderView {
    * (the engine runs and the mechanic switches it off). Without it the ending runs straight on.
    */
   setPayHold(hold: (() => Promise<void>) | null): void;
-  /**
-   * Told when the engine starts running (the looped `start` sound) and when the mechanic switches it off (fade it out
-   * over `seconds`), plan 0018. Supplied by main.ts, which plays them; the cord, start and fail moments go to onMoment
-   * as the pull reaches them once main.ts has told app to leave them to render.
-   */
-  onEngine(fn: (e: { type: "run" } | { type: "stop"; seconds: number }) => void): void;
   dispose(): void;
 }
 
@@ -326,8 +320,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const seating = new Set<PartId>();
 
   /** Where the finger's moments go (plan 0013 step 5). Set by main.ts; nothing is told until then. */
-  let momentFn: ((m: Moment) => void) | null = null;
-  function moment(m: Moment): void {
+  let momentFn: ((m: Moment | Cue) => void) | null = null;
+  function moment(m: Moment | Cue): void {
     try {
       momentFn?.(m);
     } catch {
@@ -1205,6 +1199,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   function skipStory(): void {
     if (!story) return;
+    // ADR 0028: a tap that skips the ending stops the engine at once (main.ts winds it down when the ending ends).
+    if (story.clip === "pay_leave") moment("run-cut");
     if (story.clip === "arrive" && story.landed) {
       const landed = story.landed;
       story.landed = null;
@@ -1263,15 +1259,6 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const ropeRest = pullNodes.handle && pullNodes.rope ? pullNodes.handle.position.distanceTo(pullNodes.rope.position) : STARTUP.ropeRest;
   const rootRest = { p: view.root.position.clone(), r: view.root.rotation.z };
   const exhaust = createExhaust(scene, () => pullNodes.outlet, new Vector3(-1, 0, 0));
-  /** Starts (or stops) the looped engine sound; set by main.ts. */
-  let engineFn: ((e: { type: "run" } | { type: "stop"; seconds: number }) => void) | null = null;
-  function engine(e: { type: "run" } | { type: "stop"; seconds: number }): void {
-    try {
-      engineFn?.(e);
-    } catch {
-      // A sound that fails never stops the start-up.
-    }
-  }
 
   interface Startup {
     plan: StartupPlan;
@@ -1335,7 +1322,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     view.root.rotation.z = rootRest.r;
     exhaust.clear();
     dropHandNotes();
-    if (s.did.has("run") && !s.did.has("fade")) engine({ type: "stop", seconds: 0.2 });
+    // A start-up cut short (a skip to the end, a new round) stops the engine's sound at once (ADR 0028).
+    if (s.did.has("run") && !s.did.has("fade")) moment("run-cut");
     s.done();
   }
 
@@ -1394,7 +1382,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     let haze = 0;
     if (r) {
       once(s, "run", r.catch, () => {
-        engine({ type: "run" });
+        // The catch, then the running engine's loop after it (ADR 0028).
+        moment("start");
+        moment("run-start");
         exhaust.puff("puff");
       });
       once(s, "smile", r.smile, () => {
@@ -1449,7 +1439,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         const rest = nodeRest.get(pullNodes.switch)!;
         pullNodes.switch.quaternion.copy(rest.q).multiply(new Quaternion().setFromAxisAngle(AXES.x, switchAngle(r, t)));
       }
-      once(s, "fade", r.pressed, () => engine({ type: "stop", seconds: STARTUP.windDown }));
+      // The switch pressed: the engine winds down (ADR 0028's run-stop fades over the same 0.8 s as STARTUP.windDown).
+      once(s, "fade", r.pressed, () => moment("run-stop"));
       once(s, "hand-off-switch", r.pressed + 0.15, () => {
         hand?.open();
         hand?.withdraw();
@@ -2207,9 +2198,6 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     ending: () => new Promise<void>((r) => setTimeout(() => void (endingPromise ?? Promise.resolve()).then(r), 0)),
     setPayHold(hold) {
       payHold = hold;
-    },
-    onEngine(fn) {
-      engineFn = fn;
     },
     carryChip,
     endChipCarry,

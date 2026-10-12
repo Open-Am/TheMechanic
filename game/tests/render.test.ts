@@ -15,6 +15,7 @@ import { loadMachine } from "./helpers.ts";
 import { pickToolbox, renderFileCount } from "../src/render/model.ts";
 import { coughShake, coughTimes, handleOffset, hazeLevel, planShake, pullOut, pullTimes, ropeLength, runShake, runTimes, shakeAt, STARTER_FACE_YAW, startupPlan, STARTUP, starterTurn, switchAngle, turnYaw, windDownFade } from "../src/render/startup.ts";
 import { STORY } from "../src/render/customerpose.ts";
+import { RUN } from "../src/app/moments.ts";
 import { EXHAUST, hazeDue, puffPose } from "../src/render/exhaust.ts";
 
 const machine = loadMachine();
@@ -1184,6 +1185,10 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(noStarter.run).toBeNull();
     expect(noStarter.moments).toEqual({ cord: null, start: null, fail: 0 });
     expect(noStarter.end).toBeCloseTo(STARTUP.coughSeconds, 12);
+  });
+
+  it("the wind-down lasts as long as the running sound's fade-out (ADR 0028's run-stop)", () => {
+    expect(STARTUP.windDown).toBe(RUN.fadeOutSeconds);
   });
 
   it("the same pull always plays the same way (ADR 0007)", () => {

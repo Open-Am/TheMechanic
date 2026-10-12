@@ -173,54 +173,6 @@ describe("audio (ADR 0018, plan 0013 step 1)", () => {
     expect(throwing.contextState()).toBe("none");
   });
 
-  it("loops a moment between two points and fades it out on fade(), through a gain (plan 0018)", async () => {
-    const { ctx } = fakeContext("running");
-    const sources: Array<{ loop: boolean; loopStart: number; loopEnd: number; stoppedAt: number | undefined }> = [];
-    const ramps: Array<[number, number]> = [];
-    const full = Object.assign(ctx, {
-      createBufferSource() {
-        const node = { buffer: null as unknown, loop: false, loopStart: 0, loopEnd: 0, stoppedAt: undefined as number | undefined, connect: () => node, start: () => {}, stop: (w?: number) => void (node.stoppedAt = w) };
-        sources.push(node);
-        return node;
-      },
-      createGain() {
-        const g = { gain: { value: 1, setValueAtTime: () => g, linearRampToValueAtTime: (v: number, t: number) => void ramps.push([v, t]) }, connect: () => g };
-        return g;
-      },
-    });
-    const audio = createAudio({ createContext: () => full });
-    audio.unlock();
-    await audio.load("start", good());
-    await audio.load("cord", good());
-    audio.play("start", 0, { from: 1.2, to: 2.2 });
-    audio.play("cord");
-    expect(sources[0]).toMatchObject({ loop: true, loopStart: 1.2, loopEnd: 2.2 });
-    expect(sources[1]!.loop).toBe(false);
-    audio.fade("start", 0.8);
-    expect(ramps).toEqual([[0, 10.8]]);
-    expect(sources[0]!.stoppedAt).toBe(10.8);
-    expect(sources[1]!.stoppedAt).toBeUndefined();
-    // Faded once: a second fade, or one with nothing playing, does nothing and never throws.
-    expect(() => audio.fade("start", 0.8)).not.toThrow();
-    expect(ramps.length).toBe(1);
-  });
-
-  it("a loop without gain nodes still stops on fade(), and fade() before any sound is harmless", async () => {
-    expect(() => createAudio({}).fade("start", 1)).not.toThrow();
-    const { ctx } = fakeContext("running");
-    let stopped: number | undefined;
-    ctx.createBufferSource = () => {
-      const node = { buffer: null as unknown, connect: () => node, start: () => {}, stop: (w?: number) => void (stopped = w) };
-      return node;
-    };
-    const audio = createAudio({ createContext: () => ctx });
-    audio.unlock();
-    await audio.load("start", good());
-    audio.play("start", 0, { from: 1, to: 2 });
-    audio.fade("start", 0.5);
-    expect(stopped).toBe(10.5);
-  });
-
   it("swallows a source that fails to start", async () => {
     const { ctx } = fakeContext("running");
     ctx.createBufferSource = () => {
@@ -230,6 +182,207 @@ describe("audio (ADR 0018, plan 0013 step 1)", () => {
     audio.unlock();
     await audio.load("cord", good());
     expect(() => audio.play("cord")).not.toThrow();
+  });
+});
+
+describe("the engine running loop (ADR 0028)", () => {
+  type Ramp = [string, number, number];
+  interface FakeGain {
+    gain: { value: number; ramps: Ramp[]; setValueAtTime(v: number, t: number): void; linearRampToValueAtTime(v: number, t: number): void; cancelScheduledValues(t: number): void };
+    connected: unknown[];
+    disconnected: boolean;
+    connect(to: unknown): unknown;
+    disconnect(): void;
+  }
+  interface FakeSource {
+    buffer: unknown;
+    loop: boolean;
+    loopStart: number;
+    loopEnd: number;
+    connected: unknown[];
+    startedAt: [number, number] | null;
+    stoppedAt: number | null;
+    disconnected: boolean;
+    onended: (() => void) | null;
+    connect(to: unknown): unknown;
+    start(when?: number, offset?: number): void;
+    stop(when?: number): void;
+    disconnect(): void;
+  }
+
+  function loopContext() {
+    const sources: FakeSource[] = [];
+    const gains: FakeGain[] = [];
+    const ctx = {
+      state: "suspended",
+      currentTime: 10,
+      destination: { speakers: true },
+      async resume() {
+        ctx.state = "running";
+      },
+      async decodeAudioData(data: ArrayBuffer) {
+        return { duration: new Uint8Array(data)[0]! }; // the first byte is the length in seconds
+      },
+      createBufferSource(): FakeSource {
+        const s: FakeSource = {
+          buffer: null,
+          loop: false,
+          loopStart: 0,
+          loopEnd: 0,
+          connected: [],
+          startedAt: null,
+          stoppedAt: null,
+          disconnected: false,
+          onended: null,
+          connect: (to) => (s.connected.push(to), to),
+          start: (when = 0, offset = 0) => void (s.startedAt = [when, offset]),
+          stop: (when = 0) => void (s.stoppedAt = when),
+          disconnect: () => void (s.disconnected = true),
+        };
+        sources.push(s);
+        return s;
+      },
+      createGain(): FakeGain {
+        const g: FakeGain = {
+          gain: {
+            value: 1,
+            ramps: [],
+            setValueAtTime: (v, t) => void g.gain.ramps.push(["set", v, t]),
+            linearRampToValueAtTime: (v, t) => void g.gain.ramps.push(["ramp", v, t]),
+            cancelScheduledValues: (t) => void g.gain.ramps.push(["cancel", 0, t]),
+          },
+          connected: [],
+          disconnected: false,
+          connect: (to) => (g.connected.push(to), to),
+          disconnect: () => void (g.disconnected = true),
+        };
+        gains.push(g);
+        return g;
+      },
+    };
+    return { ctx, sources, gains };
+  }
+
+  async function loopReady(muted = false) {
+    const { ctx, sources, gains } = loopContext();
+    const loops: Array<[string, boolean, boolean]> = [];
+    const audio = createAudio({ createContext: () => ctx, onLoop: (m, playing, audible) => void loops.push([m, playing, audible]) }, muted);
+    audio.unlock();
+    await audio.load("start", new Uint8Array([4]).buffer); // the catch: 4 s
+    await audio.load("run", new Uint8Array([2]).buffer);
+    return { audio, ctx, sources, gains, loops };
+  }
+
+  it("starts the loop as the catch ends, crossfading over its tail, and repeats loopStart to loopEnd", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run", { after: "start", delaySeconds: 0.6, fadeInSeconds: 0.3, loopStart: 0.11, loopEnd: 2.36 });
+    const s = t.sources[0]!;
+    const g = t.gains[0]!;
+    // The catch starts at 10.6 and lasts 4 s; the loop comes in 0.3 s before it ends, at 14.3, from its loop start.
+    expect(s.startedAt![0]).toBeCloseTo(14.3, 9);
+    expect(s.startedAt![1]).toBe(0.11);
+    expect([s.loop, s.loopStart, s.loopEnd]).toEqual([true, 0.11, 2.36]);
+    expect(g.gain.ramps[0]).toEqual(["set", 0, s.startedAt![0]]);
+    expect(g.gain.ramps[1]![0]).toBe("ramp");
+    expect(g.gain.ramps[1]![1]).toBe(1);
+    expect(g.gain.ramps[1]![2]).toBeCloseTo(14.6, 9);
+    expect(s.connected).toEqual([g]);
+    expect(g.connected).toEqual([t.ctx.destination]);
+    expect(t.audio.looping()).toEqual(["run"]);
+    expect(t.loops).toEqual([["run", true, true]]);
+  });
+
+  it("is idempotent: a second start while it runs adds nothing, a second stop does nothing", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run");
+    t.audio.startLoop("run");
+    expect(t.sources).toHaveLength(1);
+    t.audio.stopLoop("run");
+    t.audio.stopLoop("run");
+    expect(t.loops).toEqual([["run", true, true], ["run", false, true]]);
+    expect(t.audio.looping()).toEqual([]);
+  });
+
+  it("fades out over the time given, stops the source then, and disconnects it once it has ended", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run");
+    t.ctx.currentTime = 20;
+    t.audio.stopLoop("run", { fadeOutSeconds: 0.8 });
+    const g = t.gains[0]!;
+    const s = t.sources[0]!;
+    expect(g.gain.ramps.slice(-3)).toEqual([["cancel", 0, 20], ["set", 1, 20], ["ramp", 0, 20.8]]);
+    expect(s.stoppedAt).toBeCloseTo(20.8, 9);
+    expect(t.audio.looping()).toEqual([]); // already free for a new start
+    expect(s.disconnected).toBe(false);
+    s.onended!();
+    expect(s.disconnected).toBe(true);
+    expect(g.disconnected).toBe(true);
+  });
+
+  it("stops at once, and disconnects at once, with no fade (a skip or a new round)", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run");
+    t.ctx.currentTime = 12;
+    t.audio.stopLoop("run");
+    expect(t.sources[0]!.stoppedAt).toBe(12);
+    expect(t.sources[0]!.disconnected).toBe(true);
+    expect(t.gains[0]!.disconnected).toBe(true);
+  });
+
+  it("stopping during the catch means the loop never sounds", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run", { after: "start", fadeInSeconds: 0.3 });
+    t.audio.stopLoop("run");
+    expect(t.sources[0]!.startedAt![0]).toBeCloseTo(13.7, 9);
+    expect(t.sources[0]!.stoppedAt).toBe(10); // before its start
+  });
+
+  it("a wind-down asked for during the catch (plan 0018: a skip to the switch) ends before the loop would start", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run", { after: "start", fadeInSeconds: 0.3 });
+    t.ctx.currentTime = 11;
+    t.audio.stopLoop("run", { fadeOutSeconds: 0.8 });
+    expect(t.sources[0]!.stoppedAt).toBeCloseTo(11.8, 9);
+    expect(t.sources[0]!.stoppedAt!).toBeLessThan(t.sources[0]!.startedAt![0]);
+    expect(t.audio.looping()).toEqual([]);
+  });
+
+  it("plays one loop at a time: a new loop stops the old one at once", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run");
+    t.audio.startLoop("start");
+    expect(t.sources[0]!.stoppedAt).toBe(10);
+    expect(t.sources[0]!.disconnected).toBe(true);
+    expect(t.audio.looping()).toEqual(["start"]);
+  });
+
+  it("muting stops it at once, and while muted nothing loops", async () => {
+    const t = await loopReady();
+    t.audio.startLoop("run");
+    t.audio.setMuted(true);
+    expect(t.sources[0]!.stoppedAt).toBe(10);
+    expect(t.audio.looping()).toEqual([]);
+    t.audio.startLoop("run");
+    expect(t.sources).toHaveLength(1);
+    expect(t.loops.at(-1)).toEqual(["run", true, false]);
+  });
+
+  it("loops nothing before unlock or without the file, and swallows a failure", async () => {
+    const { ctx, sources } = loopContext();
+    const loops: Array<[string, boolean, boolean]> = [];
+    const audio = createAudio({ createContext: () => ctx, onLoop: (m, p, a) => void loops.push([m, p, a]) });
+    audio.startLoop("run");
+    audio.unlock();
+    audio.startLoop("run"); // no file yet
+    expect(sources).toHaveLength(0);
+    expect(loops).toEqual([["run", true, false], ["run", true, false]]);
+    await audio.load("run", new Uint8Array([2]).buffer);
+    ctx.createGain = () => {
+      throw new Error("broken");
+    };
+    expect(() => audio.startLoop("run")).not.toThrow();
+    expect(audio.looping()).toEqual([]);
+    expect(() => audio.stopLoop("run", { fadeOutSeconds: 0.8 })).not.toThrow();
   });
 });
 

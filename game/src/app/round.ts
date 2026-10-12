@@ -7,7 +7,7 @@ import type { Action, ActionType, Customer, CustomerFile, CustomerMoment, Fault,
 import type { Clock, ScoreStore, StoredResult } from "../platform/interfaces/index.ts";
 import { dailyCustomer, recordResult, recordUnfinished } from "./daily.ts";
 import { Emitter } from "./emitter.ts";
-import { CORD_SECONDS, type MomentPlayer, playMoment } from "./moments.ts";
+import { CORD_SECONDS, type CuePlayer, playCue, playMoment } from "./moments.ts";
 import { pickCustomer, pickFault } from "./faults.ts";
 
 export interface PartEvent {
@@ -71,8 +71,8 @@ export interface GameDeps {
   machine: Machine;
   faults: FaultFile;
   clock: Clock;
-  /** Sound and vibration for the moments that come from accepted actions (ADR 0018). */
-  audio: MomentPlayer;
+  /** Sound and vibration for the moments that come from accepted actions (ADR 0018), and the engine running (ADR 0028). */
+  audio: CuePlayer;
   /** Returns [0, 1). Injected so tests are repeatable. */
   random: () => number;
   /** Customers (ADR 0015). Without them there is no patience, as before. */
@@ -207,6 +207,7 @@ export function createGame(deps: GameDeps): Game {
     machine,
 
     newRound(c) {
+      playCue(audio, "run-cut"); // an engine still running from the last round stops at once (ADR 0028)
       if (c) {
         const daily = faults.faults.find((f) => f.id === c.faultId);
         if (!daily) throw new Error(`newRound: no fault ${c.faultId}`);
@@ -281,9 +282,12 @@ export function createGame(deps: GameDeps): Game {
           // "pulled" first: render presses loose parts home, and a part still going back seats (and plays `seat`)
           // before the cord. Then the cord at once, the engine's answer once the cord has run (plan 0013 reading 3).
           events.emit("pulled", { t: action.t, started, failedPulls: state.failedPulls });
+          // Plan 0018: render plays these as its pull reaches them, once main.ts has said so.
           if (!pullSoundsByRender) {
             playMoment(audio, "cord");
             playMoment(audio, started ? "start" : "fail", CORD_SECONDS);
+            // ADR 0028: the engine runs on after the catch until render's ending stops it (run-stop, or run-cut on a skip).
+            if (started) playCue(audio, "run-start", CORD_SECONDS);
           }
           if (started) {
             const score = scoreState(machine, fault, state, action.t, customer ?? undefined);

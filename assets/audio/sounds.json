@@ -1,5 +1,5 @@
 {
-  "_source": "Plan 0013 step 3. One row per moment: the original file in assets/audio/source/ (not committed; download it again from url), its Freesound page, author, licence (CC0 1.0 or own recording only, ADR 0018), the date it was downloaded, the trim (start and end, seconds into the original), fades in and out (seconds) and gain (dB). npm run audio encodes every row with a source. Candidates: docs/reference/sound-shortlist.md. Until the owner chooses, source is null and the moment is silent.",
+  "_source": "Plan 0013 step 3. One row per moment: the original file in assets/audio/source/ (not committed; download it again from url), its Freesound page, author, licence (CC0 1.0 or own recording only, ADR 0018), the date it was downloaded, the trim (start and end, seconds into the original), fades in and out (seconds) and gain (dB). npm run audio encodes every row with a source. Candidates: docs/reference/sound-shortlist.md. Until the owner chooses, source is null and the moment is silent. A row with loop: true (run, ADR 0028) plays on repeat from loopStart to loopEnd (seconds into the original, inside start and end): the encoded file keeps a little sound either side of the loop so the codec edges never land on the seam.",
   "sounds": {
     "turn": {
       "source": "340529__mickyman5000__ratchet_single_click.wav",
@@ -110,16 +110,31 @@
       "gainDb": -2.5
     },
     "start": {
-      "source": "118971__esperri__chainsaw-start.wav",
-      "url": "https://freesound.org/people/esperri/sounds/118971/",
-      "author": "esperri",
+      "source": "871136__elschorscho__chainsaw-starting-idling-stopping-husqvarna-445.wav",
+      "url": "https://freesound.org/people/ElSchorscho/sounds/871136/",
+      "author": "ElSchorscho",
       "licence": "CC0 1.0",
       "fetched": "2026-10-12",
-      "start": 0.04,
-      "end": 2.56,
+      "start": 2.84,
+      "end": 6.8,
       "fadeIn": 0,
-      "fadeOut": 0.25,
-      "gainDb": -16
+      "fadeOut": 0.3,
+      "gainDb": 4.5
+    },
+    "run": {
+      "source": "871135__elschorscho__chainsaw-idle-and-revving-husqvarna-445.wav",
+      "url": "https://freesound.org/people/ElSchorscho/sounds/871135/",
+      "author": "ElSchorscho",
+      "licence": "CC0 1.0",
+      "fetched": "2026-10-12",
+      "start": 1.15,
+      "end": 3.62,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 14.5,
+      "loop": true,
+      "loopStart": 1.260229,
+      "loopEnd": 3.50875
     }
   }
 }
