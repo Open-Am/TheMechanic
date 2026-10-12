@@ -1,7 +1,7 @@
 ---
 id: 0016
 title: The generator on a workbench, the customer across it
-status: approved
+status: done
 date: 2026-10-12
 adrs: [0004, 0007, 0010, 0012, 0013, 0014, 0015, 0020, 0021, 0025]
 branch: plan/0016-the-workbench
@@ -53,6 +53,8 @@ Risks: turning the machine instead of the camera changes how lighting falls on i
 - `npm test`, `npm run typecheck`, `npm run docs:check`, `npm run build`, `npm run size` pass; `npm run assets` checks the bench within its budget and the re-baked shadow within 64 KB.
 - `npm run verify:phone` and `npm run verify:drop` pass as in step 5, with no console errors and at least 30 fps at 4x CPU throttle.
 - The owner looks on the phone.
+
+All checks in "Done when" that an agent can run pass (2026-10-12): 394 tests, typecheck, docs check, build and size (192.1 KB). `npm run assets` checks the bench at 902 triangles and 137.9 KB of 3,000 and 300 KB, and the shadow at 13.3 KB of 64 KB. `npm run verify:phone` (`HIDDEN_DEBUG=1`) and `npm run verify:drop` both exit 0 on a quiet machine, with 0 console errors and 120 fps at 4x CPU throttle; the bench checks of step 5 pass at both sizes. Built as planned, with three changes found on the way: the generator sits a little right of the screen's middle (58 percent across) and the tools lie across the toolbox's back tray on its rims, so the tools show from eye level; and the phone check starts each part from the default view. The phone preview was not republished. Waiting on the owner: a look on the phone. Details and known gaps in `docs/releases/0.15.0.md`.
 
 ## Depends on
 
