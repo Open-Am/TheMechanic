@@ -244,10 +244,20 @@ const looseNow = () => evaluate<string[]>(hook("loose()"));
 const pressPart = (x: number, y: number) => evaluate<string | null>(hook(`pressPart(${x}, ${y})`));
 const carrying = () =>evaluate<string | null>(hook("carrying()"));
 const trayHas = (id: string) => evaluate<boolean>(`!!document.querySelector('.tray [data-part="${id}"]')`);
-/** The diagnostic overlay's frame rate after a second and a bit with nothing happening, so it is a whole fresh reading. */
+/**
+ * The diagnostic overlay's frame rate with nothing happening: the median of three one-second readings, taken 1.1, 2.1
+ * and 3.1 s after the last action. The overlay counts frames over each second it ends, so a single reading 1.1 s after a
+ * drop could still hold the end of the drop, and one stalled second (another process on the machine) decided the round:
+ * with 28 rounds a run failed "Frame rate" in three of five full runs, with no trend in the readings (perf follow-up to
+ * 0.15.1).
+ */
 const steadyFps = async () => {
-  await sleep(1100);
-  return fps();
+  const seen: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    await sleep(i === 0 ? 1100 : 1000);
+    seen.push(await fps());
+  }
+  return seen.sort((a, b) => a - b)[1]!;
 };
 const fps = async () => Number(/(\d+) fps/.exec(await evaluate<string>(`document.querySelector('[data-marker="open-am-diagnostic-overlay"]')?.textContent ?? ""`))?.[1] ?? "0");
 /** What a press at (x, y) lands on: "canvas" when it reaches the 3D view, otherwise the element's class. */
