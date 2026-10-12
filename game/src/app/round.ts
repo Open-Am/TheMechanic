@@ -101,6 +101,14 @@ export interface Game {
   /** Share of the customer's patience left, from 1 to 0 (1 with no customer). */
   patience(): number;
   readonly customerName: string | null;
+  /** The round's customer's look (ADR 0015), the file render shows; null without customers. */
+  readonly customerLook: string | null;
+  /**
+   * The next round's customer's look, chosen when this round starts (ADR 0023), so render can download it during the
+   * round. The next free-play round plays that customer; a daily plays the day's customer instead. Null before the first
+   * round starts and without customers.
+   */
+  readonly nextCustomerLook: string | null;
   /** For diagnostic mode: the round time the customer leaves at, or null. */
   readonly walkOutAt: number | null;
   readonly outcome: "fixed" | "walked" | null;
@@ -120,6 +128,8 @@ export function createGame(deps: GameDeps): Game {
   let log: Action[] = [];
   let startedAt: number | null = null;
   let customer: Customer | null = null;
+  /** The next free-play round's customer, chosen when a round starts (ADR 0023). */
+  let nextCustomer: Customer | null = null;
   let walkedAt: number | null = null;
   let mood: CustomerMoment = "arrive";
   let choice: RoundChoice | null = null;
@@ -188,9 +198,10 @@ export function createGame(deps: GameDeps): Game {
         customer = deps.customers ? dailyCustomer(deps.customers.customers, c.day) : null;
       } else {
         fault = pickFault(faults.faults, fault?.id ?? null, random);
-        customer = deps.customers ? pickCustomer(deps.customers.customers, customer?.id ?? null, random) : null;
+        customer = deps.customers ? (nextCustomer ?? pickCustomer(deps.customers.customers, customer?.id ?? null, random)) : null;
       }
       choice = c ? { ...c } : null;
+      nextCustomer = null;
       recorded = null;
       state = initialState(machine);
       log = [];
@@ -208,6 +219,8 @@ export function createGame(deps: GameDeps): Game {
     begin() {
       if (!fault || startedAt !== null) return;
       startedAt = clock.now();
+      // The next free-play round's customer is chosen now, so its file can download during this round (ADR 0023).
+      nextCustomer = deps.customers ? pickCustomer(deps.customers.customers, customer?.id ?? null, random) : null;
       // The day's scored attempt is used up now, saved unfinished until the round ends (ADR 0024).
       if (choice?.scored) recordUnfinished(deps.scores, stored(scoreState(machine, fault, state, 0, customer ?? undefined), true));
       events.emit("started", { t: 0 });
@@ -294,6 +307,12 @@ export function createGame(deps: GameDeps): Game {
     },
     get customerName() {
       return customer?.name ?? null;
+    },
+    get customerLook() {
+      return customer?.look ?? null;
+    },
+    get nextCustomerLook() {
+      return nextCustomer?.look ?? null;
     },
     get walkOutAt() {
       return customer && fault ? walkOutTime(state, customer) : null;
