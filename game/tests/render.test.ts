@@ -7,7 +7,7 @@ import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/plac
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
-import { armAnchor, basisToQuaternion, cheapest, SPANNER_TURNS, spannerTurn, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut, toolBasis, toolFor } from "../src/render/handpose.ts";
+import { armAnchor, ARM_REACH, armSideOnTrip, basisToQuaternion, cheapest, SPANNER_TURNS, spannerTurn, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut, toolBasis, toolFor, toolboxArmSide } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
@@ -1023,5 +1023,78 @@ describe("where the toolbox stands (plan 0012, release 0.11.1)", () => {
       expect(at[0]).toBeLessThan(machineLeft[0]);
       expect(at[1]).toBeLessThan(0);
     }
+  });
+});
+
+describe("the arm on the toolbox trip (0.11.1 follow-up)", () => {
+  const cam: Vec3 = [0, 0, 1];
+  const right: Vec3 = [1, 0, 0];
+  const up: Vec3 = [0, 1, 0];
+  const fwd: Vec3 = [0, 0, -1];
+
+  it("the anchor sits at the lower right by default and mirrors to the lower left at side -1, still off screen below", () => {
+    expect(armAnchor(cam, right, up, fwd)).toEqual(armAnchor(cam, right, up, fwd, 1));
+    const r = armAnchor(cam, right, up, fwd, 1);
+    const l = armAnchor(cam, right, up, fwd, -1);
+    expect(r[0]).toBeCloseTo(HAND.anchorRight);
+    expect(l[0]).toBeCloseTo(-HAND.anchorRight);
+    expect(l[1]).toBeCloseTo(r[1]);
+    expect(l[2]).toBeCloseTo(r[2]);
+    expect(armAnchor(cam, right, up, fwd, 0)[0]).toBeCloseTo(0);
+  });
+
+  it("the toolbox's side of the screen: left of the middle is -1, right is +1, and it changes smoothly between", () => {
+    expect(toolboxArmSide(-0.85)).toBe(-1);
+    expect(toolboxArmSide(0.9)).toBe(1);
+    expect(toolboxArmSide(0)).toBe(0);
+    for (let x = -1; x < 1; x += 0.05) expect(Math.abs(toolboxArmSide(x + 0.05) - toolboxArmSide(x))).toBeLessThanOrEqual(0.05 / ARM_REACH.sideNdc + 1e-9);
+    expect(toolboxArmSide(Number.NaN)).toBe(1);
+  });
+
+  it("the arm comes from the toolbox's side at the toolbox and from the right at the fasteners", () => {
+    const box = -1;
+    expect(armSideOnTrip("pick", 0.5, box)).toBe(box);
+    expect(armSideOnTrip("putBack", 0.5, box)).toBe(box);
+    expect(armSideOnTrip("fasten", 0.5, box)).toBe(1);
+    expect(armSideOnTrip("free", 0.5, box)).toBe(1);
+    expect(armSideOnTrip("toToolbox", 1, box)).toBeCloseTo(box);
+    expect(armSideOnTrip("toSlot", 1, box)).toBeCloseTo(box);
+    expect(armSideOnTrip("toFastener", 0, box)).toBeCloseTo(box);
+    expect(armSideOnTrip("home", 0, box)).toBeCloseTo(box);
+    expect(armSideOnTrip("toFastener", 1, box)).toBeCloseTo(1);
+    expect(armSideOnTrip("home", 1, box)).toBeCloseTo(1);
+    expect(armSideOnTrip("toToolbox", 0, box)).toBeCloseTo(1);
+  });
+
+  it("the anchor glides over each leg and never jumps between steps", () => {
+    const box = -1;
+    const legs = ["toToolbox", "toFastener", "toSlot", "home"] as const;
+    for (const kind of legs) {
+      let last = armSideOnTrip(kind, 0, box);
+      for (let p = 0.02; p <= 1.0001; p += 0.02) {
+        const s = armSideOnTrip(kind, Math.min(1, p), box);
+        expect(Math.abs(s - last)).toBeLessThan(0.15);
+        last = s;
+      }
+    }
+    // The trip's order: each step starts where the one before ended.
+    const order = ["toToolbox", "pick", "toFastener", "fasten", "free", "toSlot", "putBack", "home"] as const;
+    for (let i = 1; i < order.length; i++) expect(armSideOnTrip(order[i]!, 0, box)).toBeCloseTo(armSideOnTrip(order[i - 1]!, 1, box));
+    // A tool change: back to the toolbox after fastening.
+    expect(armSideOnTrip("toToolbox", 0, box)).toBeCloseTo(armSideOnTrip("fasten", 1, box));
+  });
+
+  it("with the toolbox on the right of the screen nothing moves", () => {
+    for (const kind of ["toToolbox", "pick", "toFastener", "fasten", "toSlot", "putBack", "home"] as const) expect(armSideOnTrip(kind, 0.4, 1)).toBeCloseTo(1);
+  });
+});
+
+describe("the arm reaches the toolbox's side early (0.11.1 follow-up)", () => {
+  it("on a leg to the toolbox the arm is on its side before the hand arrives, and stays there as the hand leaves", () => {
+    expect(armSideOnTrip("toToolbox", ARM_REACH.crossShare, -1)).toBeCloseTo(-1);
+    expect(armSideOnTrip("toSlot", 0.8, -1)).toBeCloseTo(-1);
+    expect(armSideOnTrip("toFastener", 1 - ARM_REACH.crossShare, -1)).toBeCloseTo(-1);
+    expect(armSideOnTrip("home", 0.2, -1)).toBeCloseTo(-1);
+    expect(armSideOnTrip("toToolbox", 0.35, -1)).toBeLessThan(1);
   });
 });

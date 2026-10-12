@@ -29,7 +29,7 @@ import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fasten
 import { DEFAULT_ORBIT, fitDistance, frameAbove, groundPlace, position, projectPoint, rotate, TOOLBOX_PLACE, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
-import { armAnchor, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolFor } from "./handpose.ts";
+import { armAnchor, armSideOnTrip, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolboxArmSide, toolFor } from "./handpose.ts";
 import type { RenderAssets, Tool } from "./model.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
@@ -244,6 +244,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   let sequence: { id: PartId; channel: string; mode: "undo" | "do-up" } | null = null;
   /** True while the hand travels to or from the toolbox: its path keeps it over the machine (overPath). */
   let tripLeg = false;
+  /** Progress of the trip step playing (0 to 1); the arm's side follows it (armSideOnTrip). */
+  let tripP = 0;
   let legAt: Vector3 | null = null;
   /** The closest the hand came to a tool's grip at the toolbox during the last trip, metres (browser check). */
   let tripReach = Infinity;
@@ -368,6 +370,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     return { at: offScreen(), q: tool.object.quaternion.clone() };
   }
 
+  /** Which side of the screen the toolbox is on, for the arm (toolboxArmSide); 1 without a toolbox. */
+  function toolboxSideNow(): number {
+    if (!toolbox) return 1;
+    const p = toolbox.slots.spanner.getWorldPosition(new Vector3()).project(camera);
+    return p.z < 1 ? toolboxArmSide(p.x) : 1;
+  }
+
   /** Lays a tool in its slot, in view; with no toolbox it is hidden until it is needed. */
   function rest(tool: Tool): void {
     toolsOut.delete(tool);
@@ -449,9 +458,47 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   /** Records what each trip did, for the browser check (only while `watchTrips` is on, set from the dev hook). */
   let watchTrips = false;
-  const tripLog = { throughAt: [] as Array<{ kind: string; p: number; at: Vec3; points: Vec3[]; core: [number, number] }>, planned: 0, metres: { pointer: 0, machine: 0 }, phases: [] as string[], reach: Infinity, toolAtBolts: Infinity, tools: [] as string[], through: [] as string[], legHidden: 0 };
+  /**
+   * The machine's rectangle on screen (CSS px), from a sparse sample of its points, and how far into it the sleeve
+   * reaches, in px: the deepest sleeve point inside it, measured to the rectangle's nearest edge (browser check).
+   */
+  function armIntoMachine(): number {
+    if (!hand || !hand.visible) return 0;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const toPx = (v: Vector3): [number, number] => [((v.x + 1) / 2) * rect.width, ((1 - v.y) / 2) * rect.height];
+    let l = Infinity;
+    let t = Infinity;
+    let r = -Infinity;
+    let b = -Infinity;
+    const v = new Vector3();
+    view.root.updateMatrixWorld();
+    view.root.traverse((o) => {
+      const mesh = o as Object3D & { isMesh?: boolean; geometry?: { attributes: { position?: { count: number } } } };
+      if (!mesh.isMesh || hitMeshes.has(o) || !shown(o) || !mesh.geometry?.attributes.position) return;
+      const m = o as unknown as { getVertexPosition(i: number, t: Vector3): Vector3; matrixWorld: Matrix4 };
+      const n = mesh.geometry.attributes.position.count;
+      for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 200))) {
+        const [x, y] = toPx(m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld).project(camera));
+        l = Math.min(l, x);
+        t = Math.min(t, y);
+        r = Math.max(r, x);
+        b = Math.max(b, y);
+      }
+    });
+    let deepest = 0;
+    for (const p of hand.sleevePoints()) {
+      const q = p.project(camera);
+      if (q.z >= 1) continue;
+      const [x, y] = toPx(q);
+      if (x < 0 || x > rect.width || y < 0 || y > rect.height) continue;
+      deepest = Math.max(deepest, Math.min(x - l, r - x, y - t, b - y));
+    }
+    return deepest;
+  }
+  const tripLog = { throughAt: [] as Array<{ kind: string; p: number; at: Vec3; points: Vec3[]; core: [number, number] }>, planned: 0, metres: { pointer: 0, machine: 0 }, armInto: {} as Record<string, number>, phases: [] as string[], reach: Infinity, toolAtBolts: Infinity, tools: [] as string[], through: [] as string[], legHidden: 0 };
   function setPhase(kind: TripStep["kind"]): void {
     if (tripPhase !== kind) tripLog.phases.push(kind);
+    if (tripPhase !== kind) tripP = 0;
     tripPhase = kind;
   }
 
@@ -483,6 +530,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       ease: ease.inOutCubic,
       update: (p) => {
         setPhase(kind);
+        tripP = p;
         tripLeg = true;
         r ??= path();
         legAt = new Vector3(...alongPath(r.points, p));
@@ -536,7 +584,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const kit = tools;
     tripReach = Infinity;
     spannerBase.clear();
-    Object.assign(tripLog, { throughAt: [], planned: 0, metres: { pointer: 0, machine: 0 }, phases: [], reach: Infinity, toolAtBolts: Infinity, tools: [], through: [], legHidden: 0 });
+    Object.assign(tripLog, { throughAt: [], planned: 0, metres: { pointer: 0, machine: 0 }, armInto: {}, phases: [], reach: Infinity, toolAtBolts: Infinity, tools: [], through: [], legHidden: 0 });
     // The pointer's spot rides with the part, so the hand comes back to where the player touched it. A spot off the part
     // (a press on its finger-sized hit volume over empty space lies at the machine's depth, inside it) gives way to
     // the part's face the camera sees.
@@ -1452,7 +1500,17 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       applyFraming();
     }
     placeCamera();
+    // On a trip the forearm comes from the toolbox's side of the screen near the toolbox, and from the lower right at
+    // the fasteners, so it does not lie across the machine (0.11.1 follow-up).
+    hand?.armSide(sequence && tripPhase ? armSideOnTrip(tripPhase, tripP, toolboxSideNow()) : 1);
     hand?.update(dt);
+    if (watchTrips && sequence && tripPhase && hand) {
+      const into = armIntoMachine();
+      tripLog.armInto[tripPhase] = Math.max(tripLog.armInto[tripPhase] ?? 0, into);
+      // At the toolbox: the hand within a hand's length of a tool's resting place.
+      const atBox = !!tools && [tools.spanner, tools.screwdriver].some((t) => handAt().distanceTo(restPose(t).at) < 0.12);
+      if (atBox) tripLog.armInto["atToolbox"] = Math.max(tripLog.armInto["atToolbox"] ?? 0, into);
+    }
     renderer.render(scene, camera);
     frame = requestAnimationFrame(tick);
   }
