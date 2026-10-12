@@ -1491,7 +1491,8 @@ async function watchPull(name: string, onPhase?: (phase: string) => Promise<void
     seen.armInto = { ...st.armInto };
     seen.armSides = st.armSides;
     // The press itself, with the hand on the switch.
-    if ((st.phase === "switch" || st.phase === "winding-down") && !shotPress && st.t >= st.stops[2]!) {
+    // Just before the press lands (a frame takes a while to save, so it is asked for a little early).
+    if ((st.phase === "switch" || st.phase === "winding-down") && !shotPress && st.t >= st.stops[2]! - 0.3) {
       shotPress = true;
       await shotTo(pullShots, `${name}-press-${st.t.toFixed(2)}s`);
     }
