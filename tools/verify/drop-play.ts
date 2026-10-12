@@ -90,8 +90,16 @@ const VIEWPORTS = (arg("--viewport") ?? "390x844,360x640").split(",").map((v) =>
   return { width: Number(m[1]), height: Number(m[2]) };
 });
 let VIEWPORT = VIEWPORTS[0]!;
-/** A camera drag on empty background, to bring a hidden part into view. */
-const rotateDrag = () => ({ x0: Math.round(VIEWPORT.width * 0.6), y0: 140, x1: Math.min(VIEWPORT.width - 5, Math.round(VIEWPORT.width * 0.6) + 140), y1: 140 });
+/**
+ * A camera drag on empty background, to bring a hidden part into view: at y 140, or just above the generator when the
+ * tray has pushed it up that far (at 360 by 640 with eleven chips its top is near 100), so the press never lands on a
+ * loose part and carries it instead of turning.
+ */
+const rotateDrag = async () => {
+  const m = await machineBox();
+  const y = Math.round(Math.max(48, Math.min(140, (m?.top ?? 160) - 20)));
+  return { x0: Math.round(VIEWPORT.width * 0.6), y0: y, x1: Math.min(VIEWPORT.width - 5, Math.round(VIEWPORT.width * 0.6) + 140), y1: y };
+};
 const TRIES = 5;
 /** DROP_DEBUG=1 prints every try's aim point and the pointer events the page saw. */
 const DEBUG = !!process.env.DROP_DEBUG;
@@ -369,7 +377,7 @@ async function bringIntoView(id: string): Promise<{ at: Aim | null; turns: numbe
       const p = await evaluate<{ x: number; y: number } | null>(hook(`probe(${JSON.stringify(id)})`));
       if (p && p.y > 90 && (await landsOn(p.x, p.y)) === "canvas") return { at: { x: p.x, y: p.y, pick: id, solid: false, hidden: true }, turns };
     }
-    const r = rotateDrag();
+    const r = await rotateDrag();
     await drag(r.x0, r.y0, r.x1, r.y1);
   }
   return { at: null, turns };
