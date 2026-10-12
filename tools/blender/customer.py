@@ -77,6 +77,8 @@ LOOKS = {
         "head": "headtie",
         "hair": None,
         "feet": "slippers",
+        # Round 9: plastic slippers with a wide band, as Lagos market women wear (references in STATUS.md).
+        "shoes": {"kind": "slippers", "sole": 0.014, "band": (0.5, 0.76), "sole_colour": "#8a5a32", "edge_colour": "#d7b98c", "upper": "#b8332b", "upper_rough": 0.45},
         "materials": {
             "top": {"kind": "print", "palette": ["#1e2a5e", "#d9a21f", "#c2451c", "#efdfba"], "scale": 24.0},
             "wrapper": {"kind": "print", "palette": ["#1e2a5e", "#d9a21f", "#c2451c", "#efdfba"], "scale": 24.0},
@@ -99,6 +101,8 @@ LOOKS = {
         "hair": {"front": 0.07, "grey": 0.35},
         "beard": True,
         "feet": "sandals",
+        # Round 9: tan leather slip-on mules, closed over the toes and open at the heel, as older men wear with a kaftan.
+        "shoes": {"kind": "mules", "sole": 0.016, "band": (0.42, 1.0), "sole_colour": "#3b2a1e", "edge_colour": "#cdb48c", "upper": "#a87643", "upper_rough": 0.5},
         "materials": {
             "top": {"kind": "fabric", "colour": "#46657f", "roughness": 0.85, "embroidery": "#a9bccb"},
             "bottom": {"kind": "fabric", "colour": "#425f78", "roughness": 0.8},
@@ -116,6 +120,8 @@ LOOKS = {
         "head": None,
         "hair": {"front": 0.06, "grey": 0.0},
         "feet": "slides",
+        # Round 9: rubber slides with a broad white strap on a dark sole with a light edge.
+        "shoes": {"kind": "slides", "sole": 0.02, "band": (0.44, 0.72), "sole_colour": "#202022", "edge_colour": "#a3a5a8", "upper": "#ecebe6", "upper_rough": 0.55},
         "materials": {
             "top": {"kind": "fabric", "colour": "#9b2d29", "roughness": 0.85},
             "bottom": {"kind": "denim", "colour": "#2e4566", "roughness": 0.85},
@@ -1252,6 +1258,21 @@ def author_factory(look, lm):
             colour = N.mix(N.math("MULTIPLY", crevice, 1.3, clamp=True), colour, tuple(c * 0.4 for c in base))
             rough = mspec.get("roughness", 0.8)
             bump_strength = 0.1
+        elif name == "sole" and spec.get("shoes"):
+            # The sole's side is lighter than its top, so it stands off the ground and its shadow.
+            sh = spec["shoes"]
+            side = N.smoothstep(0.55, 0.75, N.math("SUBTRACT", 1.0, N.math("ABSOLUTE", nsep.outputs["Z"])))
+            colour = N.mix(side, lin(sh["sole_colour"]), lin(sh["edge_colour"]))
+            colour = N.mix(N.math("MULTIPLY", N.smoothstep(0.3, 0.7, N.noise(pos, 60.0, 3.0)), 0.12), colour, tuple(c * 0.8 for c in lin(sh["edge_colour"])))
+            rough = 0.75
+            bump_strength = 0.06
+        elif name == "shoe" and spec.get("shoes"):
+            sh = spec["shoes"]
+            base = lin(sh["upper"])
+            colour = N.mix(N.math("MULTIPLY", N.smoothstep(0.3, 0.7, N.noise(pos, 40.0, 4.0)), 0.15), base, tuple(c * 0.8 for c in base))
+            colour = N.mix(N.math("MULTIPLY", crevice, 1.2, clamp=True), colour, tuple(c * 0.45 for c in base))
+            rough = sh["upper_rough"]
+            bump_strength = 0.05
         elif name == "sole":
             colour, rough = lin("#2a2522"), 0.8
         else:
@@ -1439,7 +1460,10 @@ def _x(N, pos):
 
 
 def draw_footwear(N, pos, sep, colour, rough, lm, spec):
-    """Slippers, slides or sandals: a sole under the foot and a strap over the forefoot."""
+    """Slippers, slides or sandals: a sole under the foot and a strap over the forefoot. Only for a look without
+    modelled footwear (spec "shoes", round 9): those are solid, so nothing is painted on the foot."""
+    if spec.get("shoes"):
+        return colour, rough
     sole_c = lin("#2a2522") if spec["feet"] != "slippers" else lin("#3d2a1f")
     strap_c = lin(spec["materials"]["strap"]["colour"])
     sole = N.math("SUBTRACT", 1.0, N.smoothstep(0.012, 0.018, sep.outputs["Z"]))
@@ -1492,9 +1516,172 @@ def wax_print(N, pos, palette, scale):
     return N.mix(N.math("MULTIPLY", worn, 0.12), colour, (0.6, 0.55, 0.5))
 
 
+# ---- Footwear (round 9, 2026-10-12) ----
+
+def hull2d(pts):
+    """Convex hull of 2D points, anticlockwise (Andrew's monotone chain)."""
+    pts = sorted(set(map(tuple, np.round(pts, 5))))
+    if len(pts) < 3:
+        return np.array(pts)
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower, upper = [], []
+    for p_ in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p_) <= 0:
+            lower.pop()
+        lower.append(p_)
+    for p_ in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p_) <= 0:
+            upper.pop()
+        upper.append(p_)
+    return np.array(lower[:-1] + upper[:-1])
+
+
+def resample_loop(loop, n):
+    """n points evenly spaced along a closed 2D polyline."""
+    closed = np.vstack([loop, loop[:1]])
+    seg = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    t = np.concatenate([[0.0], np.cumsum(seg)])
+    want = np.linspace(0.0, t[-1], n, endpoint=False)
+    return np.stack([np.interp(want, t, closed[:, 0]), np.interp(want, t, closed[:, 1])], axis=1)
+
+
+def build_footwear(body, lm, spec, dom, bone_names):
+    """Solid footwear for each foot: a sole of real thickness under the foot (the whole person is later lifted by
+    it), its outline the foot's own outline plus a few millimetres, and an upper with volume over the foot: a broad
+    band (slides, slippers) or a closed toe (mules). Both are weighted from the nearest foot vertices, so they bend at
+    the ball of the foot with it through every clip."""
+    sh = spec["shoes"]
+    co = np.array([v.co[:] for v in body.data.vertices])
+    d = np.array([x or "" for x in dom])
+    weights = body_weights(body, bone_names)
+    t = sh["sole"]
+    objs = []
+    for side in ("l", "r"):
+        foot = np.isin(d, [f"foot_{side}", f"ball_{side}"]) | (np.isin(d, [f"calf_{side}"]) & (co[:, 2] < lm.z_ankle))
+        pts = co[foot]
+        # The foot's own frame on the ground: s from heel to toe, q across.
+        heel_at, toe_at = np.array(lm.head(f"foot_{side}")[:2]), np.array(lm.tail(f"ball_{side}")[:2])
+        fwd = (toe_at - heel_at) / np.linalg.norm(toe_at - heel_at)
+        across = np.array([-fwd[1], fwd[0]])
+        low = pts[pts[:, 2] < 0.03]
+        loop = resample_loop(hull2d(low[:, :2]), 36)
+        centre = loop.mean(axis=0)
+        radial = loop - centre
+        out = loop + radial / np.linalg.norm(radial, axis=1, keepdims=True) * 0.006
+        for _ in range(2):
+            out = (np.roll(out, 1, axis=0) + 2 * out + np.roll(out, -1, axis=0)) / 4
+        # The sole: a top ring just inside the foot's underside, a rounded bottom edge.
+        bm = bmesh.new()
+        rings = []
+        for z, inset in ((0.003, 0.0), (-t + 0.004, 0.0), (-t, 0.003)):
+            ring = []
+            for p_ in out:
+                r_ = p_ - centre
+                k_ = 1 - inset / max(1e-4, float(np.linalg.norm(r_)))
+                ring.append(bm.verts.new((centre[0] + r_[0] * k_, centre[1] + r_[1] * k_, z)))
+            rings.append(ring)
+        n = len(out)
+        for a, b in zip(rings, rings[1:]):
+            for j in range(n):
+                bm.faces.new((a[j], a[(j + 1) % n], b[(j + 1) % n], b[j]))
+        bm.faces.new(rings[0])
+        bm.faces.new(list(reversed(rings[-1])))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        objs.append(mesh_object(bm, f"sole_{side}", "sole"))
+        # The upper: slices across the foot from s0 to s1 of its length, each following the top of the foot.
+        rel = pts[:, :2] - heel_at
+        ps, pq = rel @ fwd, rel @ across
+        s_min, s_max = float(ps.min()), float(ps.max())
+        s0, s1 = sh["band"]
+        nsl, nx = 9, 13
+        # The top of the foot under each slice, then smoothed across and along, so the upper is an even arch.
+        svs, qs, ztop = [], [], np.zeros((nsl, nx))
+        for i in range(nsl):
+            sv = s_min + (s_max - s_min) * (s0 + (min(s1, 0.985) - s0) * i / (nsl - 1))
+            sl = np.abs(ps - sv) < 0.008
+            if sl.sum() < 4:
+                sl = np.abs(ps - sv) < 0.016
+            q_lo, q_hi = float(pq[sl].min()) - 0.004, float(pq[sl].max()) + 0.004
+            qv = q_lo + (q_hi - q_lo) * np.arange(nx) / (nx - 1)
+            for k in range(nx):
+                near = sl & (np.abs(pq - qv[k]) < (q_hi - q_lo) / nx + 0.003)
+                ztop[i, k] = float(pts[near, 2].max()) if near.any() else 0.0
+            svs.append(sv)
+            qs.append(qv)
+        for _ in range(3):
+            inner_k = ztop.copy()
+            inner_k[:, 1:-1] = (ztop[:, :-2] + 2 * ztop[:, 1:-1] + ztop[:, 2:]) / 4
+            ztop = inner_k
+        for _ in range(2):
+            along_s = ztop.copy()
+            along_s[1:-1] = (ztop[:-2] + 2 * ztop[1:-1] + ztop[2:]) / 4
+            ztop = along_s
+        outer_rows, inner_rows = [], []
+        for i in range(nsl):
+            outer, inner = [], []
+            for k in range(nx):
+                edge = k in (0, nx - 1)
+                zi = 0.002 if edge else ztop[i, k] + 0.003
+                zo = 0.002 if edge else ztop[i, k] + 0.009
+                base = heel_at + fwd * svs[i] + across * qs[i][k]
+                inner.append((base[0], base[1], zi))
+                qo = qs[i][k] + (-0.003 if k == 0 else 0.003 if k == nx - 1 else 0.0)
+                bo = heel_at + fwd * svs[i] + across * qo
+                outer.append((bo[0], bo[1], zo))
+            outer_rows.append(outer)
+            inner_rows.append(inner)
+        if sh["kind"] == "mules":
+            # A closed toe: one more row round the front of the toes, down to the sole.
+            tip = heel_at + fwd * (s_max + 0.006)
+            for rows, f in ((outer_rows, 0.35), (inner_rows, 0.3)):
+                last = rows[-1]
+                rows.append([(tip[0] + (p_[0] - tip[0]) * f, tip[1] + (p_[1] - tip[1]) * f, 0.002 + (p_[2] - 0.002) * f) for p_ in last])
+        bm = bmesh.new()
+        vo = [[bm.verts.new(p_) for p_ in row] for row in outer_rows]
+        vi = [[bm.verts.new(p_) for p_ in row] for row in inner_rows]
+        for rows in (vo, vi):
+            for a, b in zip(rows, rows[1:]):
+                for k in range(nx - 1):
+                    bm.faces.new((a[k], a[k + 1], b[k + 1], b[k]))
+        for row_o, row_i in ((vo[0], vi[0]), (vo[-1], vi[-1])):
+            for k in range(nx - 1):
+                bm.faces.new((row_o[k], row_o[k + 1], row_i[k + 1], row_i[k]))
+        for k in (0, nx - 1):
+            for a_o, b_o, a_i, b_i in zip(vo, vo[1:], vi, vi[1:]):
+                bm.faces.new((a_o[k], b_o[k], b_i[k], a_i[k]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        objs.append(mesh_object(bm, f"upper_{side}", "shoe"))
+    source = np.isin(d, ["foot_l", "foot_r", "ball_l", "ball_r"])
+    for o in objs:
+        apply_weights(o, copied_weights([v.co[:] for v in o.data.vertices], body, source, weights, k=4))
+    print(f"Footwear: {sh['kind']}, sole {t * 100:.1f} cm, {sum(common.triangle_count(o) for o in objs)} triangles")
+    return objs
+
+
+def lift(body, rig, height):
+    """Raises the whole person, mesh and skeleton, by the soles' thickness, so the feet stand on the soles."""
+    co = np.zeros(len(body.data.vertices) * 3)
+    body.data.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    co[:, 2] += height
+    body.data.vertices.foreach_set("co", co.ravel())
+    body.data.update()
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.context.view_layer.objects.active = rig
+    rig.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    for eb in rig.data.edit_bones:
+        eb.head.z += height
+        eb.tail.z += height
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
 # ---- Assembling a person ----
 
-MATERIAL_ORDER = ("skin", "feet", "lips", "nail", "eye", "top", "bottom", "wrapper", "headwear")
+MATERIAL_ORDER = ("skin", "feet", "lips", "nail", "eye", "top", "bottom", "wrapper", "headwear", "shoe", "sole")
 
 
 def build_person(look, preview=False):
@@ -1531,6 +1718,8 @@ def build_person(look, preview=False):
         extras.append(build_skirt(body, lm, spec, fit))
     if spec.get("robe"):
         protected += build_robe(body, lm, spec, dom, bone_names)
+    if spec.get("shoes"):
+        protected += build_footwear(body, lm, spec, dom, bone_names)
     remove_vertices(body, keep)
     if spec["head"] == "cap":
         extras.append(build_cap(body, lm))
@@ -1593,6 +1782,10 @@ def build_person(look, preview=False):
     co = np.zeros(len(body.data.vertices) * 3)
     body.data.vertices.foreach_get("co", co)
     rest.data.foreach_set("vector", co)
+    # The feet stand on the soles: everything rises by their thickness (the rest positions above stay as they were,
+    # so the materials drawn by position do not move).
+    if spec.get("shoes"):
+        lift(body, rig, spec["shoes"]["sole"])
 
     author = author_factory(look, lm)
     for i, slot in enumerate(body.material_slots):
