@@ -108,9 +108,16 @@ export function originFor(at: Vec3, handPoint: Vec3, b: { x: Vec3; y: Vec3; z: V
  * moves it across: 1 is the lower right, -1 the mirror place at the lower left (on a trip to a toolbox on the left of
  * the screen), still below the bottom edge.
  */
-export function armAnchor(camera: Vec3, right: Vec3, up: Vec3, forward: Vec3, side = 1): Vec3 {
-  return add(add(add(camera, scale(right, HAND.anchorRight * side)), scale(up, -HAND.anchorDown)), scale(forward, HAND.anchorForward));
+export function armAnchor(camera: Vec3, right: Vec3, up: Vec3, forward: Vec3, side = 1, lift = 0): Vec3 {
+  // `lift` (0 to 1, plan 0018) raises the arm's root towards eye height and further out to its side, so the forearm
+  // comes in from the side of the screen rather than up from its bottom edge: for a press on the machine's face, where
+  // an arm from below would lie across the machine.
+  const l = Math.max(0, Math.min(1, Number.isFinite(lift) ? lift : 0));
+  return add(add(add(camera, scale(right, HAND.anchorRight * side * (1 + ARM_LIFT_OUT * l))), scale(up, -HAND.anchorDown * (1 - l))), scale(forward, HAND.anchorForward));
 }
+
+/** How much further out to its side a fully lifted arm's root goes, as a share of HAND.anchorRight. */
+export const ARM_LIFT_OUT = 0.6;
 
 // ---- The arm on the toolbox trip (release 0.11.1 follow-up) ----
 
@@ -127,6 +134,20 @@ export const ARM_REACH = {
    *  from it, so the forearm already comes from below the toolbox as the hand gets there. */
   crossShare: 0.7,
 } as const;
+
+/**
+ * Which side the arm comes from to reach a target at screen x `targetNdcX` (normalised device x, -1 left to 1 right) on
+ * or beside a machine whose middle is at `machineNdcX`: from below the target's own side of the machine, so the forearm
+ * rises from the bottom edge on that side and never lies across the machine (plan 0018: the notes, the switch). Fully
+ * to one side once the target is REACH_SIDE_BAND from the middle; in between it blends, so it never jumps. -1 to 1.
+ */
+export function reachArmSide(targetNdcX: number, machineNdcX: number): number {
+  if (!Number.isFinite(targetNdcX) || !Number.isFinite(machineNdcX)) return 1;
+  return Math.max(-1, Math.min(1, (targetNdcX - machineNdcX) / REACH_SIDE_BAND));
+}
+
+/** Screen distance (normalised device x) from the machine's middle at which a reach comes fully from one side. */
+export const REACH_SIDE_BAND = 0.12;
 
 /** Which side the arm comes from at the toolbox, from the toolbox's x on screen (-1 left to 1 right): -1 to 1. */
 export function toolboxArmSide(ndcX: number): number {

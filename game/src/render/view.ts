@@ -38,7 +38,7 @@ import { BENCH, cameraPose, clampStage, wrapAngle, DEFAULT_STAGE, DEFAULT_YAW, f
 import { createBench } from "./bench.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
-import { armAnchor, armSideOnTrip, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolboxArmSide, toolFor } from "./handpose.ts";
+import { armAnchor, armSideOnTrip, reachArmSide, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolboxArmSide, toolFor } from "./handpose.ts";
 import type { RenderAssets, Tool } from "./model.ts";
 import { createCustomerStage, type CustomerLoader } from "./customer.ts";
 import { carriedYaw, generatorIn, HANDLE_RIGHT, notesShown, settleShare, STORY, storyOver, type StoryClip } from "./customerpose.ts";
@@ -47,7 +47,7 @@ import { createThumbnailer } from "./thumbnails.ts";
 import { createContactShadow, createFloor, createMachineShadow } from "./ground.ts";
 import { createLighting } from "./lighting.ts";
 import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
-import { handleOffset, hazeLevel, planShake, shakeAt, STARTUP, startupPlan, type StartupPlan, switchAngle, turnYaw } from "./startup.ts";
+import { handleOffset, hazeLevel, planShake, shakeAt, STARTUP, startupArmLift, startupArmSide, startupPlan, type StartupPlan, switchAngle, turnYaw } from "./startup.ts";
 import { createExhaust } from "./exhaust.ts";
 
 /** Minimum finger target, CSS px (docs/design/interface.md). */
@@ -556,7 +556,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
    * The machine's rectangle on screen (CSS px), from a sparse sample of its points, and how far into it the sleeve
    * reaches, in px: the deepest sleeve point inside it, measured to the rectangle's nearest edge (browser check).
    */
-  function armIntoMachine(): number {
+  function armIntoMachine(target: Vector3 | null = null): number {
     if (!hand || !hand.visible) return 0;
     const rect = renderer.domElement.getBoundingClientRect();
     const toPx = (v: Vector3): [number, number] => [((v.x + 1) / 2) * rect.width, ((1 - v.y) / 2) * rect.height];
@@ -579,6 +579,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         b = Math.max(b, y);
       }
     });
+    if (target) {
+      // How far a point of the machine itself (a switch to press) lies inside the rectangle: the sleeve reaching it from
+      // outside must come at least this deep.
+      const [x, y] = toPx(target.clone().project(camera));
+      return Math.max(0, Math.min(x - l, r - x, y - t, b - y));
+    }
     let deepest = 0;
     for (const p of hand.sleevePoints()) {
       const q = p.project(camera);
@@ -1277,6 +1283,42 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     /** For the browser check: the farthest the handle came out, and whether loose parts were pressed home first. */
     peak: number;
     homed: boolean;
+    /** The arm's side for the notes and for the switch, fixed when the hand first sets off for each (null until then). */
+    notesSide: number | null;
+    switchSide: number | null;
+    /** For the browser check (watchArm): how far the sleeve reached into the machine's screen rectangle, px, by phase. */
+    armInto: Record<string, number>;
+  }
+  let watchArm = false;
+  /** Where a world point lands across the screen (normalised device x), or NaN behind the camera. */
+  const ndcX = (p: Vector3): number => {
+    const q = p.clone().project(camera);
+    return q.z < 1 ? q.x : NaN;
+  };
+  /** The machine's middle across the screen: on its turning axis, so it stays put as the machine turns. */
+  const machineNdcX = (): number => ndcX(center);
+  /** The phase of a start-up, for the browser check. */
+  function startupPhase(s: Startup): string {
+    const r = s.plan.run;
+    if (s.t < 0) return "homing";
+    if (s.plan.pull && s.t < s.plan.pull.release) return "pull";
+    if (!r) return "cough";
+    return s.t < r.smile ? "running" : s.t < r.payEnd ? "paying" : s.t < r.pocketed ? "pocketing" : s.t < r.pressed ? "switch" : s.t < r.stopped ? "winding-down" : "leaving";
+  }
+  /** The arm's side during the start-up (plan 0018): from the side of the notes, then of the switch, never across. */
+  function startupSide(s: Startup): number {
+    const r = s.plan.run;
+    if (!r) return 1;
+    if (s.notesSide === null && s.t >= r.payStart - 0.35) {
+      const notes = s.paying ? (customer?.notesObject() ?? null) : null;
+      const at = notes ? worldOf(notes) : s.paying ? (customer?.grips()?.right ?? null) : null;
+      s.notesSide = at ? reachArmSide(ndcX(at), machineNdcX()) : 1;
+    }
+    if (s.switchSide === null && s.t >= r.pocketed) {
+      const sw = worldOf(pullNodes.switch);
+      s.switchSide = sw ? reachArmSide(ndcX(sw), machineNdcX()) : 1;
+    }
+    return startupArmSide(r, s.t, s.notesSide ?? 1, s.switchSide ?? s.notesSide ?? 1);
   }
   let startup: Startup | null = null;
   let startups = 0;
@@ -1304,7 +1346,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     let done: () => void = () => {};
     const promise = new Promise<void>((r) => (done = r));
     const stops = plan.run ? [plan.run.catch, plan.run.smile, plan.run.press, plan.run.stopped, plan.end] : [plan.cough!.end];
-    startup = { plan, t: -delay, seed: 0x5eed + ++startups, did: new Set(), done, promise, paying: false, stops, peak: 0, homed: delay > 0 };
+    startup = { plan, t: -delay, seed: 0x5eed + ++startups, did: new Set(), done, promise, paying: false, stops, peak: 0, homed: delay > 0, notesSide: null, switchSide: null, armInto: {} };
     if (fixed) endingPromise = promise;
   }
 
@@ -1899,7 +1941,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         const handleOut = pullNodes.handle ? pullNodes.handle.position.distanceTo(nodeRest.get(pullNodes.handle)!.p) : null;
         const ropeLen = pullNodes.rope ? pullNodes.rope.scale.x * ropeRest : null;
         const r = s.plan.run;
-        const phase = s.t < 0 ? "homing" : s.plan.pull && s.t < s.plan.pull.release ? "pull" : r ? (s.t < r.smile ? "running" : s.t < r.payEnd ? "paying" : s.t < r.pocketed ? "pocketing" : s.t < r.pressed ? "switch" : s.t < r.stopped ? "winding-down" : "leaving") : "cough";
+        const phase = startupPhase(s);
         return {
           t: s.t,
           phase,
@@ -1914,11 +1956,15 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           sprites: exhaust.alive(),
           notesInHand: !!handNotes,
           handHolding: hand?.holding ?? null,
+          armInto: { ...s.armInto },
+          armSides: [s.notesSide, s.switchSide],
           customerClip: story?.clip ?? null,
           stops: [...s.stops],
           end: s.plan.end,
         };
       },
+      /** Plan 0018: record how far the sleeve reaches into the machine's rectangle during each start-up phase. */
+      watchStartupArm: (on: boolean) => void (watchArm = on),
       /** Plan 0018: how far (mm) the machine is from its resting place: 0 unless the engine shakes it. */
       machineOffsetMm: () => view.root.position.distanceTo(rootRest.p) * 1000,
       /** Plan 0018: the nodes the pull moves were found in the model. */
@@ -2163,8 +2209,14 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     storyStep();
     // On a trip the forearm comes from the toolbox's side of the screen near the toolbox, and from the lower right at
     // the fasteners, so it does not lie across the machine (0.11.1 follow-up).
-    hand?.armSide(sequence && tripPhase ? armSideOnTrip(tripPhase, tripP, toolboxSideNow()) : 1);
+    hand?.armSide(startup ? startupSide(startup) : sequence && tripPhase ? armSideOnTrip(tripPhase, tripP, toolboxSideNow()) : 1, startup ? startupArmLift(startup.plan.run, startup.t) : 0);
     hand?.update(dt);
+    if (watchArm && startup && hand?.visible) {
+      const ph = startupPhase(startup);
+      startup.armInto[ph] = Math.max(startup.armInto[ph] ?? 0, armIntoMachine());
+      const sw = ph === "switch" ? worldOf(pullNodes.switch) : null;
+      if (sw) startup.armInto["switchItself"] = Math.max(startup.armInto["switchItself"] ?? 0, armIntoMachine(sw));
+    }
     if (watchTrips && sequence && tripPhase && hand) {
       const into = armIntoMachine();
       tripLog.armInto[tripPhase] = Math.max(tripLog.armInto[tripPhase] ?? 0, into);

@@ -7,13 +7,13 @@ import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/plac
 import { matchNodes } from "../src/render/match.ts";
 import { firstPart, partIdOf } from "../src/render/picking.ts";
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Quaternion, Vector3 } from "three";
-import { armAnchor, ARM_REACH, armSideOnTrip, basisToQuaternion, cheapest, SPANNER_TURNS, spannerTurn, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut, toolBasis, toolFor, toolboxArmSide } from "../src/render/handpose.ts";
+import { reachArmSide, REACH_SIDE_BAND, armAnchor, ARM_REACH, armSideOnTrip, basisToQuaternion, cheapest, SPANNER_TURNS, spannerTurn, followShare, gripShapeFor, handBasis, HAND, originFor, pointerPose, pushOut, toolBasis, toolFor, toolboxArmSide } from "../src/render/handpose.ts";
 import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
 import { loadMachine } from "./helpers.ts";
 import { pickToolbox, renderFileCount } from "../src/render/model.ts";
-import { coughShake, coughTimes, handleOffset, hazeLevel, planShake, pullOut, pullTimes, ropeLength, runShake, runTimes, shakeAt, STARTER_FACE_YAW, startupPlan, STARTUP, starterTurn, switchAngle, turnYaw, windDownFade } from "../src/render/startup.ts";
+import { coughShake, coughTimes, handleOffset, hazeLevel, planShake, pullOut, pullTimes, ropeLength, runShake, runTimes, shakeAt, STARTER_FACE_YAW, startupPlan, STARTUP, starterTurn, switchAngle, turnYaw, windDownFade, startupArmSide, ARM_GLIDE, startupArmLift, SWITCH_ARM_LIFT } from "../src/render/startup.ts";
 import { STORY } from "../src/render/customerpose.ts";
 import { RUN } from "../src/app/moments.ts";
 import { EXHAUST, hazeDue, puffPose } from "../src/render/exhaust.ts";
@@ -1228,5 +1228,75 @@ describe("the exhaust (ADR 0027, plan 0018 step 3)", () => {
     expect(hazeDue(0, 1, 0)).toEqual({ spawn: 0, carry: 0 });
     expect(hazeDue(-1, 1, 0.5).spawn).toBe(0);
     expect(EXHAUST.sprites).toBeLessThanOrEqual(10);
+  });
+});
+
+describe("the arm during the payment and the switch press (plan 0018)", () => {
+  it("comes from below the target's own side of the machine: fully to one side away from the middle, blended near it", () => {
+    expect(reachArmSide(-0.8, 0.15)).toBe(-1);
+    expect(reachArmSide(0.9, 0.15)).toBe(1);
+    expect(reachArmSide(0.15, 0.15)).toBe(0);
+    expect(Math.abs(reachArmSide(0.15 + REACH_SIDE_BAND / 2, 0.15))).toBeCloseTo(0.5, 9);
+    // Never a jump: a small move of the target moves the side a little.
+    for (let x = -1; x < 1; x += 0.01) expect(Math.abs(reachArmSide(x + 0.01, 0) - reachArmSide(x, 0))).toBeLessThanOrEqual(0.01 / REACH_SIDE_BAND + 1e-9);
+    expect(reachArmSide(NaN, 0)).toBe(1);
+  });
+
+  it("glides to the notes' side before the hand sets off, stays through taking and pocketing them, then to the switch's side, then back", () => {
+    const r = runTimes(0);
+    expect(startupArmSide(r, r.catch, -1, -0.6)).toBe(1);
+    expect(startupArmSide(r, r.payStart, -1, -0.6)).toBe(-1);
+    expect(startupArmSide(r, (r.payStart + r.payEnd) / 2, -1, -0.6)).toBe(-1);
+    expect(startupArmSide(r, r.pocketed - 1e-6, -1, -0.6)).toBe(-1);
+    expect(startupArmSide(r, r.press, -1, -0.6)).toBeCloseTo(-0.6, 9);
+    expect(startupArmSide(r, r.pressed, -1, -0.6)).toBeCloseTo(-0.6, 9);
+    expect(startupArmSide(r, r.stopped, -1, -0.6)).toBe(1);
+    expect(startupArmSide(null, 3, -1, -1)).toBe(1);
+  });
+
+  it("never jumps between steps: frame to frame it moves at most a smooth glide's worth", () => {
+    const r = runTimes(0.5);
+    const step = 1 / 120;
+    const most = (2 * 1.5 * step) / ARM_GLIDE + 1e-9; // a smoothstep's steepest slope is 1.5 per glide, over a swing of 2
+    for (const [notes, sw] of [[-1, -1], [-1, 1], [1, -1], [1, 1], [-0.3, 0.7]] as const) {
+      let last = startupArmSide(r, 0, notes, sw);
+      for (let t = step; t < r.gone + 1; t += step) {
+        const now = startupArmSide(r, t, notes, sw);
+        expect(Math.abs(now - last)).toBeLessThanOrEqual(most);
+        last = now;
+      }
+    }
+  });
+});
+
+describe("the arm's lift for the switch press (plan 0018)", () => {
+  it("raises the arm's root towards eye height and out to its side; no lift is the usual root", () => {
+    const cam: [number, number, number] = [0, 1.6, 2];
+    const right: [number, number, number] = [1, 0, 0];
+    const up: [number, number, number] = [0, 1, 0];
+    const fwd: [number, number, number] = [0, 0, -1];
+    expect(armAnchor(cam, right, up, fwd, -1, 0)).toEqual(armAnchor(cam, right, up, fwd, -1));
+    const low = armAnchor(cam, right, up, fwd, -1, 0);
+    const high = armAnchor(cam, right, up, fwd, -1, 1);
+    expect(high[1]).toBeGreaterThan(low[1]);
+    expect(high[1]).toBeCloseTo(cam[1], 9);
+    expect(high[0]).toBeLessThan(low[0]); // further out to the left
+    expect(armAnchor(cam, right, up, fwd, 1, 5)).toEqual(high.map((v, i) => (i === 0 ? -v : v)));
+  });
+
+  it("is lifted only on the way to the switch and through the press, and glides without a jump", () => {
+    const r = runTimes(0);
+    expect(startupArmLift(r, r.payEnd)).toBe(0);
+    expect(startupArmLift(r, r.press)).toBeCloseTo(SWITCH_ARM_LIFT, 9);
+    expect(startupArmLift(r, r.pressed)).toBeCloseTo(SWITCH_ARM_LIFT, 9);
+    expect(startupArmLift(r, r.stopped)).toBe(0);
+    expect(startupArmLift(null, 5)).toBe(0);
+    const step = 1 / 120;
+    let last = 0;
+    for (let t = 0; t < r.gone; t += step) {
+      const now = startupArmLift(r, t);
+      expect(Math.abs(now - last)).toBeLessThanOrEqual((1.5 * SWITCH_ARM_LIFT * step) / ARM_GLIDE + 1e-9);
+      last = now;
+    }
   });
 });

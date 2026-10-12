@@ -26,9 +26,10 @@ export interface HandRig {
   firm(on: boolean): void;
   /**
    * Which side of the screen the forearm comes from: 1 the lower right (as always), -1 the lower left (on a trip to a
-   * toolbox there). The arm's root eases towards it, so it never jumps.
+   * toolbox there). The arm's root eases towards it, so it never jumps. `lift` (0 to 1) raises the root towards eye
+   * height so the forearm comes in from that side of the screen (plan 0018: the switch press); it eases the same way.
    */
-  armSide(side: number): void;
+  armSide(side: number, lift?: number): void;
   /** Lets go of the object it rides with; it follows the pointer again from where it is. */
   detach(): void;
   /** Opens the hand where it is. */
@@ -126,6 +127,9 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
   /** The forearm's side (armAnchor), easing towards `sideWanted`. */
   let side = 1;
   let sideWanted = 1;
+  /** How far the arm's root is raised towards eye height (armAnchor), easing towards `liftWanted` like the side. */
+  let lift = 0;
+  let liftWanted = 0;
   let action: HandAction = "hover";
   let closed = 0;
   let wantClosed = 0;
@@ -157,7 +161,7 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
     if (attached) target.at.copy(attached.getWorldPosition(new Vector3())).add(attachOffset);
     const usable = action === "pinch" && !pinchPoint ? "grip" : action;
     const axes = cameraAxes();
-    const p = pointerPose(v3(target.at), v3(target.normal), armAnchor(v3(camera.position), axes.right, axes.up, axes.forward, side), axes.up, usable, { tip: tipPoint, pinch: pinchPoint });
+    const p = pointerPose(v3(target.at), v3(target.normal), armAnchor(v3(camera.position), axes.right, axes.up, axes.forward, side, lift), axes.up, usable, { tip: tipPoint, pinch: pinchPoint });
     goalPos.set(...p.position);
     goalQ.set(...p.quaternion);
     // Keep every sampled point of the hand, as the fingers are curled now, outside the surface: move back towards the
@@ -230,8 +234,9 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
       firm = on;
     },
 
-    armSide(s) {
+    armSide(s, l = 0) {
       sideWanted = Number.isFinite(s) ? Math.max(-1, Math.min(1, s)) : 1;
+      liftWanted = Number.isFinite(l) ? Math.max(0, Math.min(1, l)) : 0;
     },
 
     detach() {
@@ -272,6 +277,7 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
       setMorphs();
       // Hidden, the arm's root may jump; shown, it eases across.
       side = root.visible ? side + (sideWanted - side) * followShare(dt, ARM_REACH.halfLife) : sideWanted;
+      lift = root.visible ? lift + (liftWanted - lift) * followShare(dt, ARM_REACH.halfLife) : liftWanted;
       if (!root.visible) return;
       if (withdrawing) {
         withdrawing.left -= dt;

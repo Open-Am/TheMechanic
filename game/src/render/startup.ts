@@ -334,6 +334,48 @@ export function startupPlan(opts: { yaw: number; fixed: boolean; starterOn: bool
   };
 }
 
+/** Seconds over which the arm's root glides from one side of the screen to the other during the run (plan 0018). */
+export const ARM_GLIDE = 0.3;
+
+/**
+ * The arm's side (as handpose's armAnchor takes it, -1 left to 1 right) during a run: from the right (1) for the pull,
+ * gliding over ARM_GLIDE to `notesSide` as the hand sets off for the notes, staying there while it takes them and
+ * pockets them, gliding to `switchSide` on the way to the switch, staying through the press, then back to the right.
+ * Smooth at every step, so the forearm never jumps. Pass notesSide 1 when there is no one to pay.
+ */
+export function startupArmSide(r: RunTimes | null, t: number, notesSide: number, switchSide: number): number {
+  if (!r) return 1;
+  const glide = (from: number, to: number, start: number): number => {
+    const u = Math.max(0, Math.min(1, (t - start) / ARM_GLIDE));
+    return from + (to - from) * u * u * (3 - 2 * u);
+  };
+  const handOff = r.pressed + 0.15;
+  if (t < r.payStart - ARM_GLIDE) return 1;
+  if (t < r.pocketed) return glide(1, notesSide, r.payStart - ARM_GLIDE);
+  if (t < handOff) return glide(notesSide, switchSide, r.pocketed);
+  return glide(switchSide, 1, handOff);
+}
+
+/** How far the arm's root is raised for the switch press (handpose armAnchor's lift), so it comes in from the side. */
+export const SWITCH_ARM_LIFT = 0.85;
+
+/**
+ * The arm's lift (armAnchor) during a run: 0, gliding up to SWITCH_ARM_LIFT over ARM_GLIDE as the hand leaves the
+ * pocket for the switch, held through the press, and back down as the hand lets go: the forearm reaches the panel from
+ * the side, not up across the machine's face (plan 0018).
+ */
+export function startupArmLift(r: RunTimes | null, t: number): number {
+  if (!r) return 0;
+  const glide = (from: number, to: number, start: number): number => {
+    const u = Math.max(0, Math.min(1, (t - start) / ARM_GLIDE));
+    return from + (to - from) * u * u * (3 - 2 * u);
+  };
+  const handOff = r.pressed + 0.15;
+  if (t < r.pocketed) return 0;
+  if (t < handOff) return glide(0, SWITCH_ARM_LIFT, r.pocketed);
+  return glide(SWITCH_ARM_LIFT, 0, handOff);
+}
+
 /** The shake size at `t` for a plan: the run's or the cough's. */
 export function planShake(plan: StartupPlan, t: number): number {
   if (plan.run) return runShake(plan.run, t);

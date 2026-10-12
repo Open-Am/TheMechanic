@@ -219,6 +219,8 @@ interface StartupNow {
   sprites: number;
   notesInHand: boolean;
   handHolding: string | null;
+  armInto: Record<string, number>;
+  armSides: [number | null, number | null];
   customerClip: string | null;
   stops: number[];
   end: number;
@@ -1448,11 +1450,14 @@ interface PullSeen {
   liftedWhile: string[];
   holding: string[];
   notesInHandWhile: string[];
+  armInto: Record<string, number>;
+  armSides: [number | null, number | null];
 }
 async function watchPull(name: string, onPhase?: (phase: string) => Promise<void>): Promise<PullSeen> {
-  const seen: PullSeen = { phases: [], handleMax: 0, ropeMax: 0, ropeAtMax: 0, handleSeenMax: 0, handleEnd: 0, shakeBy: {}, spritesBy: {}, notesWhile: [], switchAt: null, liftedWhile: [], holding: [], notesInHandWhile: [] };
+  const seen: PullSeen = { phases: [], handleMax: 0, ropeMax: 0, ropeAtMax: 0, handleSeenMax: 0, handleEnd: 0, shakeBy: {}, spritesBy: {}, notesWhile: [], switchAt: null, liftedWhile: [], holding: [], notesInHandWhile: [], armInto: {}, armSides: [null, null] };
   let shotPeak = false;
   let shotNotes = false;
+  let shotPress = false;
   let started = false;
   for (const end = Date.now() + 20000; Date.now() < end; ) {
     const st = await startupNow();
@@ -1483,6 +1488,13 @@ async function watchPull(name: string, onPhase?: (phase: string) => Promise<void
     seen.spritesBy[st.phase] = Math.max(seen.spritesBy[st.phase] ?? 0, st.sprites);
     if (story?.notes) seen.notesWhile.push(st.phase);
     if (st.notesInHand && !seen.notesInHandWhile.includes(st.phase)) seen.notesInHandWhile.push(st.phase);
+    seen.armInto = { ...st.armInto };
+    seen.armSides = st.armSides;
+    // The press itself, with the hand on the switch.
+    if ((st.phase === "switch" || st.phase === "winding-down") && !shotPress && st.t >= st.stops[2]!) {
+      shotPress = true;
+      await shotTo(pullShots, `${name}-press-${st.t.toFixed(2)}s`);
+    }
     if (story?.generator === "carried") seen.liftedWhile.push(st.phase);
     if (seen.switchAt === null && Math.abs(st.switchAngle ?? 0) > 0.2) seen.switchAt = st.phase;
     if (st.handHolding && !seen.holding.includes(st.handHolding)) seen.holding.push(st.handHolding);
@@ -1511,6 +1523,7 @@ try {
   // The winning pull, watched to the result, with the frame rate read while it runs and smokes at 4x CPU throttle.
   watchEnding = true;
   let win: PullSeen | null = null;
+  await evaluate("window.__openAmDevRender.watchStartupArm(true)");
   onWinningPull = async () => {
     win = await watchPull("win", async (phase) => {
       if (phase !== "running") return;
@@ -1523,6 +1536,7 @@ try {
   await solveRound();
   onWinningPull = null;
   watchEnding = false;
+  await evaluate("window.__openAmDevRender.watchStartupArm(false)");
   const w2 = win as PullSeen | null;
   if (!w2) failures.push("pull: the winning pull was not seen");
   else {
@@ -1539,6 +1553,15 @@ try {
       pullChecks.push(`a winning pull: ${w2.phases.join(", ")}; the handle out ${(w2.handleMax * 100).toFixed(0)} cm; running shake up to ${(w2.shakeBy["running"] ?? 0).toFixed(1)} mm with up to ${w2.spritesBy["running"]} exhaust sprites; the notes passed from the customer's hand to the mechanic's and into the pocket while it ran; the rocker flipped in ${w2.switchAt}; no shake when the customer lifted it; then the result`);
     } else failures.push(`pull: the winning pull saw ${JSON.stringify(w2)}`);
     if (w2.holding.length) pullChecks.push(`the hand held ${w2.holding.join(", ")}`);
+    // The forearm comes from the side of the notes and of the switch, never across the generator (as at the toolbox).
+    // The switch is on the generator's face, inside its rectangle: there the sleeve may come no deeper than the switch
+    // itself lies (plus the 32 px), so the wrist can reach it from the side but the forearm cannot lie across the face.
+    const switchItself = Math.round(w2.armInto["switchItself"] ?? 0);
+    const allow = (ph: string) => (ph === "switch" ? Math.max(ARM_AT_TOOLBOX_PX, switchItself + ARM_AT_TOOLBOX_PX / 2) : ARM_AT_TOOLBOX_PX);
+    const arm = ["paying", "pocketing", "switch"].map((ph) => [ph, Math.round(w2.armInto[ph] ?? 0)] as const);
+    const armSay = `${arm.map(([ph, px]) => `${ph} ${px} px (limit ${allow(ph)})`).join(", ")}; the switch itself ${switchItself} px in (sides: notes ${w2.armSides[0]?.toFixed(2)}, switch ${w2.armSides[1]?.toFixed(2)})`;
+    if (arm.every(([ph]) => w2.armInto[ph] !== undefined) && arm.every(([ph, px]) => px <= allow(ph))) pullChecks.push(`the sleeve into the generator's rectangle while paying and at the switch: ${armSay}`);
+    else failures.push(`pull: the arm lay across the generator, more than ${ARM_AT_TOOLBOX_PX} px into its rectangle, or was not measured: ${armSay}`);
   }
   if (!(runFps > 0)) failures.push("pull: the frame rate while the engine ran could not be read");
   else if (runFps < FPS_BUDGET) failures.push(`pull: ${runFps} fps at 4x CPU throttle with the exhaust showing, under the ${FPS_BUDGET} fps budget`);
