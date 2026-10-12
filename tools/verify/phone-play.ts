@@ -254,18 +254,29 @@ async function pullOff(id: string): Promise<void> {
     const p = await probe(id);
     if (p) {
       await doubleTap(p.x, p.y);
-      await sleep(350);
-      await noteHidden(`loosening ${id}`);
       // Plan 0011: a part held on by fasteners is undone with the right tool, fastener by fastener. Watch the tool in
       // the hand through the whole loosening, not at one moment.
       const count = FASTENED.get(id) ?? 0;
+      // Plan 0012: such a part first sends the hand to the toolbox. The hand-inside-the-machine sample is taken where
+      // the hand works on the part (the first fastener), as it was before the trip; on the legs to and from the
+      // toolbox the check is that the hand's path stays out of the machine's bounds (over it, not through it).
+      if (count === 0) {
+        await sleep(350);
+        await noteHidden(`loosening ${id}`);
+      }
+      let sampled = count === 0;
       const used = new Set<string>();
       toolsUsed.set(id, used);
       let isLoose = false;
-      for (const end = Date.now() + 4000; Date.now() < end; ) {
+      for (const end = Date.now() + 6000; Date.now() < end; ) {
         if ((await looseNow()).includes(id)) {
           isLoose = true;
           break;
+        }
+        const phase = await evaluate<string | null>("window.__openAmDevRender.trip()");
+        if (!sampled && phase === "fasten") {
+          sampled = true;
+          await noteHidden(`loosening ${id}`);
         }
         const tool = await evaluate<string | null>("window.__openAmDevRender.tool()");
         if (tool) {
@@ -283,7 +294,10 @@ async function pullOff(id: string): Promise<void> {
           const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners(${JSON.stringify(id)})`);
           if (outs.length !== count || outs.some((d) => d < 0.006)) failures.push(`fasteners: ${id} came loose with its fasteners not all out (${outs.map((d) => (d * 1000).toFixed(1)).join(", ")} mm)`);
           else fastenedOut.add(id);
-          if (await evaluate<string | null>("window.__openAmDevRender.tool()")) failures.push(`fasteners: the tool was still out after ${id} came loose`);
+          // The hand still takes the tool back to the toolbox: watch it there, then the tool must be in its slot.
+          await waitFor("the trip to end", async () => !(await evaluate<string | null>("window.__openAmDevRender.sequence()")), 4000).catch(() => false);
+          await readTrip(`loosening ${id}`);
+          if (await evaluate<boolean>("window.__openAmDevRender.toolOut()")) failures.push(`fasteners: the tool was still out after ${id} came loose`);
         }
         await idle();
         const q = (await probe(id)) ?? p; // a loose part sits a few millimetres proud
@@ -306,6 +320,24 @@ const toolsUsed = new Map<string, Set<string>>();
 const fastenerShots = new Set<string>();
 const fastenedOut = new Set<string>();
 const fastenedBackIn = new Set<string>();
+/** Parts whose fasteners were seen done up with the tool in the hand after a put-back (plan 0012). */
+const doneUpWithTool = new Set<string>();
+/**
+ * Trips to the toolbox (plan 0012), as the page logged them (`watchTrips`): every leg's path checked against the machine's
+ * bounds between its stand-offs, frame by frame, and the most of the hand hidden on the legs.
+ */
+type TripLog = { phases: string[]; reach: number | null; toolAtBolts: number | null; tools: string[]; through: string[]; legHidden: number };
+let tripsRead = 0;
+const throughMachine: string[] = [];
+const DEFAULT_TRIP = "recoil starter from the default view";
+const legHidden = new Map<string, number>();
+async function readTrip(where: string): Promise<TripLog> {
+  const log = await evaluate<TripLog>("window.__openAmDevRender.tripLog()");
+  tripsRead++;
+  for (const k of new Set(log.through)) throughMachine.push(`${where} (${k})`);
+  legHidden.set(where, Math.max(legHidden.get(where) ?? 0, log.legHidden));
+  return log;
+}
 
 async function putBack(id: string): Promise<void> {
   await idle();
@@ -316,7 +348,12 @@ async function putBack(id: string): Promise<void> {
   await drag(chip.x, chip.y, VIEWPORT.width * 0.72, VIEWPORT.height * 0.5, 12);
   await waitFor(`${id} back on`, async () => !(await trayHas(id)), 3000);
   if (FASTENED.has(id)) {
+    // Plan 0012: doing the fasteners up runs the trip too; the tool goes back in its slot after.
+    await waitFor("the trip to end", async () => !(await evaluate<string | null>("window.__openAmDevRender.sequence()")), 8000).catch(() => false);
+    const log = await readTrip(`doing up ${id}`);
+    if (log.phases.includes("fasten") && log.tools.length > 0) doneUpWithTool.add(id);
     await idle();
+    if (await evaluate<boolean>("window.__openAmDevRender.toolOut()")) failures.push(`fasteners: the tool was still out after ${id} was done up`);
     const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners(${JSON.stringify(id)})`);
     if (outs.some((d) => d > 0.0005)) failures.push(`fasteners: ${id} went back on with its fasteners not done up`);
     else fastenedBackIn.add(id);
@@ -325,8 +362,11 @@ async function putBack(id: string): Promise<void> {
 
 // ---- The run ----
 
-/** The start screen after a page load (plan 0014). */
-const atStart = () => waitFor("the start screen", () => evaluate<boolean>("!!document.querySelector('.start')"), 30000);
+/**
+ * The start screen after a page load (plan 0014). Up to 60 s: the first load runs on a throttled network through the dev
+ * server, and on a busy build machine it took 22 to 34 s.
+ */
+const atStart = () => waitFor("the start screen", () => evaluate<boolean>("!!document.querySelector('.start')"), 60000);
 /** Text of an element, or null. */
 const textOf = (selector: string) => evaluate<string | null>(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`);
 /** From the start screen to the briefing through a button, then waits for Start to be enabled (the machine loaded). */
@@ -339,6 +379,7 @@ async function toBriefing(button = ".start .free"): Promise<void> {
 async function beginRound(): Promise<void> {
   await tapSelector(".briefing .primary");
   await waitFor("the HUD", () => evaluate<boolean>("!document.querySelector('.hud').hidden"));
+  await evaluate("window.__openAmDevRender.watchTrips(true)"); // plan 0012: the page logs each trip to the toolbox
 }
 async function load(pageUrl: string): Promise<void> {
   await send("Page.navigate", { url: pageUrl });
@@ -411,7 +452,9 @@ async function noteHidden(where: string): Promise<void> {
   if (process.env.HIDDEN_DEBUG && share > 0.05) {
     const need = await evaluate<number>("window.__openAmDevRender.handNeed()");
     const o = await orbitNow();
-    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; azimuth ${o.azimuth.toFixed(2)} polar ${o.polar.toFixed(2)}`);
+    // The whole-machine check's last ask and what it applied, capped at HAND.maxPush: "needs" is on top of "applied".
+    const push = await evaluate<{ asked: number; applied: number } | null>("window.__openAmDevRender.handPush()");
+    console.log(`   hidden ${(share * 100).toFixed(0)}% ${where}; needs ${(need * 100).toFixed(1)} cm more; asked ${((push?.asked ?? 0) * 100).toFixed(1)} cm, applied ${((push?.applied ?? 0) * 100).toFixed(1)} cm; azimuth ${o.azimuth.toFixed(2)} polar ${o.polar.toFixed(2)}`);
     if (share > HIDDEN_LIMIT) await screenshot(`hidden-${where.replace(/[^a-z0-9]+/gi, "-")}`);
   }
   if (share > worstHidden.share) worstHidden = { share, where };
@@ -617,12 +660,12 @@ const toolRound: string[] = [];
       await tapSelector(".pull");
       await sleep(800);
       const toolAfter = await evaluate<string | null>("window.__openAmDevRender.tool()");
-      const toolShown = await evaluate<boolean>("window.__openAmDevRender.toolVisible()");
+      const toolShown = await evaluate<boolean>("window.__openAmDevRender.toolOut()");
       const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners("recoil_starter")`);
       if (!midway) failures.push("tools: the spanner was not out to test pulling the cord mid-loosening");
-      else if (toolAfter || toolShown) failures.push(`tools: the ${toolAfter ?? "tool"} stayed out after the cord was pulled mid-loosening`);
+      else if (toolAfter || toolShown) failures.push(`tools: the ${toolAfter ?? "tool"} stayed out of the toolbox after the cord was pulled mid-loosening`);
       else if (outs.some((d) => d > 0.0005)) failures.push(`tools: the starter's bolts stayed out after the cord was pulled mid-loosening (${outs.map((d) => (d * 1000).toFixed(1)).join(", ")} mm)`);
-      else toolRound.push("the cord pulled mid-loosening puts the spanner away and the bolts back in");
+      else toolRound.push("the cord pulled mid-loosening puts the spanner back in the toolbox and the bolts back in");
     } else failures.push("tools: the recoil starter was not in view to test pulling the cord mid-loosening");
   } catch (e) {
     failures.push(`tools: ${(e as Error).message}`);
@@ -771,6 +814,110 @@ try {
   await screenshot("fail-sound");
 }
 
+// The toolbox (plan 0012, ADR 0021). At 390 by 844 and 360 by 640, in the default view: the toolbox shows with the
+// tools in it above the controls, and is drawn clear of the machine. Then a loosening in the default view (the recoil
+// starter) and one of the alternator cover: the hand reaches the toolbox, holds the spanner at the bolts, puts it back
+// in its slot, and its path never goes through the machine; a second loosen during the sequence is ignored. "Reaches"
+// is within 10 cm: the gripping hand sits in front of the tool's grip point by its own thickness.
+const toolboxChecks: string[] = [];
+type ToolboxRect = { toolbox: Rect | null; machine: Rect | null; slots: Array<{ x: number; y: number }>; overMachine: number; screen: { width: number; height: number } };
+type Rect = { left: number; top: number; right: number; bottom: number };
+async function checkToolboxInView(label: string): Promise<void> {
+  await idle();
+  await sleep(400);
+  const r = await evaluate<ToolboxRect | null>("window.__openAmDevRender.toolboxRect()");
+  const controlsTop = await evaluate<number>("document.querySelector('.controls').getBoundingClientRect().top");
+  await screenshot(`17-toolbox-${label}`);
+  if (!r || !r.toolbox || !r.machine) {
+    failures.push(`toolbox: not in the scene at ${label}`);
+    return;
+  }
+  const slotsShown = r.slots.every((p) => p.x >= 0 && p.x <= r.screen.width && p.y >= 0 && p.y < controlsTop);
+  const topShown = r.toolbox.top >= 0 && r.toolbox.top < controlsTop;
+  const rectOverlap = Math.max(0, Math.min(r.toolbox.right, r.machine.right) - Math.max(r.toolbox.left, r.machine.left)) > 0 ? Math.max(0, r.machine.bottom - r.toolbox.top) : 0;
+  const where = `toolbox top ${Math.round(r.toolbox.top)} px, machine bottom ${Math.round(r.machine.bottom)} px, controls top ${Math.round(controlsTop)} px, tools at y ${r.slots.map((p) => Math.round(p.y)).join(" and ")}`;
+  if (!slotsShown || !topShown) failures.push(`toolbox: at ${label} the toolbox or the tools in it are out of the default view (${where})`);
+  else if (r.overMachine > 0) failures.push(`toolbox: at ${label} ${(r.overMachine * 100).toFixed(0)}% of the toolbox is drawn over the machine (${where})`);
+  else toolboxChecks.push(`at ${label} the toolbox and the tools in it are in the default view, drawn clear of the machine (${where}; bounding boxes overlap by ${Math.round(rectOverlap)} px)`);
+}
+
+/** Loosens a part with fasteners and watches the trip. Returns false if the part was never in view. */
+async function watchTrip(id: string, label: string, shot: string | null, interrupt: string | null): Promise<boolean> {
+  let p: Probe | null = null;
+  for (let i = 0; i < 8 && !(p = await probe(id)); i++) await drag(ROTATE.x0, ROTATE.y0, ROTATE.x1, ROTATE.y1);
+  if (!p) return false;
+  await idle();
+  await doubleTap(p.x, p.y);
+  let shotTaken = false;
+  let interrupted: string | null = null;
+  for (const end = Date.now() + 8000; Date.now() < end; ) {
+    const phase = await evaluate<string | null>("window.__openAmDevRender.trip()");
+    const seq = await evaluate<string | null>("window.__openAmDevRender.sequence()");
+    if (!seq) break;
+    // The hand taking the tool out: at the pick, or just after it if the pick was too quick to see.
+    if ((phase === "pick" || phase === "toFastener") && shot && !shotTaken) {
+      shotTaken = true;
+      if (phase === "pick") await sleep(60);
+      await screenshot(shot);
+    }
+    if (phase === "fasten") {
+      if (interrupt && !interrupted) {
+        // A second loosen while the sequence plays must do nothing.
+        const q = await probe(interrupt);
+        if (q) {
+          await doubleTap(q.x, q.y);
+          interrupted = interrupt;
+        }
+      }
+    }
+    await sleep(30);
+  }
+  await idle();
+  const log = await readTrip(label);
+  const reached = log.reach ?? Infinity;
+  const atBolts = log.toolAtBolts ?? Infinity;
+  const spannerHeld = log.tools.includes("spanner");
+  const phases = log.phases;
+  const back = await evaluate<number | null>("window.__openAmDevRender.toolFromSlot('spanner')");
+  const out = await evaluate<boolean>("window.__openAmDevRender.toolOut()");
+  const loose = (await looseNow()).includes(id);
+  const say = `${label}: phases ${phases.join(", ")}; hand to the slot ${(reached * 100).toFixed(1)} cm; spanner to the bolts ${(atBolts * 100).toFixed(1)} cm; spanner from its slot after ${((back ?? 0) * 1000).toFixed(1)} mm`;
+  if (!loose) failures.push(`toolbox: ${label}: the part did not come loose (${say})`);
+  else if (!(reached < 0.1)) failures.push(`toolbox: ${label}: the hand never reached the toolbox (${say})`);
+  else if (!spannerHeld || !(atBolts < 0.03)) failures.push(`toolbox: ${label}: the spanner was not held at the bolts (${say})`);
+  else if (out || !(back !== null && back < 0.002)) failures.push(`toolbox: ${label}: the spanner was not back in its slot afterwards (${say})`);
+  else toolboxChecks.push(say);
+  if (interrupt) {
+    if (!interrupted) failures.push(`toolbox: ${label}: ${interrupt} was not in view to try a second loosen`);
+    else if ((await looseNow()).includes(interrupt)) failures.push(`toolbox: ${label}: a second loosen (${interrupt}) during the sequence was not ignored`);
+    else toolboxChecks.push(`a second loosen (${interrupt}) during the sequence was ignored`);
+  }
+  return true;
+}
+
+{
+  try {
+    await load(url.replace("?diag", "?diag&patience=600"));
+    await toBriefing();
+    await beginRound();
+    if (!(await evaluate<boolean>("window.__openAmDevRender.hasToolbox()"))) throw new Error("the game has no toolbox (toolbox.glb missing?)");
+    await checkToolboxInView("390x844");
+    if (!(await watchTrip("recoil_starter", DEFAULT_TRIP, "18-hand-taking-tool", null))) failures.push("toolbox: the recoil starter was not in view");
+    if (!(await watchTrip("alternator_cover", "alternator cover", null, "fuel_hose"))) failures.push("toolbox: the alternator cover was never in view");
+    await screenshot("19-after-trip");
+    await send("Emulation.setDeviceMetricsOverride", { width: 360, height: 640, deviceScaleFactor: 2, mobile: true });
+    await load(url);
+    await toBriefing();
+    await beginRound();
+    await checkToolboxInView("360x640");
+  } catch (e) {
+    failures.push(`toolbox: ${(e as Error).message}`);
+    await screenshot("fail-toolbox");
+  }
+  await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
+  await load(url);
+}
+
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
 if (failures.length === 0) {
   await toBriefing();
@@ -916,6 +1063,15 @@ console.log(`Sound: ${soundChecks.join("; ") || "not run"}; files decoded: ${sou
 console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done up again on ${[...fastenedBackIn].join(", ") || "none"}; tools seen: ${[...toolsSeen].join(", ") || "none"}`);
 if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
 for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
+console.log(`Toolbox: ${toolboxChecks.join("; ") || "not run"}`);
+console.log(`Trips: ${tripsRead} watched frame by frame; the hand's path inside the machine's bounds on ${throughMachine.length}${throughMachine.length ? ` (${[...new Set(throughMachine)].join(", ")})` : ""}`);
+// In the default view the toolbox and the machine are both in front of the camera: the trip must not hide the hand.
+const defaultLegHidden = legHidden.get(DEFAULT_TRIP);
+console.log(`Hand hidden on the legs of the default-view trip: ${defaultLegHidden === undefined ? "not watched" : `at most ${(defaultLegHidden * 100).toFixed(0)}%`}, limit ${HIDDEN_LIMIT * 100}%; worst on any trip ${(Math.max(0, ...legHidden.values()) * 100).toFixed(0)}% (views turned until the part showed, where the toolbox can be behind the machine)`);
+if (defaultLegHidden !== undefined && defaultLegHidden > HIDDEN_LIMIT) failures.push(`toolbox: ${(defaultLegHidden * 100).toFixed(0)}% of the hand was hidden on the way to or from the toolbox in the default view`);
+if (throughMachine.length) failures.push(`toolbox: the hand went through the machine on its way to or from the toolbox: ${[...new Set(throughMachine)].join(", ")}`);
+console.log(`Done up with the tool after a put-back: ${[...doneUpWithTool].join(", ") || "none"}`);
+if (doneUpWithTool.size === 0) failures.push("toolbox: no part was seen done up with the tool after a put-back");
 console.log(`Tools round: ${toolRound.length ? `undone, to the tray and done up again: ${toolRound.join("; ")}` : "not passed"}`);
 if (toolRound.length !== 3 && !failures.some((x) => x.startsWith("tools:"))) failures.push("tools: the fuel tank and recoil starter round did not pass");
 console.log(`Hand inside the machine: at most ${(worstHidden.share * 100).toFixed(0)}% of its points hidden${worstHidden.where ? ` (${worstHidden.where})` : ""}, limit ${HIDDEN_LIMIT * 100}%`);

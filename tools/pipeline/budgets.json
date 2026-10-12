@@ -39,5 +39,11 @@
     "triangles": 2000,
     "bytes": 100000,
     "texturePx": 512
+  },
+  "toolbox": {
+    "_source": "ADR 0021: the toolbox beside the generator, scenery only",
+    "triangles": 3000,
+    "bytes": 200000,
+    "texturePx": 1024
   }
 }

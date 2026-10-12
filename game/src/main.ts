@@ -144,7 +144,7 @@ async function start(): Promise<void> {
   let view: RenderView | null = null;
   const mounted = mountUi(ui, stage, game, {
     partImage: (id) => view?.partImage(id) ?? null,
-    carry: { move: (id, x, y) => view?.carryChip(id, x, y), end: (id) => view?.endChipCarry(id) },
+    carry: { move: (id, x, y) => view?.carryChip(id, x, y), end: (id) => view?.endChipCarry(id), busy: () => view?.busy() ?? false },
     daily: () => dailyStatus(daily, scores),
     share: { send: (text) => share.share(text), sheet: hasShareSheet(navigator), url: shareUrl(location.href, import.meta.env.BASE_URL) },
     sound: {
@@ -157,8 +157,8 @@ async function start(): Promise<void> {
   });
   document.getElementById("boot")?.remove();
 
-  // The model, its ground shadow, the environment, the hand and the tools load behind the start and briefing screens (ADR 0014).
-  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`, `${import.meta.env.BASE_URL}hand/tools.glb`, mounted.setLoading);
+  // The model, its ground shadow, the environment, the hand, the tools and the toolbox load behind the start and briefing screens (ADR 0014).
+  const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`, `${import.meta.env.BASE_URL}hand/tools.glb`, `${import.meta.env.BASE_URL}hand/toolbox.glb`, mounted.setLoading);
   try {
     view = mountRender(stage, game, assets);
   } catch (e) {

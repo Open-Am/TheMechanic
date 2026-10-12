@@ -67,6 +67,12 @@ PROFILES = {
     "chrome": ("metal", None, 0.2),
     "handle_yellow": ("plastic", None, 0.3),
     "handle_black": ("plastic", None, 0.3),
+    # The toolbox (plan 0012): red paint chipped to bare steel and rust, with grease; a rag, a wooden brush handle.
+    "toolbox_red": ("toolpaint", "#5d5953", 0.35),
+    "rag_cloth": ("cloth", None, 0.25),
+    "wood": ("plain", None, 0.3),
+    "wire": ("metal", None, 0.2),
+    "ground": ("plain", None, 0.0),
 }
 GREASE = (0.012, 0.010, 0.009)
 DUST = (0.36, 0.31, 0.25)  # Lagos laterite dust, linear-ish, reddish brown
@@ -189,13 +195,21 @@ def authoring(base_name, group, image):
     metal_out = metallic
     rough_out = rough
 
-    if profile == "paint":
+    if profile in ("paint", "toolpaint"):
         chips = math_node("MULTIPLY", edge, ramp(big, 0.45, 0.6))
         chips = math_node("GREATER_THAN", chips, 0.35)
         colour = mix_rgb(chips, colour, srgb_to_linear(under))
         rusty = math_node("MULTIPLY", chips, ramp(noise(25.0), 0.5, 0.7))
         colour = mix_rgb(rusty, colour, RUST)
         rough_out = math_node("ADD", math_node("MULTIPLY", chips, 0.35), rough)
+        if profile == "toolpaint":
+            # A toolbox is handled with greasy hands: dark smears in the corners and along the edges, and the paint
+            # worn through to rust in patches, not only at the edges.
+            patches = math_node("MULTIPLY", ramp(noise(9.0, 5.0), 0.58, 0.72), ramp(fine, 0.4, 0.6))
+            colour = mix_rgb(math_node("MULTIPLY", patches, 0.8), colour, RUST)
+            grease = math_node("MULTIPLY", math_node("ADD", math_node("MULTIPLY", crevice, 1.4), math_node("MULTIPLY", edge, 0.6)), ramp(noise(14.0, 6.0), 0.45, 0.7))
+            colour = mix_rgb(math_node("MULTIPLY", grease, 0.75), colour, GREASE)
+            rough_out = math_node("SUBTRACT", rough_out, math_node("MULTIPLY", grease, 0.2))
     elif profile == "plastic":
         scuff = math_node("MULTIPLY", edge, ramp(big, 0.4, 0.7))
         colour = mix_rgb(math_node("MULTIPLY", scuff, 0.5), colour, tuple(min(1, c + 0.08) for c in base))
@@ -380,8 +394,9 @@ def final_material(group, base_img, orm_img, normal_img):
     return m
 
 
-def bake_groups(groups, tex_dir):
-    """Bakes each group {name: (size, [object names])} to its own texture set in tex_dir. Used by main() and hand.py."""
+def bake_groups(groups, tex_dir, orm_filter=None):
+    """Bakes each group {name: (size, [object names])} to its own texture set in tex_dir. Used by main() and hand.py.
+    `orm_filter`, if given, is applied to the packed occlusion-roughness-metallic array before it is saved."""
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
@@ -421,6 +436,8 @@ def bake_groups(groups, tex_dir):
         orm[:, :, 0] = pixels(ao_img)[:, :, 0]
         orm[:, :, 1] = pixels(rough_img)[:, :, 0]
         orm[:, :, 2] = pixels(metal_img)[:, :, 0]
+        if orm_filter:
+            orm = orm_filter(orm)
         orm_img = new_image(f"{group}_orm", size, True)
         orm_img.pixels = orm.ravel().tolist()
 

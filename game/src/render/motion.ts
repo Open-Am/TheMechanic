@@ -2,7 +2,7 @@
 // Pure: a pose is a function of the motion, the explode vector and progress p, where 0 is installed and 1 is fully out.
 // Install plays the same pose with p running from 1 back to 0.
 
-import { MOTION_TYPES, type Axis, type Motion, type MotionType, type Vec3 } from "../core/index.ts";
+import { MOTION_TYPES, type Axis, type FastenerKind, type Motion, type MotionType, type Vec3 } from "../core/index.ts";
 import { clamp01, ease } from "./tween.ts";
 
 export interface ResolvedMotion {
@@ -197,8 +197,10 @@ export const FASTEN = {
   turns: 2,
   /** Metres it stands proud of its hole once out. */
   backOut: 0.008,
-  /** Seconds to do one up again (put-back, before the cord is pulled). */
+  /** Seconds to do one up again quickly, with no trip to the toolbox (before the cord is pulled). */
   upSeconds: 0.15,
+  /** Seconds to do one up again with the tool after a part is put back (plan 0012). */
+  doUpSeconds: 0.2,
   /** Seconds the part takes to come free once its fasteners are out (shorter than without fasteners). */
   freeSeconds: 0.3,
   /** Degrees the spanner swings on each stroke; it ratchets back between strokes. */
@@ -263,4 +265,189 @@ export function turnCounter(turns: number, click: () => void): (p: number) => vo
     last = p;
     for (let i = 0; i < n; i++) click();
   };
+}
+
+// ---- The toolbox trip (plan 0012, ADR 0021) ----
+
+/** How the hand fetches tools from the toolbox and puts them back. Tuning lives here. */
+export const TRIP = {
+  /** Seconds for one leg at the default view's distance, and the most any leg takes, however far. */
+  minSeconds: 0.35,
+  maxSeconds: 0.6,
+  /** Metres from the toolbox to the machine in the default view, over the top where the path climbs: a leg this long
+   *  takes minSeconds. */
+  refMetres: 1.0,
+  /** Seconds to take a tool out of its slot, or to lay it back in. */
+  pickSeconds: 0.12,
+  /** Metres the hand's path keeps above the machine's top where it crosses over, and out from a fastener. */
+  clearance: 0.05,
+  /** The most the path stands off a point inside the machine's bounds before it climbs, metres. */
+  maxStandOff: 0.3,
+  /** Metres a point may sit inside the bounds along its own outward direction (a recess) before the path leaves by
+   *  the nearest way out instead. */
+  maxRecess: 0.1,
+} as const;
+
+/** The tool a fastener needs (ADR 0020): a screwdriver for screws, a spanner for bolts and nuts. */
+export type TripTool = "spanner" | "screwdriver";
+const tripToolFor = (kind: FastenerKind): TripTool => (kind === "screw" ? "screwdriver" : "spanner");
+
+/** Seconds for a leg of `metres`: minSeconds at the default view's distance, longer with distance, never past maxSeconds. */
+export function legSeconds(metres: number): number {
+  const m = Number.isFinite(metres) ? Math.max(0, metres) : 0;
+  return Math.min(TRIP.maxSeconds, Math.max(TRIP.minSeconds, (TRIP.minSeconds * m) / TRIP.refMetres));
+}
+
+/** One step of the trip. `index` is a fastener's index in the part's own list. */
+export type TripStep =
+  | { kind: "toToolbox"; tool: TripTool; seconds: number }
+  | { kind: "pick"; tool: TripTool; seconds: number }
+  | { kind: "toFastener"; tool: TripTool; index: number; seconds: number }
+  | { kind: "fasten"; tool: TripTool; index: number; seconds: number }
+  | { kind: "free"; seconds: number }
+  | { kind: "toSlot"; tool: TripTool; seconds: number }
+  | { kind: "putBack"; tool: TripTool; seconds: number }
+  | { kind: "home"; seconds: number };
+
+export interface TripPlan {
+  steps: TripStep[];
+  /** Fastener indices in the order they are worked: grouped by tool, so each tool is fetched once. */
+  order: number[];
+  total: number;
+}
+
+/**
+ * The trip for loosening a part (`undo`) or doing it up again after it is put back (`do-up`), from the kinds of its
+ * fasteners in order: from the pointer to the toolbox, take the first tool, carry it to the first fastener, work each
+ * fastener that tool fits, change tool at the toolbox if another is needed, free the part (loosening only), put the tool
+ * back, and return. `metres` are the lengths of the legs from the pointer to the toolbox and from the toolbox to the
+ * part. A part without fasteners makes no trip. Pure, so the same fasteners always make the same trip (ADR 0007).
+ */
+export function tripPlan(kinds: readonly FastenerKind[], mode: "undo" | "do-up", metres: { pointer: number; machine: number }): TripPlan {
+  if (kinds.length === 0) return { steps: [], order: [], total: 0 };
+  const tools: TripTool[] = [];
+  for (const k of kinds) if (!tools.includes(tripToolFor(k))) tools.push(tripToolFor(k));
+  const order = tools.flatMap((t) => kinds.flatMap((k, i) => (tripToolFor(k) === t ? [i] : [])));
+  const toBox = legSeconds(metres.pointer);
+  const across = legSeconds(metres.machine);
+  const work = mode === "undo" ? FASTEN.outSeconds : FASTEN.doUpSeconds;
+  const steps: TripStep[] = [];
+  tools.forEach((tool, n) => {
+    // The first leg comes from the pointer; after a tool change the hand is already at the toolbox.
+    if (n === 0) steps.push({ kind: "toToolbox", tool, seconds: toBox });
+    steps.push({ kind: "pick", tool, seconds: TRIP.pickSeconds });
+    const mine = order.filter((i) => tripToolFor(kinds[i]!) === tool);
+    steps.push({ kind: "toFastener", tool, index: mine[0]!, seconds: across });
+    for (const index of mine) steps.push({ kind: "fasten", tool, index, seconds: work });
+    if (n === tools.length - 1 && mode === "undo") steps.push({ kind: "free", seconds: FASTEN.freeSeconds });
+    steps.push({ kind: "toSlot", tool, seconds: across });
+    steps.push({ kind: "putBack", tool, seconds: TRIP.pickSeconds });
+  });
+  steps.push({ kind: "home", seconds: toBox });
+  return { steps, order, total: steps.reduce((s, x) => s + x.seconds, 0) };
+}
+
+/** An axis-aligned box, world space: the machine's bounds. */
+export interface Bounds {
+  min: Vec3;
+  max: Vec3;
+}
+
+/** How far from `p` along the unit direction `d` the box ends: 0 if `p` is outside it. */
+export function exitDistance(p: Vec3, d: Vec3, box: Bounds): number {
+  if (p.some((v, i) => v < box.min[i]! || v > box.max[i]!)) return 0;
+  let t = Infinity;
+  for (let i = 0; i < 3; i++) {
+    if (d[i]! > 1e-9) t = Math.min(t, (box.max[i]! - p[i]!) / d[i]!);
+    else if (d[i]! < -1e-9) t = Math.min(t, (box.min[i]! - p[i]!) / d[i]!);
+  }
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** True if the segment from a to b passes through the box (slab test). */
+export function segmentHitsBox(a: Vec3, b: Vec3, box: Bounds): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  for (let i = 0; i < 3; i++) {
+    const d = b[i]! - a[i]!;
+    if (Math.abs(d) < 1e-12) {
+      if (a[i]! < box.min[i]! || a[i]! > box.max[i]!) return false;
+      continue;
+    }
+    let lo = (box.min[i]! - a[i]!) / d;
+    let hi = (box.max[i]! - a[i]!) / d;
+    if (lo > hi) [lo, hi] = [hi, lo];
+    t0 = Math.max(t0, lo);
+    t1 = Math.min(t1, hi);
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+
+/** Ways out of the machine's bounds when a point's own outward direction runs through it: up, then the four sides. */
+const OUTWARD: readonly Vec3[] = [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+
+const addScaled = (a: Vec3, b: Vec3, k: number): Vec3 => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
+
+/**
+ * The hand's path between two points, over the machine rather than through it. A point on the machine (the pointer's
+ * spot, a fastener) comes with its outward direction `out`, and the path first stands off it along `out` until it is out
+ * of the machine's bounds, plus TRIP.clearance: a fastener tucked under the tank's overhang comes out from under it
+ * before the hand climbs. If that direction runs more than TRIP.maxRecess inside the bounds, it leaves by the nearest
+ * way out instead. If the straight line between the stand-off points would pass through the machine's bounds,
+ * the path rises above the machine's top by TRIP.clearance, crosses there, and comes down. Returns the corner points,
+ * first and last included.
+ */
+export function overPath(from: Vec3, fromOut: Vec3 | null, to: Vec3, toOut: Vec3 | null, box: Bounds): Vec3[] {
+  const c = TRIP.clearance;
+  const standOff = (p: Vec3, out: Vec3): Vec3 => {
+    let d = unit(out);
+    let t = exitDistance(p, d, box);
+    // A direction that runs a long way inside the bounds goes through the machine (a normal that points in, or along a
+    // face): leave by the nearest way out instead, up or to a side.
+    if (t > TRIP.maxRecess) {
+      for (const alt of OUTWARD) {
+        const ta = exitDistance(p, alt, box);
+        if (ta < t) [t, d] = [ta, alt];
+      }
+    }
+    return addScaled(p, d, Math.min(t, TRIP.maxStandOff) + c);
+  };
+  const s0 = fromOut ? standOff(from, fromOut) : from;
+  const s1 = toOut ? standOff(to, toOut) : to;
+  const points: Vec3[] = [from];
+  if (fromOut) points.push(s0);
+  if (segmentHitsBox(s0, s1, box)) {
+    const top = box.max[1] + c;
+    points.push([s0[0], Math.max(top, s0[1]), s0[2]], [s1[0], Math.max(top, s1[1]), s1[2]]);
+  }
+  if (toOut) points.push(s1);
+  points.push(to);
+  return points;
+}
+
+/** The path's length, metres. */
+export function pathLength(points: readonly Vec3[]): number {
+  let n = 0;
+  for (let i = 1; i < points.length; i++) n += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1], points[i]![2] - points[i - 1]![2]);
+  return n;
+}
+
+/** The point a share t (0 to 1) of the way along the path, by length. */
+export function alongPath(points: readonly Vec3[], t: number): Vec3 {
+  if (points.length === 0) return [0, 0, 0];
+  const total = pathLength(points);
+  if (points.length === 1 || total <= 1e-9) return [...points[0]!];
+  let left = clamp01(t) * total;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const seg = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    if (left <= seg || i === points.length - 1) {
+      const k = seg > 1e-12 ? Math.min(1, left / seg) : 1;
+      return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+    }
+    left -= seg;
+  }
+  return [...points[points.length - 1]!];
 }
