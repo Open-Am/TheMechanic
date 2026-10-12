@@ -992,10 +992,15 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     tellCarry("carrying", machineOnScreen());
   }
 
-  function moveCarry(x: number, y: number, t = performance.now()): void {
+  /**
+   * `between` are the moves the browser merged into this one (getCoalescedEvents), each with its own time stamp, so a
+   * flick that fits inside one frame still has its speed measured (0.15.1).
+   */
+  function moveCarry(x: number, y: number, t = performance.now(), between: readonly PointerSample[] = []): void {
     if (!carry) return;
+    for (const p of between) if (p.t < t) carry.samples.push(p);
     carry.samples.push({ x, y, t });
-    if (carry.samples.length > 24) carry.samples.shift();
+    while (carry.samples.length > 48) carry.samples.shift();
     placeCarried(x, y);
     const machine = machineOnScreen();
     tellCarry(overTray({ x, y }, carriedOnScreen(), machine) ? "over" : "carrying", machine);
@@ -1567,7 +1572,10 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         startTurn(e.clientX, e.clientY);
       }
     }
-    if (drag.mode === "carry") moveCarry(e.clientX, e.clientY, e.timeStamp);
+    if (drag.mode === "carry") {
+      const merged = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
+      moveCarry(e.clientX, e.clientY, e.timeStamp, merged.map((m) => ({ x: m.clientX, y: m.clientY, t: m.timeStamp })));
+    }
     else if (drag.mode === "turn") turnTo(e.clientX, e.clientY);
     drag.lastX = e.clientX;
     drag.lastY = e.clientY;

@@ -94,9 +94,10 @@ export function dragMode(part: string | null, loose: (id: string) => boolean): "
 /**
  * A quick downward flick at release counts where it was heading: a thumb lifts while still moving, and the screen
  * reports the last spot it touched, short of where the player meant. windowMs: the recent movement measured; minSpeed:
- * the downward speed that counts as a flick, px per ms; aheadMs: how far ahead the release is projected.
+ * the downward speed that counts as a flick, px per ms; aheadMs: how far ahead the release is projected; staleMs: the
+ * longest gap from the last move to the lift that still counts as lifting while moving.
  */
-export const FLICK = { windowMs: 80, minSpeed: 0.8, aheadMs: 120 } as const;
+export const FLICK = { windowMs: 80, minSpeed: 0.8, aheadMs: 120, staleMs: 50 } as const;
 
 export interface PointerSample {
   x: number;
@@ -107,15 +108,22 @@ export interface PointerSample {
 
 /**
  * Where a release was heading `FLICK.aheadMs` ahead, if the pointer was moving down at least `FLICK.minSpeed` over the
- * last `FLICK.windowMs` before it; otherwise null. `samples` are the recent moves, oldest first.
+ * last `FLICK.windowMs` of moves before it, and lifted within `FLICK.staleMs` of the last move; otherwise null. The speed
+ * is measured over the moves, up to the lift only if the lift moved: a lift is often reported a frame or two after the
+ * last move, at the same spot, which would halve the speed. `samples` are the recent moves, oldest first.
  */
 export function flickAhead(samples: readonly PointerSample[], release: PointerSample): { x: number; y: number } | null {
-  const from = samples.find((s) => s.t >= release.t - FLICK.windowMs && s.t < release.t);
+  const before = samples.filter((s) => s.t <= release.t);
+  const last = before[before.length - 1];
+  if (!last || release.t - last.t > FLICK.staleMs) return null;
+  const moved = release.x !== last.x || release.y !== last.y;
+  const end = moved ? release : last;
+  const from = before.find((s) => s.t >= end.t - FLICK.windowMs);
   if (!from) return null;
-  const dt = release.t - from.t;
+  const dt = end.t - from.t;
   if (dt < 8) return null;
-  const vx = (release.x - from.x) / dt;
-  const vy = (release.y - from.y) / dt;
+  const vx = (end.x - from.x) / dt;
+  const vy = (end.y - from.y) / dt;
   if (vy < FLICK.minSpeed || Math.abs(vx) > vy * 2) return null;
   return { x: release.x + vx * FLICK.aheadMs, y: release.y + vy * FLICK.aheadMs };
 }

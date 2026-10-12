@@ -1003,6 +1003,22 @@ describe("a fast downward release counts where it was heading (release 0.15.1)",
     expect(p!.x).toBeCloseTo(200);
   });
 
+  it("still counts when the lift is reported a frame or two after the last move, at the same spot", () => {
+    // Seen in headless Edge: moves 30 ms apart at 1.3 px/ms, the lift 33 ms after the last one. Measured to the lift,
+    // the speed read 0.6 px/ms and the flick was missed.
+    const s = Array.from({ length: 5 }, (_, i) => ({ x: 227, y: 455 + 40 * i, t: 30292 + 30 * i }));
+    const last = s[4]!;
+    const p = flickAhead(s, { ...last, t: last.t + 33 });
+    expect(p).not.toBeNull();
+    expect(p!.y).toBeGreaterThan(last.y + 100);
+  });
+
+  it("ignores a lift long after the last move", () => {
+    const s = path(2);
+    const last = s[s.length - 1]!;
+    expect(flickAhead(s, { ...last, t: last.t + FLICK.staleMs + 1 })).toBeNull();
+  });
+
   it("ignores a slow, deliberate drag", () => {
     const s = path(0.3);
     const last = s[s.length - 1]!;
