@@ -14,7 +14,7 @@ import { createDailyProvider } from "./platform/local/daily.ts";
 import { createScoreStore, safeStorage } from "./platform/local/scores.ts";
 import { createShare, hasShareSheet } from "./platform/local/share.ts";
 import { createFlag, MUTED_KEY } from "./platform/local/storage.ts";
-import { loadRenderAssets } from "./render/model.ts";
+import { loadCustomer, loadRenderAssets } from "./render/model.ts";
 import { mountRender, type RenderView } from "./render/view.ts";
 import { shareUrl } from "./ui/format.ts";
 import { mountUi, showCannotRun } from "./ui/index.ts";
@@ -66,6 +66,22 @@ async function loadSounds(audio: LocalAudio): Promise<void> {
     }),
   );
   if (import.meta.env.DEV && silent.length) console.warn(`Sound: ${silent.length} of ${MOMENTS.length} moments will be silent: ${silent.join(", ")}. See game/public/audio/LICENCE.md and plan 0013.`);
+}
+
+/**
+ * Downloads a customer's file by look (plan 0015, ADR 0023). In development, ?nocustomer=<look> makes that look's file
+ * missing and ?slowcustomer=<look>:<ms> delays it, for the browser check's fallback cases.
+ */
+function customerLoader(): (look: string) => ReturnType<typeof loadCustomer> {
+  const q = import.meta.env.DEV ? new URLSearchParams(location.search) : null;
+  const missing = new Set(q?.getAll("nocustomer") ?? []);
+  const slow = new Map((q?.getAll("slowcustomer") ?? []).map((v) => v.split(":") as [string, string]).map(([l, ms]) => [l, Number(ms) || 0] as const));
+  return async (look) => {
+    if (missing.has(look)) return null;
+    const wait = slow.get(look);
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    return loadCustomer(`${import.meta.env.BASE_URL}customers/${look}.glb`);
+  };
 }
 
 async function start(): Promise<void> {
@@ -160,7 +176,7 @@ async function start(): Promise<void> {
   // The model, its ground shadow, the environment, the hand, the tools and the toolbox load behind the start and briefing screens (ADR 0014).
   const assets = await loadRenderAssets(`${import.meta.env.BASE_URL}machines/${MACHINE_ID}/`, `${import.meta.env.BASE_URL}env/workshop.hdr`, `${import.meta.env.BASE_URL}hand/hand.glb`, `${import.meta.env.BASE_URL}hand/tools.glb`, `${import.meta.env.BASE_URL}hand/toolbox.glb`, `${import.meta.env.BASE_URL}scene/bench.glb`, mounted.setLoading);
   try {
-    view = mountRender(stage, game, assets);
+    view = mountRender(stage, game, assets, customers ? customerLoader() : null);
   } catch (e) {
     console.error(e);
     showCannotRun(root, "webgl");

@@ -1,8 +1,8 @@
 // Loads what the scene needs from the machine folder at startup (plan 0005 step 8): the model, its baked ground shadow,
-// and the shared environment map; and the hand, its tools, the toolbox and the workbench (plans 0008, 0011, 0012, 0016). Fetched with the machine data, before the game starts; nothing is fetched after
-// (ADR 0010). Each file is optional: whatever is missing falls back (placeholders, RoomEnvironment, a drawn shadow).
+// and the shared environment map; and the hand, its tools, the toolbox and the workbench (plans 0008, 0011, 0012, 0016). Fetched with the machine data, before the game starts. The customers are
+// the one thing fetched later, one look at a time (loadCustomer, ADR 0023). Each file is optional: whatever is missing falls back (placeholders, RoomEnvironment, a drawn shadow).
 
-import { DataTexture, EquirectangularReflectionMapping, LinearFilter, type Object3D } from "three";
+import { DataTexture, EquirectangularReflectionMapping, LinearFilter, type AnimationClip, type Object3D } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
@@ -116,6 +116,24 @@ async function loadModel(url: string): Promise<Object3D | null> {
     return gltf.scene;
   } catch (e) {
     console.warn("The model could not be read; using placeholders.", e);
+    return null;
+  }
+}
+
+/**
+ * One customer's file (plan 0015 step 8, ADR 0023): the scene and its clips, or null if it is missing or cannot be read.
+ * Never throws. The dev server answers a missing file with the page itself, which counts as missing.
+ */
+export async function loadCustomer(url: string): Promise<{ scene: Object3D; animations: AnimationClip[] } | null> {
+  const r = await fetchOk(url);
+  if (!r || (r.headers.get("content-type") ?? "").includes("text/html")) return null;
+  try {
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    const gltf = await loader.parseAsync(await r.arrayBuffer(), "");
+    return { scene: gltf.scene, animations: gltf.animations };
+  } catch (e) {
+    console.warn(`The customer ${url} could not be read; the round plays without the figure.`, e);
     return null;
   }
 }

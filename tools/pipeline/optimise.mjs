@@ -1,13 +1,15 @@
 // Optimises the exported GLB with glTF Transform (plan 0005 step 7, brief section 9).
 //
-//   node tools/pipeline/optimise.mjs [in.glb] [out.glb] [--keep-empty]
+//   node tools/pipeline/optimise.mjs [in.glb] [out.glb] [texture px] [--keep-empty]
 //
 // Defaults: assets/gen950/export/model.glb -> assets/gen950/export/model.optimised.glb.
-// Meshopt geometry compression (the decoder ships in three), WebP textures at most 2048 px.
+// Meshopt geometry compression (the decoder ships in three), WebP textures at most 2048 px (the customers pass 1024,
+// ADR 0015). Animation clips are resampled, which drops keys a straight line between their neighbours would give.
 // Flattening, joining, instancing, palettes and simplification are all turned off: they would merge or rename the
 // one-node-per-part structure the game relies on (brief section 8), and triangle counts are the modeller's job.
 // Flags checked against `gltf-transform help optimize` for 4.5.0.
-// --keep-empty turns pruning off: it would drop empty nodes, and the toolbox's tool slots are empty nodes (plan 0012).
+// --keep-empty turns pruning off: it would drop empty nodes, and the toolbox's tool slots (plan 0012) and the customers'
+// hand grips (plan 0017) are empty nodes.
 // A fresh Blender export of selected objects carries nothing unused, so there is nothing for pruning to remove.
 
 import { spawnSync } from "node:child_process";
@@ -33,7 +35,7 @@ const args = [
   output,
   "--compress", "meshopt",
   "--texture-compress", "webp",
-  "--texture-size", "2048",
+  "--texture-size", files[2] ?? "2048",
   "--flatten", "false",
   "--join", "false",
   "--instance", "false",

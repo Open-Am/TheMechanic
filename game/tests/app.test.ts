@@ -666,3 +666,59 @@ describe("moments (ADR 0018, plan 0013 step 2)", () => {
     expect(sounds).toEqual(["land", "land"]);
   });
 });
+
+describe("the round's customer look and the next one (plan 0015 step 6, ADR 0023)", () => {
+  const customers = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "public", "customers.json"), "utf8")) as CustomerFile;
+  /** A random that walks through a list, so each pick is known. */
+  function sequence(values: number[]) {
+    let i = 0;
+    return () => values[i++ % values.length]!;
+  }
+
+  it("customerLook follows the picked customer; both are null before a round", () => {
+    const game = createGame({ machine, faults, clock: fakeClock(), audio: silent, random: sequence([0.1, 0.5, 0.9, 0.3]), customers });
+    expect(game.customerLook).toBeNull();
+    expect(game.nextCustomerLook).toBeNull();
+    for (let i = 0; i < 5; i++) {
+      game.newRound();
+      const c = customers.customers.find((x) => x.name === game.customerName)!;
+      expect(game.customerLook).toBe(c.look);
+      game.begin();
+    }
+  });
+
+  it("the next customer is chosen when the round starts, is never this round's, and the next free-play round plays them", () => {
+    const game = createGame({ machine, faults, clock: fakeClock(), audio: silent, random: sequence([0.2, 0.7, 0.4, 0.95, 0.05]), customers });
+    game.newRound();
+    expect(game.nextCustomerLook).toBeNull();
+    for (let i = 0; i < 8; i++) {
+      game.begin();
+      const next = game.nextCustomerLook;
+      expect(next).not.toBeNull();
+      expect(next).not.toBe(game.customerLook);
+      game.newRound();
+      expect(game.customerLook).toBe(next);
+    }
+  });
+
+  it("a daily plays the day's customer, whatever was announced; free play then picks afresh", () => {
+    const day = 40;
+    const game = createGame({ machine, faults, clock: fakeClock(), audio: silent, random: sequence([0.3, 0.6, 0.9]), customers });
+    game.newRound();
+    game.begin();
+    game.newRound({ day, faultId: dailyFaultId(faults.faults, day), scored: false });
+    const daily = customers.customers.find((c) => c.id === dailyCustomerId(customers.customers, day))!;
+    expect(game.customerLook).toBe(daily.look);
+    expect(game.nextCustomerLook).toBeNull();
+    game.begin();
+    expect(game.nextCustomerLook).not.toBe(daily.look);
+  });
+
+  it("without customers both stay null", () => {
+    const game = createGame({ machine, faults, clock: fakeClock(), audio: silent, random: () => 0.5 });
+    game.newRound();
+    game.begin();
+    expect(game.customerLook).toBeNull();
+    expect(game.nextCustomerLook).toBeNull();
+  });
+});

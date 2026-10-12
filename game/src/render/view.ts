@@ -40,6 +40,7 @@ import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
 import { armAnchor, armSideOnTrip, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolboxArmSide, toolFor } from "./handpose.ts";
 import type { RenderAssets, Tool } from "./model.ts";
+import { createCustomerStage, type CustomerLoader } from "./customer.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
 import { createContactShadow, createFloor, createMachineShadow } from "./ground.ts";
@@ -130,7 +131,7 @@ function outlinePoints(root: Object3D): Vec3[] {
 }
 
 /** Throws if WebGL is not available, so main can show the "cannot run" message. `assets` come from loadRenderAssets. */
-export function mountRender(container: HTMLElement, game: Game, assets: RenderAssets = { model: null, environment: null, ground: null, hand: null }): RenderView {
+export function mountRender(container: HTMLElement, game: Game, assets: RenderAssets = { model: null, environment: null, ground: null, hand: null }, loadCustomer: CustomerLoader | null = null): RenderView {
   const machine: Machine = game.machine;
   const renderer = new WebGLRenderer({ antialias: window.devicePixelRatio < 2, powerPreference: "low-power" });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio)); // ADR 0006
@@ -215,6 +216,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
+
+  // The customer across the bench (plan 0015, ADRs 0015, 0023 and 0025): fixed in the scene, never picked, never in
+  // the hand's way. The round's look is downloaded as soon as the round is chosen (behind the briefing) and shown when
+  // it arrives; the next round's look downloads while this round is played.
+  const customer = loadCustomer ? createCustomerStage(scene, camera, loadCustomer) : null;
+  customer?.show(game.customerLook);
 
   /** A world point in the frame a part's group is placed in (the machine's own axes). */
   const toPartFrame = (pv: PartView, world: Vector3): Vector3 => (pv.group.parent ? pv.group.parent.worldToLocal(world.clone()) : world.clone());
@@ -1098,6 +1105,16 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       abortSequence();
       hand?.withdraw();
     }),
+    // The customer moves only with the clock and the cord (ADR 0007): no part event is passed to them.
+    game.events.on("started", () => {
+      customer?.show(game.customerLook);
+      customer?.event({ type: "started" });
+      customer?.request(game.nextCustomerLook);
+    }),
+    game.events.on("patience", (e) => customer?.event({ type: "patience", mood: e.mood })),
+    game.events.on("pulled", (e) => customer?.event({ type: "pulled", started: e.started })),
+    game.events.on("ended", () => customer?.event({ type: "ended" })),
+    game.events.on("left", () => customer?.event({ type: "left" })),
   ];
 
   // ---- Where the pointer is ----
@@ -1619,6 +1636,36 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         return { bench: box(bench, () => false), machine: box(view.root, (o) => hitMeshes.has(o)), nearEdgeY: rect.top + ((1 - near.y) / 2) * rect.height, kind: assets.bench ? "glb" : "box", screen: { width: rect.width, height: rect.height } };
       },
       /** How far (metres) the whole hand, every sample point, would have to come towards the camera to clear the machine. */
+      /**
+       * The customer (plan 0015 step 8): the look shown, the clip playing, whether it is drawn, the screen box (CSS px)
+       * of their joints above the bench top, the nearest joint's distance from the camera and the machine's farthest point's, and every
+       * look requested so far with when.
+       */
+      customer: () => {
+        if (!customer) return null;
+        const info = customer.info();
+        const rect = renderer.domElement.getBoundingClientRect();
+        let box: { left: number; top: number; right: number; bottom: number } | null = null;
+        let nearest = Infinity;
+        customer.root.updateMatrixWorld(true);
+        const v = new Vector3();
+        customer.root.traverse((o) => {
+          if (!(o as Object3D & { isBone?: boolean }).isBone || !info.shown) return;
+          o.getWorldPosition(v);
+          nearest = Math.min(nearest, v.distanceTo(camera.position));
+          // The screen box is of the joints above the bench top: below it the bench stands in front of them, and the
+          // feet seen through its open frame are under the controls.
+          if (v.y < BENCH.top) return;
+          v.project(camera);
+          const x = rect.left + ((v.x + 1) / 2) * rect.width;
+          const y = rect.top + ((1 - v.y) / 2) * rect.height;
+          box = box ? { left: Math.min(box.left, x), top: Math.min(box.top, y), right: Math.max(box.right, x), bottom: Math.max(box.bottom, y) } : { left: x, top: y, right: x, bottom: y };
+        });
+        const mbox = new Box3().setFromObject(view.root);
+        let farthest = 0;
+        for (const x of [mbox.min.x, mbox.max.x]) for (const y of [mbox.min.y, mbox.max.y]) for (const z of [mbox.min.z, mbox.max.z]) farthest = Math.max(farthest, camera.position.distanceTo(new Vector3(x, y, z)));
+        return { ...info, box, nearest: Number.isFinite(nearest) ? nearest : null, machineFarthest: farthest, now: Math.round(performance.now()) };
+      },
       handPush: () => (hand ? hand.push : null),
       handNeed: () => (hand && hand.visible ? collide(hand.samplePoints()) : 0),
       marker: "open-am-dev-hook",
@@ -1633,6 +1680,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
     last = now;
     tweens.update(dt);
+    customer?.show(game.customerLook);
+    customer?.update(dt);
     // Settle into the space above the controls, but never under a finger that is carrying or turning, nor between the
     // two taps of a double tap (0.9.4).
     if (cover !== coverWanted && !drag && !carry && !chip && !awaitingSecondTap(lastTap, now)) {

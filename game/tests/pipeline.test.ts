@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MOMENTS } from "../src/platform/interfaces/index.ts";
 import { checkAudio, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
-import { checkBench, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { CUSTOMER_CLIPS, CUSTOMER_NODES, checkBench, checkCustomer, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -202,6 +202,96 @@ describe("companion files", () => {
   it("the shipped environment map is within budget", () => {
     const bytes = readFileSync(join(root, "game", "public", "env", "workshop.hdr")).length;
     expect(checkFileSize("env", bytes, budgets.environmentBytes, true)).toEqual([]);
+  });
+});
+
+describe("the customers' budgets (ADR 0015, plan 0015)", () => {
+  it("each look is held to 15,000 triangles, 1.5 MB, one 1024 px texture set and 64 joints", () => {
+    expect(budgets.customers).toMatchObject({ trianglesPerLook: 15000, bytesPerLook: 1500000, texturePx: 1024, jointsPerLook: 64 });
+  });
+});
+
+describe("a customer's file (ADRs 0015 and 0023, plan 0015 step 4)", () => {
+  const looks = (JSON.parse(readFileSync(join(root, "game", "public", "customers.json"), "utf8")) as { customers: Array<{ look: string }> }).customers.map((c) => c.look);
+  const look = "man_young";
+  const customerJson = (opts: { roots?: string[]; tris?: number; joints?: number; clips?: string[]; images?: Array<[number, number]>; extra?: string[]; loose?: string[] } = {}) => {
+    const roots = opts.roots ?? [`customer_${look}`];
+    const joints = opts.joints ?? 53;
+    const images = opts.images ?? [];
+    const extra = opts.extra ?? CUSTOMER_NODES.map((n) => `${look}_${n}`);
+    const under = [roots.length, ...extra.map((_, i) => roots.length + 1 + i)];
+    return {
+      scene: 0,
+      scenes: [{ nodes: [...roots.map((_, i) => i), ...(opts.loose ?? []).map((_, i) => roots.length + 1 + extra.length + i)] }],
+      nodes: [
+        ...roots.map((name, i) => ({ name, ...(i === 0 ? { children: under } : {}) })),
+        { name: `${look}_body`, mesh: 0, skin: 0 },
+        ...extra.map((name) => ({ name })),
+        ...(opts.loose ?? []).map((name) => ({ name })),
+      ],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      accessors: [{ count: (opts.tris ?? 100) * 3 }, { count: (opts.tris ?? 100) * 3 }],
+      skins: [{ joints: Array.from({ length: joints }, (_, i) => i) }],
+      animations: (opts.clips ?? CUSTOMER_CLIPS.map((c) => `${look}.${c}`)).map((name) => ({ name })),
+      images: images.map((_, i) => ({ bufferView: i, mimeType: "image/png" })),
+      bufferViews: images.map((_, i) => ({ byteOffset: i * 32, byteLength: 32 })),
+    };
+  };
+  const png = (w: number, h: number) => {
+    const b = new Uint8Array(32);
+    b.set([0x89, 0x50, 0x4e, 0x47], 0);
+    new DataView(b.buffer).setUint32(16, w);
+    new DataView(b.buffer).setUint32(20, h);
+    return b;
+  };
+  const check = (json: object, bin?: Uint8Array, name = look) => checkCustomer(readGlb(makeGlb(json, bin)), name, looks, budgets).errors.join(" ");
+
+  it("needs both hands' grip points and the notes under the root (plan 0017 step 1)", () => {
+    expect(CUSTOMER_CLIPS).toContain("pay_leave");
+    expect(CUSTOMER_CLIPS).toContain("storm_off");
+    expect(check(customerJson({ clips: CUSTOMER_CLIPS.filter((c) => c !== "storm_off").map((c) => `${look}.${c}`) }))).toMatch(/no clip "man_young.storm_off"/);
+    expect(check(customerJson({ clips: CUSTOMER_CLIPS.filter((c) => c !== "pay_leave").map((c) => `${look}.${c}`) }))).toMatch(/no clip "man_young.pay_leave"/);
+    expect(check(customerJson({ extra: [`${look}_grip_l`, `${look}_notes`] }))).toMatch(/no node "man_young_grip_r"/);
+    expect(check(customerJson({ extra: [`${look}_grip_r`, `${look}_grip_l`] }))).toMatch(/no node "man_young_notes"/);
+    expect(check(customerJson({ extra: [`${look}_grip_r`, `${look}_notes`], loose: [`${look}_grip_l`] }))).toMatch(/"man_young_grip_l" must be under "customer_man_young"/);
+  });
+
+  it("every look in customers.json has a name the check accepts, and a good file passes", () => {
+    expect(looks).toEqual(["woman_market", "man_kaftan", "man_young"]);
+    expect(checkCustomer(readGlb(makeGlb(customerJson())), look, looks, budgets).errors).toEqual([]);
+  });
+
+  it("an unknown look, a misnamed root and an extra root node are errors", () => {
+    expect(check(customerJson({ roots: ["customer_man_old"] }), undefined, "man_old")).toMatch(/not a look in customers.json/);
+    expect(check(customerJson({ roots: ["Armature"] }))).toMatch(/one root node named "customer_man_young"/);
+    expect(check(customerJson({ roots: [`customer_${look}`, "Light"] }))).toMatch(/found customer_man_young, Light/);
+  });
+
+  it("every clip of plan 0015 must be there; a missing one is named", () => {
+    const missing = CUSTOMER_CLIPS.filter((c) => c !== "leaving").map((c) => `${look}.${c}`);
+    expect(check(customerJson({ clips: missing }))).toMatch(/no clip "man_young.leaving"/);
+    expect(check(customerJson({ clips: CUSTOMER_CLIPS.map((c) => `woman_market.${c}`) }))).toMatch(/no clip "man_young.idle"/);
+    const extra = checkCustomer(readGlb(makeGlb(customerJson({ clips: [...CUSTOMER_CLIPS.map((c) => `${look}.${c}`), `${look}.dance`] }))), look, looks, budgets);
+    expect(extra.errors).toEqual([]);
+    expect(extra.warnings.join(" ")).toMatch(/man_young.dance/);
+  });
+
+  it("a look over its triangles, joints, bytes or texture size is an error", () => {
+    expect(check(customerJson({ tris: 15001 }))).toMatch(/15001 triangles, over its budget of 15000/);
+    expect(check(customerJson({ tris: 15000 }))).toBe("");
+    expect(check(customerJson({ joints: 65 }))).toMatch(/65 joints, over its budget of 64/);
+    expect(check(customerJson({ joints: 0 }))).not.toMatch(/joints, over/);
+    const big = { ...readGlb(makeGlb(customerJson())), byteLength: 1_500_001 };
+    expect(checkCustomer(big, look, looks, budgets).errors.join(" ")).toMatch(/over its 1.5 MB budget/);
+    const bin = new Uint8Array(64);
+    bin.set(png(1024, 1024), 0);
+    bin.set(png(2048, 1024), 32);
+    expect(check(customerJson({ images: [[1024, 1024], [2048, 1024]] }), bin)).toMatch(/image 1 is 2048 x 1024, over 1024 px/);
+  });
+
+  it("a file with no skeleton is an error", () => {
+    const json = { ...customerJson(), skins: [] };
+    expect(check(json)).toMatch(/no skin/);
   });
 });
 

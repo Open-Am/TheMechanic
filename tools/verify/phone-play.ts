@@ -14,6 +14,11 @@
 // sound files), the vibrations, a blocked part and the walk-out silent, and mute kept over a reload. Plan 0016 adds the
 // workbench: the bench under the machine, the generator's share of the width at both phone sizes, a customer's head
 // line under the timer, a sideways drag turning the machine and not the camera, and the toolbox on the bench's left end.
+// Plan 0015 adds the customer: in view at both sizes with the head under the timer and above the machine, farther than
+// the machine, never picked (a tap does nothing, a drag turns the machine), idle at the start and unmoved by a part
+// coming off, failed_pull on a failed pull, pleased on a fix, annoyed then leaving on the walk-out, the next customer's
+// file requested during the round, and a missing and a late file playing without a figure. Screenshots of each person
+// at both sizes (OPEN_AM_CUSTOMER_SHOTS=<dir> to put them elsewhere).
 // Exits 1 on any failure.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -1053,6 +1058,154 @@ async function watchTrip(id: string, label: string, shot: string | null, interru
   await load(url);
 }
 
+
+// The customer (plan 0015 step 9, ADRs 0007, 0015, 0023 and 0025).
+interface CustomerNow {
+  look: string | null;
+  clip: string | null;
+  shown: boolean;
+  box: { left: number; top: number; right: number; bottom: number } | null;
+  nearest: number | null;
+  machineFarthest: number;
+  requests: Array<{ look: string; at: number; state: string }>;
+  now: number;
+}
+const customerNow = () => evaluate<CustomerNow | null>("window.__openAmDevRender.customer()");
+const customerChecks: string[] = [];
+const customerShots = process.env.OPEN_AM_CUSTOMER_SHOTS ?? outDir;
+mkdirSync(customerShots, { recursive: true });
+const LOOKS = (JSON.parse(readFileSync(join(root, "game", "public", "customers.json"), "utf8")) as { customers: Array<{ look: string }> }).customers.map((c) => c.look);
+/** A screenshot for the owner, without the diagnostic panel over the customer's face. */
+async function shotTo(dir: string, name: string): Promise<void> {
+  await evaluate("(() => { const d = document.querySelector('[data-marker=\"open-am-diagnostic-overlay\"]'); if (d) d.style.visibility = 'hidden'; })()");
+  await sleep(100);
+  const { data } = await send<{ data: string }>("Page.captureScreenshot", { format: "png" });
+  writeFileSync(join(dir, `${name}.png`), Buffer.from(data, "base64"));
+  await evaluate("(() => { const d = document.querySelector('[data-marker=\"open-am-diagnostic-overlay\"]'); if (d) d.style.visibility = ''; })()");
+}
+async function customerShown(ms = 30000): Promise<CustomerNow> {
+  return waitFor("the customer in the scene", async () => {
+    const c = await customerNow();
+    return c && c.shown && c.box ? c : null;
+  }, ms);
+}
+const controlsTop = () => evaluate<number>("document.querySelector('.controls').getBoundingClientRect().top");
+{
+  const seenAt = new Map<string, Set<string>>();
+  try {
+    for (const [w, h] of [[390, 844], [360, 640]] as const) {
+      const size = `${w}x${h}`;
+      await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 2, mobile: true });
+      const seen = new Set<string>();
+      seenAt.set(size, seen);
+      for (let attempt = 0; attempt < 12 && seen.size < LOOKS.length; attempt++) {
+        await load(url.replace("?diag", "?diag&patience=600"));
+        await toBriefing();
+        await beginRound();
+        const c = await customerShown();
+        await sleep(400);
+        const top = await controlsTop();
+        const where = `${c.look} at ${size}`;
+        if (!(c.box!.top > 70)) failures.push(`customer: ${where}: the head (${c.box!.top.toFixed(0)} px) is under the timer and meter`);
+        const m = await evaluate<{ machine: { top: number } | null }>("window.__openAmDevRender.benchRect()");
+        if (m.machine && !(c.box!.top < m.machine.top)) failures.push(`customer: ${where}: the head is not above the machine`);
+        if (!(c.box!.bottom < top)) failures.push(`customer: ${where}: above the bench they reach the controls (${c.box!.bottom.toFixed(0)} px, controls at ${top.toFixed(0)} px)`);
+        if (!(c.nearest !== null && c.nearest > c.machineFarthest)) failures.push(`customer: ${where}: nearer the camera (${c.nearest?.toFixed(2)} m) than the machine's far side (${c.machineFarthest.toFixed(2)} m)`);
+        if (c.clip !== "idle") failures.push(`customer: ${where}: the round started in ${c.clip}, not idle`);
+        if (!seen.has(c.look!)) {
+          seen.add(c.look!);
+          await shotTo(customerShots, `${c.look}-${size}`);
+        }
+        if (attempt === 0) {
+          // Never picked: a tap on them does nothing; a sideways drag across them turns the machine (ADR 0025).
+          const cx = (c.box!.left + c.box!.right) / 2;
+          const cy = c.box!.top + 0.25 * (c.box!.bottom - c.box!.top);
+          const before = await stageNow();
+          await tapAt(cx, cy);
+          await sleep(300);
+          const loose = await looseNow();
+          const carrying = await evaluate<string | null>("window.__openAmDevRender.carrying()");
+          if (loose.length || carrying) failures.push(`customer: ${where}: a tap on the customer picked ${loose.join(", ") || carrying}`);
+          else customerChecks.push(`a tap on the customer picks nothing (${size})`);
+          await drag(cx - 40, cy, cx + 40, cy, 12);
+          await sleep(200);
+          const after = await stageNow();
+          if (Math.abs(after.yaw - before.yaw) > 0.05) customerChecks.push(`a drag across the customer turns the machine (${size})`);
+          else failures.push(`customer: ${where}: a drag across the customer did not turn the machine`);
+          // The next round's file is requested during this round, after it started.
+          const reqs = (await customerNow())!.requests;
+          const later = reqs.filter((r) => r.look !== c.look);
+          if (later.length >= 1) customerChecks.push(`the next customer (${later.map((r) => r.look).join(", ")}) was requested during the round (${size})`);
+          else failures.push(`customer: ${where}: no next customer was requested during the round (requests ${JSON.stringify(reqs)})`);
+        }
+      }
+      if (seen.size < LOOKS.length) failures.push(`customer: at ${size} only ${[...seen].join(", ")} came up in 12 rounds`);
+      else customerChecks.push(`all three people in view at ${size} with the head under the timer, above the machine and farther than it`);
+    }
+  } catch (e) {
+    failures.push(`customer: ${(e as Error).message}`);
+    await screenshot("fail-customer");
+  }
+  await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
+
+  // Clips follow the clock and the cord only (ADR 0007): idle stays idle when a part comes off; a failed pull plays
+  // failed_pull; a fix plays pleased.
+  try {
+    await load(url.replace("?diag", "?diag&patience=600"));
+    await toBriefing();
+    await beginRound();
+    await customerShown();
+    await tapSelector(".pull");
+    const failed = await waitFor("failed_pull", async () => ((await customerNow())?.clip === "failed_pull" ? true : null), 3000).catch(() => false);
+    if (failed) customerChecks.push("a failed pull plays failed_pull");
+    else failures.push(`customer: a failed pull played ${(await customerNow())?.clip}`);
+    await waitFor("back to idle", async () => ((await customerNow())?.clip === "idle" ? true : null), 4000).catch(() => failures.push("customer: did not go back to idle after the failed pull"));
+    const mm = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
+    const fault = faultFile.faults.find((f) => f.id === mm?.[1]);
+    if (fault) {
+      const first = removalOrder(machine, fault)[0]!;
+      await pullOff(first);
+      await sleep(300);
+      const clip = (await customerNow())?.clip;
+      if (clip === "idle") customerChecks.push(`taking ${first} off leaves the customer in idle`);
+      else failures.push(`customer: taking ${first} off changed the clip to ${clip}`);
+      await putBack(first);
+    }
+    await solveRound();
+    const pleased = (await customerNow())?.clip;
+    if (pleased === "pleased") customerChecks.push("solving plays pleased");
+    else failures.push(`customer: solving played ${pleased}`);
+  } catch (e) {
+    failures.push(`customer clips: ${(e as Error).message}`);
+    await screenshot("fail-customer-clips");
+  }
+
+  // Fallback (ADR 0023): with every file missing, and with every file late, all rounds still play, no console errors.
+  for (const [label, query] of [["missing", LOOKS.map((l) => `nocustomer=${l}`).join("&")], ["late", LOOKS.map((l) => `slowcustomer=${l}:6000`).join("&")]] as const) {
+    const errorsBefore = consoleErrors.length;
+    try {
+      await load(url.replace("?diag", `?diag&patience=600&${query}`));
+      await toBriefing();
+      await beginRound();
+      const atStartRound = await customerNow();
+      if (atStartRound?.shown) failures.push(`customer: with every file ${label}, a figure showed at the start`);
+      if (label === "late") {
+        const c = await customerShown(20000).catch(() => null);
+        if (c) customerChecks.push(`a late file shows its figure when it arrives, in ${c.clip}`);
+        else failures.push("customer: a late file never showed its figure");
+      }
+      await solveRound();
+      if (label === "missing" && (await customerNow())?.shown) failures.push("customer: a figure showed with every file missing");
+      if (consoleErrors.length === errorsBefore) customerChecks.push(`with every file ${label} a round plays to the result with no console errors`);
+      else failures.push(`customer: with every file ${label}, console errors`);
+    } catch (e) {
+      failures.push(`customer ${label}: ${(e as Error).message}`);
+      await screenshot(`fail-customer-${label}`);
+    }
+  }
+  await load(url);
+}
+
 // Frame rate at 4x CPU throttle, read from the diagnostic overlay while the camera turns.
 if (failures.length === 0) {
   await toBriefing();
@@ -1074,10 +1227,28 @@ if (failures.length === 0) {
   await toBriefing();
   await tapSelector(".briefing .primary");
   await evaluate<void>("(window.__openAmDevAudio?.clear(), window.__vibrations = [], undefined)");
+  // The customer's clips through the walk-out (plan 0015): annoyed, then leaving before the result screen.
+  const walkClips: string[] = [];
+  let annoyedShot = false;
+  const watching = (async () => {
+    for (const end = Date.now() + 14000; Date.now() < end; ) {
+      const c = await customerNow().catch(() => null);
+      if (c?.clip && walkClips[walkClips.length - 1] !== c.clip) walkClips.push(c.clip);
+      if (c?.clip === "annoyed_idle" && !annoyedShot) {
+        annoyedShot = true;
+        await shotTo(customerShots, `${c.look}-annoyed-390x844`);
+      }
+      if (await evaluate<boolean>("!!document.querySelector('.result.walked')").catch(() => false)) break;
+      await sleep(80);
+    }
+  })();
   await sleep(3000);
   if (await evaluate<boolean>("!document.querySelector('.speech').hidden")) await screenshot("5-customer-line");
   else failures.push("walk-out: the customer said nothing at 50 percent patience");
   walkedOk = await waitFor("the walked result", () => evaluate<boolean>("!!document.querySelector('.result.walked')"), 12000).catch(() => false);
+  await watching;
+  if (walkClips.indexOf("annoyed") >= 0 && walkClips.indexOf("leaving") > walkClips.indexOf("annoyed")) customerChecks.push(`the walk-out played ${walkClips.join(", ")}`);
+  else failures.push(`customer: the walk-out played ${walkClips.join(", ") || "nothing"}, not annoyed then leaving`);
   if (walkedOk) await screenshot("6-walked");
   else failures.push("walk-out: no walked result screen after the patience ran out");
   const walkHeard = await evaluate<unknown[]>("window.__openAmDevAudio?.log() ?? []");
@@ -1199,6 +1370,7 @@ console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done
 if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");
 for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push(`fasteners: the ${t} was never seen in the hand`);
 console.log(`Bench: ${benchChecks.join("; ") || "not run"}`);
+console.log(`Customer: ${customerChecks.join("; ") || "not run"}`);
 if (benchChecks.length !== 4 && !failures.some((x) => x.startsWith("bench:"))) failures.push("bench: the bench checks did not all run");
 console.log(`Toolbox: ${toolboxChecks.join("; ") || "not run"}`);
 console.log(`Trips: ${tripsRead} watched frame by frame; the hand's path inside the machine's bounds on ${throughMachine.length}${throughMachine.length ? ` (${[...new Set(throughMachine)].join(", ")})` : ""}`);

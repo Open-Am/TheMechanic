@@ -51,5 +51,12 @@
     "triangles": 3000,
     "bytes": 300000,
     "texturePx": 1024
+  },
+  "customers": {
+    "_source": "ADR 0015: each customer, one file per look with its animations (plan 0015, ADR 0023). Joints: plan 0015 reading 4.",
+    "trianglesPerLook": 15000,
+    "bytesPerLook": 1500000,
+    "texturePx": 1024,
+    "jointsPerLook": 64
   }
 }
