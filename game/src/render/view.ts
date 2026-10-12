@@ -26,7 +26,7 @@ import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.ts";
 import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
 import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, overPath, pathLength, poseAt, resolveMotion, spannerSwing, TIMING, tripPlan, turnCounter, type Pose, type TripStep, type TripTool } from "./motion.ts";
-import { fitDistance, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
+import { DEFAULT_ORBIT, fitDistance, frameAbove, groundPlace, position, projectPoint, rotate, TOOLBOX_PLACE, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
 import { armAnchor, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolFor } from "./handpose.ts";
@@ -40,16 +40,9 @@ import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
 /** Minimum finger target, CSS px (docs/design/interface.md). */
 const FINGER_PX = 44;
 const FOV_DEG = 40;
-const DEFAULT_ORBIT = { azimuth: 0.55, polar: 1.12 };
 const BACKGROUND = "#1b1c1e";
 /** Seconds for the machine to settle halfway into its new place when the controls grow or shrink (release 0.9.3). */
 const REFRAME_HALF_LIFE = 0.08;
-/**
- * Where the toolbox stands (plan 0012, ADR 0021): on the ground `ahead` machine radii towards the default camera and
- * `left` radii to its left, so it shows below and to the left of the machine; turned by `turn` radians from facing the
- * default camera, so the camera looks along its trays and sees the tools in them.
- */
-const TOOLBOX_PLACE = { ahead: 1.85, left: 0.4, turn: -0.8 };
 
 export interface RenderView {
   /** A picture of one part as a data URL, for the tray. Null if it cannot be drawn. */
@@ -331,13 +324,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const nearMachine = machineBox.clone().expandByScalar(0.1);
   const bounds = (): Bounds => ({ min: [machineBox.min.x, machineBox.min.y, machineBox.min.z], max: [machineBox.max.x, machineBox.max.y, machineBox.max.z] });
   if (toolbox) {
-    // On the ground towards the default camera and to its left, turned so the camera looks into the trays (plan 0012).
-    const a = DEFAULT_ORBIT.azimuth;
-    const r = view.radius;
+    // On the ground to the left of the machine as the default camera sees it, cut by the screen edge so only its open
+    // back tray and the tools show beside the machine (plan 0012, release 0.11.1).
+    const place = groundPlace(DEFAULT_ORBIT.azimuth, view.radius, TOOLBOX_PLACE);
     const wrap = new Group();
     wrap.name = "toolbox_place";
-    wrap.position.set(Math.sin(a) * TOOLBOX_PLACE.ahead * r - Math.cos(a) * TOOLBOX_PLACE.left * r, 0, Math.cos(a) * TOOLBOX_PLACE.ahead * r + Math.sin(a) * TOOLBOX_PLACE.left * r);
-    wrap.rotation.y = a + TOOLBOX_PLACE.turn;
+    wrap.position.set(place.x, 0, place.z);
+    wrap.rotation.y = place.rotationY;
     wrap.add(toolbox.object);
     const size = new Box3().setFromObject(toolbox.object).getSize(new Vector3());
     wrap.add(createContactShadow(size.x * 0.9, size.z * 0.6));
@@ -456,7 +449,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   /** Records what each trip did, for the browser check (only while `watchTrips` is on, set from the dev hook). */
   let watchTrips = false;
-  const tripLog = { throughAt: [] as Array<{ kind: string; p: number; at: Vec3; points: Vec3[]; core: [number, number] }>, planned: 0, phases: [] as string[], reach: Infinity, toolAtBolts: Infinity, tools: [] as string[], through: [] as string[], legHidden: 0 };
+  const tripLog = { throughAt: [] as Array<{ kind: string; p: number; at: Vec3; points: Vec3[]; core: [number, number] }>, planned: 0, metres: { pointer: 0, machine: 0 }, phases: [] as string[], reach: Infinity, toolAtBolts: Infinity, tools: [] as string[], through: [] as string[], legHidden: 0 };
   function setPhase(kind: TripStep["kind"]): void {
     if (tripPhase !== kind) tripLog.phases.push(kind);
     tripPhase = kind;
@@ -543,7 +536,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const kit = tools;
     tripReach = Infinity;
     spannerBase.clear();
-    Object.assign(tripLog, { throughAt: [], planned: 0, phases: [], reach: Infinity, toolAtBolts: Infinity, tools: [], through: [], legHidden: 0 });
+    Object.assign(tripLog, { throughAt: [], planned: 0, metres: { pointer: 0, machine: 0 }, phases: [], reach: Infinity, toolAtBolts: Infinity, tools: [], through: [], legHidden: 0 });
     // The pointer's spot rides with the part, so the hand comes back to where the player touched it. A spot off the part
     // (a press on its finger-sized hit volume over empty space lies at the machine's depth, inside it) gives way to
     // the part's face the camera sees.
@@ -554,12 +547,10 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const spot = (): { at: Vector3; out: Vector3 | null } => ({ at: pv.group.localToWorld(spotLocal.clone()), out: spotOut ? spotOut.clone().transformDirection(pv.group.matrixWorld) : null });
     const toolOf = (t: TripTool): Tool => kit[t];
     const firstSlot = restPose(toolOf(toolFor(fasteners[0]!.kind)));
-    const plan = tripPlan(
-      fasteners.map((f) => f.kind),
-      mode,
-      { pointer: at.point.distanceTo(firstSlot.at), machine: pathLength(overPath(v3(firstSlot.at), null, v3(fastenerAt(fasteners[0]!)), v3(fastenerAxis(pv, fasteners[0]!)), bounds())) },
-    );
+    const metres = { pointer: at.point.distanceTo(firstSlot.at), machine: pathLength(overPath(v3(firstSlot.at), null, v3(fastenerAt(fasteners[0]!)), v3(fastenerAxis(pv, fasteners[0]!)), bounds())) };
+    const plan = tripPlan(fasteners.map((f) => f.kind), mode, metres);
     tripLog.planned = plan.total;
+    tripLog.metres = metres;
     // The fastener the tool last worked, as the trip runs; and whether the next fastener starts a tool's run.
     let lastIndex = -1;
     let runStart = false;
@@ -1364,11 +1355,15 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       hasToolbox: () => toolbox !== null,
       /** Metres from a tool to its resting place in the toolbox. */
       toolFromSlot: (name: "spanner" | "screwdriver") => (tools ? tools[name].object.position.distanceTo(restPose(tools[name]).at) : null),
-      /** Screen rectangles (CSS px) of the toolbox and of the machine as drawn, and the share of the toolbox in view. */
-      toolboxRect: () => {
+      /**
+       * Screen rectangles (CSS px) of the toolbox and of the machine as drawn, the share of the toolbox in view, and how
+       * many of its sampled points fall inside any of the `avoid` rectangles (the pull cord and the tray chips).
+       */
+      toolboxRect: (avoid: ReadonlyArray<{ left: number; top: number; right: number; bottom: number }> = []) => {
         if (!toolbox) return null;
         const rect = renderer.domElement.getBoundingClientRect();
         type R = { left: number; top: number; right: number; bottom: number };
+        let covered = 0;
         const box = (root: Object3D, skip: (o: Object3D) => boolean): { r: R | null; share: number } => {
           const v = new Vector3();
           let r: R | null = null;
@@ -1386,6 +1381,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
               const y = rect.top + ((1 - v.y) / 2) * rect.height;
               all++;
               if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) seen++;
+              if (root === toolbox.object && avoid.some((a) => x >= a.left && x <= a.right && y >= a.top && y <= a.bottom)) covered++;
               const c: R | null = r;
               r = c ? { left: Math.min(c.left, x), top: Math.min(c.top, y), right: Math.max(c.right, x), bottom: Math.max(c.bottom, y) } : { left: x, top: y, right: x, bottom: y };
             }
@@ -1393,6 +1389,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           return { r, share: all ? seen / all : 0 };
         };
         const tb = box(toolbox.object, () => false);
+        const underControls = covered;
         const mc = box(view.root, (o) => hitMeshes.has(o));
         // Points of the toolbox drawn where the machine is too (in front of it or behind it): the two overlap on screen.
         let overMachine = 0;
@@ -1415,7 +1412,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           const p = toolbox.slots[k].getWorldPosition(new Vector3()).project(camera);
           return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height };
         });
-        return { toolbox: tb.r, inView: tb.share, machine: mc.r, slots, overMachine: sampled ? overMachine / sampled : 0, screen: { width: rect.width, height: rect.height } };
+        return { toolbox: tb.r, inView: tb.share, machine: mc.r, slots, overMachine: sampled ? overMachine / sampled : 0, underControls, screen: { width: rect.width, height: rect.height } };
       },
       fasteners: (id: PartId) => (view.parts.get(id)?.fasteners ?? []).map((f) => f.pivot.position.distanceTo(f.rest)),
       // Share of the hand's sample points hidden behind the machine's surface from the camera: a hand that sinks into
