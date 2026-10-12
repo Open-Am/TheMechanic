@@ -33,3 +33,4 @@ Read this first. Open only the ADRs that touch your work. Status meanings: `prop
 | [0025](ADR-0025-the-workbench.md) | The generator on a workbench, the customer across it | accepted |
 | [0026](ADR-0026-customer-arrives-pays-and-leaves.md) | The customer brings the generator, and pays or storms off with it | accepted |
 | [0027](ADR-0027-pulling-the-cord-on-screen.md) | The mechanic pulls the cord on screen, and the engine runs | accepted |
+| [0028](ADR-0028-the-engine-running-sound.md) | The engine's sound runs as long as the engine does | accepted |

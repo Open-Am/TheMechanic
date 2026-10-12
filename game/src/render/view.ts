@@ -28,7 +28,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from "three";
-import { giveMoment, type Moment } from "../app/moments.ts";
+import { type Cue, giveMoment, type Moment } from "../app/moments.ts";
 import type { Game } from "../app/round.ts";
 import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.ts";
 import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, flickAhead, GESTURE, type PointerSample, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
@@ -92,7 +92,7 @@ export interface RenderView {
    * giving, a part seating home (ADR 0018, plan 0013 step 5). Supplied by main.ts, which plays them; render never
    * imports platform (ADR 0010). A part that cannot come off makes none.
    */
-  onMoment(fn: (moment: Moment) => void): void;
+  onMoment(fn: (moment: Moment | Cue) => void): void;
   /** True while the hand plays a loosening or doing-up sequence: a new put-back is ignored until it ends (ADR 0021). */
   busy(): boolean;
   /**
@@ -335,8 +335,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const seating = new Set<PartId>();
 
   /** Where the finger's moments go (plan 0013 step 5). Set by main.ts; nothing is told until then. */
-  let momentFn: ((m: Moment) => void) | null = null;
-  function moment(m: Moment): void {
+  let momentFn: ((m: Moment | Cue) => void) | null = null;
+  function moment(m: Moment | Cue): void {
     try {
       momentFn?.(m);
     } catch {
@@ -1286,6 +1286,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   function skipStory(): void {
     if (!story) return;
+    // ADR 0028: a tap that skips the ending stops the engine at once (main.ts winds it down when the ending ends).
+    if (story.clip === "pay_leave") moment("run-cut");
     if (story.clip === "arrive" && story.landed) {
       const landed = story.landed;
       story.landed = null;

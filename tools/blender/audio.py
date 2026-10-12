@@ -107,7 +107,10 @@ def main():
             skipped.append(f"{moment} ({'no source chosen' if not name else 'not downloaded: ' + name})")
             continue
         seconds, size = encode(scene, src, os.path.join(out_dir, f"{moment}.ogg"), row)
-        done.append(f"{moment} {seconds:.2f} s {size / 1000:.1f} KB")
+        # A looping row (ADR 0028) is encoded like any other, with sound kept either side of its loop points; the game
+        # repeats loopStart to loopEnd inside the decoded file, so the codec's edges never land on the seam.
+        loops = f", loops {row['loopStart'] - row['start']:.6f}–{row['loopEnd'] - row['start']:.6f} s into the file" if row.get("loop") else ""
+        done.append(f"{moment} {seconds:.2f} s {size / 1000:.1f} KB{loops}")
     print("AUDIO encoded: " + (", ".join(done) if done else "none"))
     if skipped:
         print("AUDIO skipped: " + ", ".join(skipped))

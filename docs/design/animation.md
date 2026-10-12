@@ -69,14 +69,14 @@ One person per round stands 0.35 m behind the bench's far edge, facing the mecha
 | `patience`, waiting (50 percent) | `waiting` (1.5 s: looks at the wrist) | `idle` |
 | `patience`, annoyed (20 percent) | `annoyed` (1 s: crosses the arms) | `annoyed_idle` (2 s loop, foot tapping) |
 | `pulled`, not started | `failed_pull` (1.2 s: hands to hips, head shakes) | the resting loop for the mood |
-| `ended` | `pay_leave` (3.6 s, plan 0017) | hidden, with the generator |
+| `ended` | `pay_leave` (4.3 s, plan 0017; smiling) | hidden, with the generator |
 | `left` | `storm_off` (2.5 s, plan 0017) | hidden, with the generator |
 
 A figure that arrives late starts in the resting loop for the current mood. `pleased` and `leaving` stay in the files but are no longer played.
 
 ## Bringing the generator, paying, storming off (plan 0017, ADRs 0026 and 0027)
 
-Start pressed: the customer walks in carrying the generator by its handle and sets it on the bench (`arrive`, 3.1 s). The clock and patience start when it lands, at 2.5 s (`app` `begin()`); they step back into `idle`. Fixed: `pay_leave` (3.6 s): the notes are in their right hand from 0.55 s and let go at 1.45 s; a hold point at 1.7 s, where plan 0018's running engine and its switch-off will go (`setPayHold`, ADR 0027); they take the generator at 2.0 s and walk off. Walked: the parts that were off or loose snap home at once, silently, the tray empties, and `storm_off` (2.5 s): a head shake, the generator snatched at 0.85 s, a fast walk off. While carried, the generator hangs from `<look>_grip_r` by its handle, turned along the line to `<look>_grip_l`; it eases onto the bench over the last 0.3 s before it lands, and before an ending reaches for it, it is turned back to the landed turn over 0.3 s. A tap anywhere during any of them skips to its end (the arrival lands at once). The result screen waits for the ending, at most 4 s. Without a figure, the round begins at Start and ends as before. Times are in `render/customerpose.ts` (`STORY`).
+Start pressed: the customer walks in carrying the generator by its handle and sets it on the bench (`arrive`, 3.1 s). The clock and patience start when it lands, at 2.5 s (`app` `begin()`); they step back into `idle`. Fixed: `pay_leave` (4.3 s): they smile (the `smile` morph, full by 0.3 s) and nod; the notes are in their right hand from 0.55 s, held out at the height of the generator's top, and let go at 2.2 s; a hold point at 2.35 s, where plan 0018's running engine and its switch-off will go (`setPayHold`, ADR 0027); they take the generator at 2.7 s and walk off. `pleased` also smiles. Walked: the parts that were off or loose snap home at once, silently, the tray empties, and `storm_off` (2.5 s): a head shake, the generator snatched at 0.85 s, a fast walk off. While carried, the generator hangs from `<look>_grip_r` by its handle, turned along the line to `<look>_grip_l`; it eases onto the bench over the last 0.3 s before it lands, and before an ending reaches for it, it is turned back to the landed turn over 0.3 s. A tap anywhere during any of them skips to its end (the arrival lands at once). The result screen waits for the ending, at most 4 s. Without a figure, the round begins at Start and ends as before. Times are in `render/customerpose.ts` (`STORY`).
 
 ## Motion defaults
 
