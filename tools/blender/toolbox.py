@@ -9,8 +9,9 @@ hanging open beyond them, and the carrying handle over the middle. Worn: chipped
 things in it that the player never uses (a rag, a wire brush, sockets), so it reads as a working box.
 
 One root node `toolbox` (glTF axes, metres): origin on the ground under the middle of the body, the long side along X,
-the front tray towards +Z. Under it, two empty nodes where the tools rest in the front tray, each turned so a tool
-placed with the empty's transform lies in it:
+the front tray towards +Z. Under it, two empty nodes where the tools rest, each turned so a tool
+placed with the empty's transform lies in it. They lie side by side in the back tray, which the game turns towards the
+machine, so from the default camera they show just under the machine:
 
 - `slot_spanner`: the spanner's jaw centre; its local Z (the bolt axis) points up, its handle along +X.
 - `slot_screwdriver`: the screwdriver's tip; its shaft (local +Z) runs along -X.
@@ -39,17 +40,17 @@ BUDGET = common.BUDGETS["toolbox"]
 SLOTS = ("slot_spanner", "slot_screwdriver")
 
 # Dimensions, metres (glTF axes: X long side, Y up, Z front).
-W = 0.42  # body length
-BODY_H = 0.12
-BODY_D = 0.20
+W = 0.36  # body length
+BODY_H = 0.11
+BODY_D = 0.18
 WALL = 0.003
-TRAY_W = 0.40
-TRAY_H = 0.055
-TRAY_D = 0.10
-TRAY_Y = 0.13  # tray bottom, open
-TRAY_Z = 0.135  # tray centre, either side
-LID_D = 0.095
-HANDLE_Y = 0.25
+TRAY_W = 0.34
+TRAY_H = 0.05
+TRAY_D = 0.09
+TRAY_Y = 0.12  # tray bottom, open
+TRAY_Z = 0.12  # tray centre, either side
+LID_D = 0.085
+HANDLE_Y = 0.19
 
 
 def materials():
@@ -101,13 +102,13 @@ def body_parts(M):
 def tray_parts(M, side):
     z = side * TRAY_Z
     parts = [open_box((TRAY_W, TRAY_H, TRAY_D), (0, TRAY_Y + TRAY_H / 2, z), M["paint"])]
-    parts.append(box((WALL, TRAY_H - 0.012, TRAY_D - 2 * WALL), (0.14, TRAY_Y + TRAY_H / 2 - 0.004, z), M["paint"]))  # divider
+    parts.append(box((WALL, TRAY_H - 0.012, TRAY_D - 2 * WALL), (0.13, TRAY_Y + TRAY_H / 2 - 0.004, z), M["paint"]))  # divider
     # The lid, hinged on the tray's outer top edge and hanging open, sloping down and out.
     hinge = (0, TRAY_Y + TRAY_H, z + side * TRAY_D / 2)
     lid = box((TRAY_W + 0.006, 0.004, LID_D), (0, hinge[1], hinge[2] + side * LID_D / 2), M["paint"], bevel=0.0015, segments=1)
     lip = box((TRAY_W + 0.006, 0.012, 0.004), (0, hinge[1] - 0.006, hinge[2] + side * LID_D), M["paint"])
     for piece in (lid, lip):
-        rotate_about(piece, "x", side * 28, hinge)
+        rotate_about(piece, "x", side * 35, hinge)
     parts += [lid, lip, cyl(0.004, TRAY_W, hinge, "x", M["paint"], verts=6)]
     return parts
 
@@ -132,7 +133,7 @@ def arm_parts(M):
 
 
 def contents(M):
-    """Things in the box the player never uses: a rag in the body, a wire brush, sockets in the back tray."""
+    """Things in the box the player never uses: a rag in the body, a wire brush, sockets in the front tray."""
     parts = []
     # A crumpled rag spilling over the body's back edge.
     bpy.ops.mesh.primitive_cube_add(size=1, location=common.gl(-0.08, BODY_H - 0.005, -0.02))
@@ -161,20 +162,20 @@ def contents(M):
     for piece in (handle, bristles):
         rotate_about(piece, "y", 12, (0.08, 0, 0.025))
     parts += [handle, bristles]
-    # Three sockets standing in the back tray, a fourth lying in the front tray's end compartment.
+    # Three sockets standing in the front tray, a fourth lying in its end compartment.
     for i, x in enumerate((-0.15, -0.125, -0.1)):
-        s = cyl(0.009 + 0.0015 * i, 0.022, (x, TRAY_Y + WALL + 0.011, -TRAY_Z), "y", M["chrome"], verts=10)
-        cut(s, [cyl(0.0055 + 0.0012 * i, 0.03, (x, TRAY_Y + 0.03, -TRAY_Z), "y", M["chrome"], verts=6)])
+        s = cyl(0.009 + 0.0015 * i, 0.022, (x, TRAY_Y + WALL + 0.011, TRAY_Z), "y", M["chrome"], verts=10)
+        cut(s, [cyl(0.0055 + 0.0012 * i, 0.03, (x, TRAY_Y + 0.03, TRAY_Z), "y", M["chrome"], verts=6)])
         parts.append(s)
-    parts.append(cyl(0.01, 0.024, (0.17, TRAY_Y + WALL + 0.01, TRAY_Z + 0.02), "z", M["chrome"], verts=10))
+    parts.append(cyl(0.01, 0.024, (0.13 + 0.015, TRAY_Y + WALL + 0.01, TRAY_Z - 0.01), "z", M["chrome"], verts=10))
     return parts
 
 
-# Where the tools rest in the front tray (glTF), and their axes: see the module docstring.
+# Where the tools rest in the back tray (glTF), and their axes: see the module docstring.
 FLOOR = TRAY_Y + WALL
 SLOT_POSES = {
-    "slot_spanner": ((0.0, FLOOR + 0.003, TRAY_Z - 0.02), (1, 0, 0), (0, 0, -1), (0, 1, 0)),
-    "slot_screwdriver": ((-0.005, FLOOR + 0.0132, TRAY_Z + 0.023), (0, 0, 1), (0, 1, 0), (-1, 0, 0)),
+    "slot_spanner": ((-0.07, FLOOR + 0.003, -TRAY_Z - 0.02), (1, 0, 0), (0, 0, -1), (0, 1, 0)),
+    "slot_screwdriver": ((0.09, FLOOR + 0.0132, -TRAY_Z + 0.02), (0, 0, 1), (0, 1, 0), (-1, 0, 0)),
 }
 
 # glTF axes from Blender axes: gl = C @ bl.
