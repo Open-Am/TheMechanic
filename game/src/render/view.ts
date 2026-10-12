@@ -1476,14 +1476,14 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       const sw = worldOf(pullNodes.switch);
       const front = machineDir(0, 0, 1);
       if (sw && t >= r.pocketed && t < r.press) hand?.point(sw.clone().addScaledVector(front, 0.01), front);
-      if (sw && t >= r.press && t < r.pressed + 0.15) hand?.grab(sw, front, "pinch");
+      if (sw && t >= r.press && t < r.pressed + STARTUP.pressHold) hand?.grab(sw, front, "pinch");
       if (pullNodes.switch) {
         const rest = nodeRest.get(pullNodes.switch)!;
         pullNodes.switch.quaternion.copy(rest.q).multiply(new Quaternion().setFromAxisAngle(AXES.x, switchAngle(r, t)));
       }
       // The switch pressed: the engine winds down (ADR 0028's run-stop fades over the same 0.8 s as STARTUP.windDown).
       once(s, "fade", r.pressed, () => moment("run-stop"));
-      once(s, "hand-off-switch", r.pressed + 0.15, () => {
+      once(s, "hand-off-switch", r.pressed + STARTUP.pressHold, () => {
         hand?.open();
         hand?.withdraw();
       });

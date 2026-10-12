@@ -52,6 +52,8 @@ export const STARTUP = {
   /** The hand moves from the pocket to the red switch and presses it; the rocker flips by switchAngle about X. */
   switchReach: 0.45,
   press: 0.15,
+  /** The hand stays on the switch this long after the press, so the press is seen, then lets go. */
+  pressHold: 0.4,
   switchAngle: -16 * DEG,
   /** The engine winds down after the press: the shake, the haze and the `start` sound fade out (about 0.8 s). */
   windDown: 0.8,
@@ -349,7 +351,7 @@ export function startupArmSide(r: RunTimes | null, t: number, notesSide: number,
     const u = Math.max(0, Math.min(1, (t - start) / ARM_GLIDE));
     return from + (to - from) * u * u * (3 - 2 * u);
   };
-  const handOff = r.pressed + 0.15;
+  const handOff = r.pressed + STARTUP.pressHold;
   if (t < r.payStart - ARM_GLIDE) return 1;
   if (t < r.pocketed) return glide(1, notesSide, r.payStart - ARM_GLIDE);
   if (t < handOff) return glide(notesSide, switchSide, r.pocketed);
@@ -370,7 +372,7 @@ export function startupArmLift(r: RunTimes | null, t: number): number {
     const u = Math.max(0, Math.min(1, (t - start) / ARM_GLIDE));
     return from + (to - from) * u * u * (3 - 2 * u);
   };
-  const handOff = r.pressed + 0.15;
+  const handOff = r.pressed + STARTUP.pressHold;
   if (t < r.pocketed) return 0;
   if (t < handOff) return glide(0, SWITCH_ARM_LIFT, r.pocketed);
   return glide(SWITCH_ARM_LIFT, 0, handOff);
