@@ -303,7 +303,8 @@ def authoring(base_name, group, image):
             # Old oil soaked in all over: a fainter, wider darkening, as on the benches in the Lagos photos.
             soak = math_node("MULTIPLY", ramp(noise(1.6, 3.0), 0.4, 0.65), 0.45)
             colour = mix_rgb(soak, colour, srgb_to_linear("#2a221b"))
-            rough_out = math_node("SUBTRACT", rough_out, math_node("MULTIPLY", stain, 0.4))
+            # Only a little glossier than dry wood: glossier stains mirrored the sky blue in the game (plan 0016).
+            rough_out = math_node("SUBTRACT", rough_out, math_node("MULTIPLY", stain, 0.15))
         wb = n.new("ShaderNodeBump")
         wb.inputs["Strength"].default_value = 0.25
         wb.inputs["Distance"].default_value = 0.002
