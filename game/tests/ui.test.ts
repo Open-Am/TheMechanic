@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { SYMPTOMS } from "../src/core/types.ts";
+import { CHECK_IDS, SYMPTOMS } from "../src/core/types.ts";
+import { initialState } from "../src/core/reducer.ts";
+import { unmetNeeds } from "../src/core/rules.ts";
 import type { ScoreBreakdown } from "../src/core/types.ts";
-import { DROP_REACH, dailyButtonText, formatTime, inDropZone, patienceMood, shareOffered, shareText, shareUrl, soundButton, starText, todayResultText } from "../src/ui/format.ts";
-import { SHARE, STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
-import { loadFaults } from "./helpers.ts";
+import { DROP_REACH, dailyButtonText, diagnosisRows, needsText, partInSentence, formatTime, inDropZone, patienceMood, shareOffered, shareText, shareUrl, soundButton, starText, todayResultText } from "../src/ui/format.ts";
+import { CHECK_NAMES, SHARE, STRINGS, SYMPTOM_TEXT, TEMPLATES } from "../src/ui/strings.ts";
+import { loadFaults, loadMachine } from "./helpers.ts";
 
 describe("formatTime", () => {
   it("shows minutes and two-digit seconds, rounding down", () => {
@@ -144,5 +146,47 @@ describe("the mute button (plan 0013 step 7)", () => {
     expect(soundButton(false)).toEqual({ label: "Sound on", pressed: "false" });
     expect(soundButton(true).label).toBe(STRINGS.soundOff);
     expect(soundButton(false).label).toBe(STRINGS.soundOn);
+  });
+});
+
+describe("the Check sheet's words (ADR 0029)", () => {
+  const machine = loadMachine();
+
+  it("every check has a name", () => {
+    for (const id of CHECK_IDS) expect(CHECK_NAMES[id].length, id).toBeGreaterThan(0);
+  });
+
+  it("part names read inside a sentence with a lower-case first letter", () => {
+    expect(partInSentence(machine, "spark_plug")).toBe("spark plug");
+    expect(partInSentence(machine, "alternator_cover")).toBe("alternator end cover");
+    expect(partInSentence(machine, "no_such_part")).toBe("no such part");
+  });
+
+  it("a greyed check says what it needs from what the player can see", () => {
+    expect(needsText(machine, { off: ["spark_plug"], on: [], allOn: false })).toBe("Needs the spark plug out");
+    expect(needsText(machine, { off: [], on: [], allOn: true })).toBe("Needs every part on");
+    expect(needsText(machine, { off: ["spark_plug"], on: ["recoil_starter"], allOn: false })).toBe("Needs the spark plug out and the recoil starter on");
+    expect(needsText(machine, { off: ["fuel_hose"], on: ["fuel_tank", "fuel_tap"], allOn: false })).toBe("Needs the fuel hose out, the fuel tank on and the fuel tap on");
+    expect(needsText(machine, { off: [], on: [], allOn: false })).toBe("");
+  });
+
+  it("the needs come from the machine's checks data at the start of a round", () => {
+    const s = initialState(machine);
+    expect(needsText(machine, unmetNeeds(machine, s, "look_plug")!)).toBe("Needs the spark plug out");
+    expect(needsText(machine, unmetNeeds(machine, s, "fuel_flow")!)).toBe("Needs the fuel hose out");
+  });
+
+  it("the result screen gains Checks and Clean job rows only when they are not zero", () => {
+    expect(diagnosisRows({ checkSeconds: 0, clean: false }, 10)).toEqual([]);
+    expect(diagnosisRows({ checkSeconds: 9, clean: true }, 10)).toEqual([
+      { cls: "row checks", label: STRINGS.checks, value: "+9 s" },
+      { cls: "row clean", label: STRINGS.cleanJob, value: "−10" },
+    ]);
+    expect(diagnosisRows({ checkSeconds: 0, clean: true }, 10).map((r) => r.cls)).toEqual(["row clean"]);
+  });
+
+  it("costs and the notes button read as seconds and a count", () => {
+    expect(TEMPLATES.seconds(3)).toBe("3 s");
+    expect(TEMPLATES.notesCount(0)).toBe("Notes (0)");
   });
 });

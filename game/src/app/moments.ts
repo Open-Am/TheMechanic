@@ -2,7 +2,7 @@
 // app plays its own moments from accepted actions; render reports the finger's moments, and main.ts passes them here.
 // render imports Moment from this file, never from platform (ADR 0010).
 
-import type { MotionType } from "../core/index.ts";
+import type { CheckId, MotionType, Symptom } from "../core/index.ts";
 import { MOMENTS, type Audio, type Moment } from "../platform/interfaces/index.ts";
 
 export { MOMENTS, type Moment };
@@ -85,6 +85,27 @@ export function giveMoment(type: MotionType | string | undefined): Moment | null
       return "give-pull";
     default:
       return "give-scrape";
+  }
+}
+
+/**
+ * The sounds a check makes (ADR 0029): only the existing moments, each with its delay in seconds. Listening, watching
+ * the smoke and the volts test pull the cord and run the engine: it fails (`no_start`) or catches (every other symptom;
+ * the clue line says whether it then dies, runs weak or gives no output, plan 0019 reading 4). The spark test pulls the
+ * cord with the plug out, so the engine cannot answer. Reading the plug and the fuel flow make no sound.
+ * The running loop and the switch press wait for plan 0018: a check never starts the engine's loop.
+ */
+export function checkCues(checkId: CheckId, symptom: Symptom): Array<[Moment, number]> {
+  switch (checkId) {
+    case "listen_pull":
+    case "look_smoke":
+    case "volts_test":
+      return [["cord", 0], [symptom === "no_start" ? "fail" : "start", CORD_SECONDS]];
+    case "spark_test":
+      return [["cord", 0]];
+    case "look_plug":
+    case "fuel_flow":
+      return [];
   }
 }
 

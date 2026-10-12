@@ -1,9 +1,9 @@
 // Result screen: score, its breakdown, stars, the best for this fault, Share for a fixed scored daily, next customer.
 
 import type { RoundRecord } from "../app/round.ts";
-import type { ScoreBreakdown } from "../core/index.ts";
+import { CLEAN_BONUS, type ScoreBreakdown } from "../core/index.ts";
 import { el } from "./dom.ts";
-import { formatTime, starText } from "./format.ts";
+import { diagnosisRows, formatTime, starText } from "./format.ts";
 import { STRINGS, TEMPLATES } from "./strings.ts";
 
 export type ShareRoute = "sheet" | "clipboard" | "none";
@@ -42,6 +42,8 @@ export function resultScreen(
       row(STRINGS.time, formatTime(score.elapsedSeconds * 1000)),
       row(STRINGS.wrongParts, String(score.wrongParts)),
       row(STRINGS.failedPulls, String(score.failedPulls)),
+      // ADR 0029: the checks' seconds and the clean-job bonus, each only when it is not zero.
+      ...diagnosisRows(score, CLEAN_BONUS).map((r) => row(r.label, r.value, r.cls)),
       // A walked round has no total: a quick walk-out would otherwise read as a good, low score.
       walked ? null : row(STRINGS.total, String(score.total), "row total"),
       best,

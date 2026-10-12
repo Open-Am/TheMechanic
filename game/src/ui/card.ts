@@ -1,5 +1,6 @@
 // The tray card: name, what it does, condition, and Fix for the unfixed culprit (docs/design/interface.md).
-// Condition text comes only from game.conditionOf (ADR 0010).
+// Condition text comes only from game.conditionOf (ADR 0010). The same card shows a check's result (ADR 0029), whose
+// text comes only from game.resultOf, passed in by ui/checks.ts.
 
 import type { Game } from "../app/round.ts";
 import type { PartId } from "../core/index.ts";
@@ -11,6 +12,8 @@ export const FIX_MS = 2000;
 
 export interface Card {
   open(partId: PartId): void;
+  /** Shows a check's result (ADR 0029): its name, and what it showed. `extra` is a button under it (the notes). */
+  openResult(title: string, text: string, extra?: HTMLElement | null): void;
   close(): void;
   readonly partId: PartId | null;
 }
@@ -76,6 +79,26 @@ export function createCard(host: HTMLElement, game: Game): Card {
       if (!game.propose({ type: "inspect", partId })) return;
       current = partId;
       render(partId);
+    },
+    openResult(title, text, extra = null) {
+      if (fixTimer) return;
+      sheet?.remove();
+      current = null;
+      const closeBtn = el("button", { class: "close", type: "button", "aria-label": STRINGS.close, text: "×" });
+      closeBtn.addEventListener("click", close);
+      const backdrop = el("div", { class: "backdrop" });
+      backdrop.addEventListener("click", close);
+      const body = el(
+        "div",
+        { class: "sheet check-result", role: "dialog", "aria-label": title },
+        closeBtn,
+        el("h2", { text: title }),
+        el("p", { class: "label", text: STRINGS.resultLabel }),
+        el("p", { class: "condition", text }),
+        extra,
+      );
+      sheet = el("div", { class: "card" }, backdrop, body);
+      host.appendChild(sheet);
     },
     close,
     get partId() {

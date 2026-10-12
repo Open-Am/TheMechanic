@@ -34,7 +34,7 @@ export function mountDiagnostic(root: HTMLElement, game: Game): void {
     lastRefusal = null;
     draw();
   });
-  for (const name of ["removed", "installed", "inspected", "fixed", "pulled", "ended", "patience", "left"] as const) game.events.on(name, draw);
+  for (const name of ["removed", "installed", "inspected", "fixed", "pulled", "checked", "ended", "patience", "left"] as const) game.events.on(name, draw);
 
   function draw(): void {
     if (collapsed) {
@@ -45,13 +45,17 @@ export function mountDiagnostic(root: HTMLElement, game: Game): void {
     const refusal = lastRefusal
       ? `${lastRefusal.action.type} ${lastRefusal.action.partId ?? ""} -> ${lastRefusal.reason}${lastRefusal.parts ? ` [${lastRefusal.parts.join(", ")}]` : ""}`
       : "none";
-    const log = game.log.map((a) => `${(a.t / 1000).toFixed(1)}s ${a.type} ${a.partId ?? ""}`).join("\n  ");
+    const log = game.log.map((a) => `${(a.t / 1000).toFixed(1)}s ${a.type} ${a.partId ?? a.checkId ?? ""}`).join("\n  ");
+    // ADR 0029: the checks possible now, and every result so far.
+    const results = game.notes().map((n) => `${n.checkId}: ${n.text}`).join("\n  ");
     panel.textContent = [
       `fps ${fps}  lighting ${document.documentElement.dataset.lighting ?? "-"}  model ${document.documentElement.dataset.model ?? "-"}  bench ${document.documentElement.dataset.bench ?? "-"}`,
       `fault ${game.faultId ?? "-"}  culprit ${game.culprit ?? "-"}  fixed ${s.fixed}`,
       `customer ${game.customerName ?? "-"}  patience ${Math.round(game.patience() * 100)}%  leaves at ${game.walkOutAt === null ? "-" : (game.walkOutAt / 1000).toFixed(1) + "s"}  outcome ${game.outcome ?? "-"}`,
       `last refusal: ${refusal}`,
       `removable: ${removableNow(game.machine, s).join(", ") || "-"}`,
+      `checks possible: ${game.checksPossible().join(", ") || "-"}`,
+      `checked:\n  ${results || "-"}`,
       `tray: ${s.tray.join(", ") || "-"}`,
       `log:\n  ${log || "-"}`,
     ].join("\n");

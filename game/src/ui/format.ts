@@ -1,7 +1,7 @@
 // Pure formatting helpers for the interface.
 
-import type { ScoreBreakdown } from "../core/index.ts";
-import { SHARE, STRINGS, TEMPLATES } from "./strings.ts";
+import type { Machine, PartId, ScoreBreakdown, UnmetNeeds } from "../core/index.ts";
+import { NEEDS, SHARE, STRINGS, TEMPLATES } from "./strings.ts";
 
 /** What the start screen needs to know about today's fault. */
 export interface DailyView {
@@ -75,6 +75,32 @@ export function shareUrl(pageHref: string, basePath: string): string {
   u.search = "";
   u.hash = "";
   return u.href;
+}
+
+/** A part's name as it reads inside a sentence: its name from machine.json with a lower-case first letter. */
+export function partInSentence(machine: Machine, id: PartId): string {
+  const name = machine.parts.find((p) => p.id === id)?.name ?? id.replace(/_/g, " ");
+  return name.charAt(0).toLowerCase() + name.slice(1);
+}
+
+/**
+ * What a greyed check still needs, from what the player can see (ADR 0029): "Needs the spark plug out", "Needs every
+ * part on". Parts to take off first, then parts to put on, then every part. Empty when nothing is needed.
+ */
+export function needsText(machine: Machine, needs: UnmetNeeds): string {
+  const phrases = [...needs.off.map((id) => NEEDS.off(partInSentence(machine, id))), ...needs.on.map((id) => NEEDS.on(partInSentence(machine, id)))];
+  if (needs.allOn) phrases.push(NEEDS.allOn);
+  if (phrases.length === 0) return "";
+  const list = phrases.length === 1 ? phrases[0]! : `${phrases.slice(0, -1).join(", ")}${NEEDS.and}${phrases[phrases.length - 1]!}`;
+  return NEEDS.needs(list);
+}
+
+/** The result screen's extra rows (ADR 0029): Checks when any were done, Clean job when earned. Label and value. */
+export function diagnosisRows(score: Pick<ScoreBreakdown, "checkSeconds" | "clean">, bonus: number): Array<{ cls: string; label: string; value: string }> {
+  const rows: Array<{ cls: string; label: string; value: string }> = [];
+  if (score.checkSeconds > 0) rows.push({ cls: "row checks", label: STRINGS.checks, value: `+${TEMPLATES.seconds(score.checkSeconds)}` });
+  if (score.clean) rows.push({ cls: "row clean", label: STRINGS.cleanJob, value: TEMPLATES.bonus(bonus) });
+  return rows;
 }
 
 /** Filled and empty stars, always three characters. */

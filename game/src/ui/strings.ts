@@ -1,6 +1,6 @@
 // Every player-facing string that is not in the machine data (brief section 3, AGENTS.md).
 
-import type { Symptom } from "../core/index.ts";
+import type { CheckId, Symptom } from "../core/index.ts";
 
 /** What the player reads when the cord is pulled (brief section 5.2). Wording from the brief. */
 export const SYMPTOM_TEXT: Record<Symptom, string> = {
@@ -46,6 +46,40 @@ export const STRINGS = {
   loadingLabel: "Loading the machine",
   soundOn: "Sound on",
   soundOff: "Sound off",
+  // Diagnosis checks (ADR 0029).
+  check: "Check",
+  checksTitle: "Check the engine",
+  checksHint: "Each check costs a few seconds and some of the customer's patience.",
+  resultLabel: "Result",
+  notes: "Notes",
+  notesTitle: "What you found",
+  notesEmpty: "No checks done yet.",
+  back: "Back",
+  checkFixed: "Not needed: you have fixed it.",
+  checks: "Checks",
+  cleanJob: "Clean job",
+} as const;
+
+/** The checks' names, as the Check sheet lists them (ADR 0029). */
+export const CHECK_NAMES: Record<CheckId, string> = {
+  listen_pull: "Listen to a pull",
+  look_smoke: "Watch the smoke",
+  look_plug: "Read the plug",
+  spark_test: "Spark test",
+  fuel_flow: "Fuel flow",
+  volts_test: "Volts test",
+};
+
+/**
+ * What a greyed check still needs, in words about what the player can see (ADR 0029, ADR 0007). Part names come from
+ * machine.json; needsText in format.ts puts the pieces together.
+ */
+export const NEEDS = {
+  off: (part: string) => `the ${part} out`,
+  on: (part: string) => `the ${part} on`,
+  allOn: "every part on",
+  and: " and ",
+  needs: (list: string) => `Needs ${list}`,
 } as const;
 
 /** Player-facing text that names someone. */
@@ -59,6 +93,12 @@ export const TEMPLATES = {
   todayFixed: (day: number, total: number, stars: string) => `Day ${day}: score ${total} ${stars}`,
   todayWalked: (day: number) => `Day ${day}: the customer walked`,
   todayUnfinished: (day: number) => `Day ${day}: Not finished`,
+  /** A check's cost on the Check sheet, and the checks' seconds on the result screen. */
+  seconds: (n: number) => `${n} s`,
+  /** The clean-job bonus on the result screen (ADR 0029). */
+  bonus: (n: number) => `−${n}`,
+  /** The Notes button with how many results it holds. */
+  notesCount: (n: number) => `Notes (${n})`,
 } as const;
 
 /** The share text's words (ADR 0005). Its three lines are put together by shareText in format.ts. */

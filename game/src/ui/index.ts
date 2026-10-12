@@ -6,6 +6,7 @@ import type { Game, RoundRecord } from "../app/round.ts";
 import type { ScoreBreakdown } from "../core/index.ts";
 import { briefingScreen, setBriefingLoading } from "./briefing.ts";
 import { createCard } from "./card.ts";
+import { createChecks } from "./checks.ts";
 import { el, speakerIcon } from "./dom.ts";
 import { formatTime, inDropZone, patienceMood, progressShare, shareOffered, shareText, soundButton } from "./format.ts";
 import { type ResultExtras, type ShareRoute, resultScreen } from "./result.ts";
@@ -61,15 +62,19 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   const speech = el("div", { class: "speech", role: "status", hidden: "" });
   const banner = el("div", { class: "banner", role: "status", hidden: "" });
   const pull = el("button", { class: "pull", type: "button", text: STRINGS.pullCord });
+  // The Check button beside Pull cord (ADR 0029): the same row, so the controls keep their height.
+  const checkButton = el("button", { class: "check-open", type: "button", text: STRINGS.check });
+  const actions = el("div", { class: "actions" }, pull, checkButton);
   const trayHost = el("div", { class: "tray-host" });
   const dropHint = el("div", { class: "drop-hint", hidden: "", text: STRINGS.dropHere });
-  const controls = el("div", { class: "controls" }, banner, pull, trayHost);
+  const controls = el("div", { class: "controls" }, banner, actions, trayHost);
   const mute = options.sound ? muteButton(options.sound) : null;
   const hud = el("div", { class: "hud", hidden: "" }, timer, mute, meter, speech, controls);
   const overlays = el("div", { class: "overlays" });
   root.append(hud, overlays);
 
   const card = createCard(overlays, game);
+  const checks = createChecks(overlays, game, card);
   const overMachine = (x: number, y: number) => {
     const hit = document.elementFromPoint(x, y);
     return hit !== null && stage.contains(hit);
@@ -107,6 +112,8 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   function update(): void {
     tray.refresh();
     pull.disabled = !game.running || game.state.tray.length > 0;
+    checkButton.disabled = !game.running;
+    checks.refresh();
   }
 
   function showScreen(screen: HTMLElement): void {
@@ -117,6 +124,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   /** The start screen: today's fault or free play (plan 0014 reading 1). */
   async function showStart(): Promise<void> {
     card.close();
+    checks.close();
     hud.hidden = true;
     speech.hidden = true;
     const status = await readDaily();
@@ -154,6 +162,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
 
   function newRound(choice?: Parameters<Game["newRound"]>[0]): void {
     card.close();
+    checks.close();
     const b = game.newRound(choice);
     symptomText = SYMPTOM_TEXT[b.symptom];
     hud.hidden = true;
@@ -163,6 +172,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   }
 
   pull.addEventListener("click", () => game.propose({ type: "pull" }));
+  checkButton.addEventListener("click", () => checks.open());
 
   // Start pressed: the HUD shows at 0:00 while the customer brings the generator (plan 0017); the clock starts when it
   // lands ("started").
@@ -181,6 +191,8 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
     update();
   });
   game.events.on("removed", update);
+  game.events.on("fixed", update);
+  game.events.on("checked", update);
   game.events.on("installed", (e) => {
     if (card.partId === e.partId) card.close();
     update();
@@ -195,6 +207,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   game.events.on("patience", (e) => say(e.line));
   game.events.on("ended", (e) => {
     card.close();
+    checks.close();
     banner.hidden = true;
     update();
     const name = game.customerName;
@@ -210,6 +223,7 @@ export function mountUi(root: HTMLElement, stage: HTMLElement, game: Game, optio
   });
   game.events.on("left", (e) => {
     card.close();
+    checks.close();
     banner.hidden = true;
     update();
     say(e.line);

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -12,8 +12,9 @@ import { removalOrder } from "../src/core/rules.ts";
 import { score } from "../src/core/score.ts";
 import type { CustomerFile } from "../src/core/types.ts";
 import type { LoopOptions, Moment, ScoreStore, StoredResult, VibrationPattern } from "../src/platform/interfaces/index.ts";
-import { CORD_SECONDS, CUES, MOMENTS, RUN, RUN_LOOP, VIBRATION, giveMoment, playCue, playMoment } from "../src/app/moments.ts";
-import { MOTION_TYPES } from "../src/core/types.ts";
+import { CORD_SECONDS, CUES, MOMENTS, RUN, RUN_LOOP, VIBRATION, checkCues, giveMoment, playCue, playMoment } from "../src/app/moments.ts";
+import { CHECK_IDS, MOTION_TYPES, SYMPTOMS } from "../src/core/types.ts";
+import { CHECK_SECONDS } from "../src/core/constants.ts";
 import { createDailyProvider } from "../src/platform/local/daily.ts";
 import { loadFaults, loadMachine } from "./helpers.ts";
 
@@ -813,5 +814,167 @@ describe("the customer brings the generator before the clock starts (plan 0017 s
     game.newRound();
     game.begin();
     expect(game.running).toBe(true);
+  });
+});
+
+describe("checks through the game (ADR 0029)", () => {
+  it("a check is logged with its id, emits checked, and its result comes from resultOf", () => {
+    const { game, clock, seen } = setup("dead_capacitor");
+    const checked: GameEvents["checked"][] = [];
+    game.events.on("checked", (e) => checked.push(e));
+    game.newRound();
+    expect(game.propose({ type: "check", checkId: "listen_pull" })).toBe(false); // not before begin
+    game.begin();
+    expect(game.resultOf("volts_test")).toBeNull();
+    clock.advance(1500);
+    expect(game.propose({ type: "check", checkId: "volts_test" })).toBe(true);
+    expect(game.log).toEqual([{ t: 1500, type: "check", checkId: "volts_test" }]);
+    expect(checked).toEqual([{ checkId: "volts_test", t: 1500, allOn: true }]);
+    expect(game.resultOf("volts_test")).toBe(faults.faults.find((f) => f.id === "dead_capacitor")!.clues.volts_test);
+    expect(game.resultOf("listen_pull")).toBeNull();
+    expect(seen).toEqual(["started"]); // checked is not one of the part events
+  });
+
+  it("a check can be done once; a refused one emits refused and logs nothing", () => {
+    const { game } = setup("fouled_plug");
+    const refused: string[] = [];
+    game.events.on("refused", (r) => refused.push(r.reason));
+    game.newRound();
+    game.begin();
+    expect(game.propose({ type: "check", checkId: "look_smoke" })).toBe(true);
+    expect(game.propose({ type: "check", checkId: "look_smoke" })).toBe(false);
+    expect(game.propose({ type: "check", checkId: "look_plug" })).toBe(false);
+    expect(refused).toEqual(["already_checked", "check_unavailable"]);
+    expect(game.log).toHaveLength(1);
+  });
+
+  it("checks() shows each check done, possible, waiting on parts, or not needed after the fix", () => {
+    const { game } = setup("fouled_plug");
+    game.newRound();
+    expect(game.checks().every((c) => c.status === "closed")).toBe(true);
+    expect(game.checksPossible()).toEqual([]);
+    game.begin();
+    const start = game.checks();
+    expect(start.map((c) => c.id)).toEqual([...CHECK_IDS]);
+    expect(start.map((c) => c.seconds)).toEqual(CHECK_IDS.map((id) => CHECK_SECONDS[id]));
+    expect(Object.fromEntries(start.map((c) => [c.id, c.status]))).toEqual({
+      listen_pull: "possible",
+      look_smoke: "possible",
+      look_plug: "needs",
+      spark_test: "needs",
+      fuel_flow: "needs",
+      volts_test: "possible",
+    });
+    expect(start.find((c) => c.id === "look_plug")!.needs).toEqual({ off: ["spark_plug"], on: [], allOn: false });
+    expect(game.checksPossible()).toEqual(["listen_pull", "look_smoke", "volts_test"]);
+
+    const plug = faults.faults.find((f) => f.id === "fouled_plug")!;
+    game.propose({ type: "check", checkId: "listen_pull" });
+    game.propose({ type: "remove", partId: "plug_cap" });
+    game.propose({ type: "remove", partId: "spark_plug" });
+    const out = game.checks();
+    expect(out.find((c) => c.id === "listen_pull")).toMatchObject({ status: "done", result: plug.clues.listen_pull });
+    expect(out.find((c) => c.id === "look_smoke")).toMatchObject({ status: "needs", needs: { off: [], on: [], allOn: true } });
+    expect(game.checksPossible()).toEqual(["look_plug", "spark_test"]);
+
+    game.propose({ type: "fix", partId: "spark_plug" });
+    expect(game.checks().filter((c) => c.status !== "done").every((c) => c.status === "fixed")).toBe(true);
+    expect(game.checksPossible()).toEqual([]);
+    expect(game.propose({ type: "check", checkId: "look_plug" })).toBe(false);
+  });
+
+  it("the notes are the results of the checks done, in order, built from the log", () => {
+    const { game, clock } = setup("fouled_plug");
+    game.newRound();
+    game.begin();
+    clock.advance(1000);
+    game.propose({ type: "check", checkId: "volts_test" });
+    clock.advance(1000);
+    game.propose({ type: "check", checkId: "listen_pull" });
+    const plug = faults.faults.find((f) => f.id === "fouled_plug")!;
+    expect(game.notes()).toEqual([
+      { checkId: "volts_test", t: 1000, text: plug.clues.volts_test },
+      { checkId: "listen_pull", t: 2000, text: plug.clues.listen_pull },
+    ]);
+    game.newRound();
+    expect(game.notes()).toEqual([]);
+  });
+
+  it("a check costs the customer's patience and can empty the meter", () => {
+    const customers = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "public", "customers.json"), "utf8")) as CustomerFile;
+    const one = { schema: 1, customers: [{ ...customers.customers[0]!, patience: 6 }] } satisfies CustomerFile;
+    const clock = fakeClock();
+    const game = createGame({ machine, faults, clock, audio: silent, random: () => 0, customers: one });
+    const left: number[] = [];
+    game.events.on("left", (e) => left.push(e.t));
+    game.newRound();
+    game.begin();
+    expect(game.walkOutAt).toBe(6000);
+    clock.advance(1000);
+    game.propose({ type: "check", checkId: "listen_pull" });
+    expect(game.walkOutAt).toBe((6 - CHECK_SECONDS.listen_pull) * 1000);
+    clock.advance(500);
+    game.propose({ type: "check", checkId: "volts_test" }); // 6 - 3 - 4 is under 1.5 s: they leave at this check
+    expect(left).toEqual([1500]);
+    expect(game.outcome).toBe("walked");
+  });
+
+  it("the score on ended counts the checks and the clean job", () => {
+    const { game } = setup("fouled_plug");
+    const ended: GameEvents["ended"][] = [];
+    game.events.on("ended", (e) => ended.push(e));
+    game.newRound();
+    game.begin();
+    game.propose({ type: "check", checkId: "listen_pull" });
+    game.propose({ type: "remove", partId: "plug_cap" });
+    game.propose({ type: "remove", partId: "spark_plug" });
+    game.propose({ type: "fix", partId: "spark_plug" });
+    game.propose({ type: "install", partId: "spark_plug" });
+    game.propose({ type: "install", partId: "plug_cap" });
+    game.propose({ type: "pull" });
+    const plug = faults.faults.find((f) => f.id === "fouled_plug")!;
+    expect(ended[0]!.score.checkSeconds).toBe(CHECK_SECONDS.listen_pull);
+    expect(ended[0]!.score.clean).toBe(true);
+    expect(ended[0]!.score).toEqual(score(machine, plug, ended[0]!.log));
+  });
+
+  it("plays only the existing moments: the cord and the engine's answer by symptom, nothing for the plug or the fuel", () => {
+    for (const symptom of SYMPTOMS) {
+      for (const id of ["listen_pull", "look_smoke", "volts_test"] as const) {
+        expect(checkCues(id, symptom), `${id} ${symptom}`).toEqual([["cord", 0], [symptom === "no_start" ? "fail" : "start", CORD_SECONDS]]);
+      }
+      expect(checkCues("spark_test", symptom)).toEqual([["cord", 0]]);
+      expect(checkCues("look_plug", symptom)).toEqual([]);
+      expect(checkCues("fuel_flow", symptom)).toEqual([]);
+    }
+    const { game, calls } = setup("fouled_plug");
+    game.newRound();
+    game.begin();
+    game.propose({ type: "check", checkId: "look_smoke" });
+    expect(calls).toEqual([["cord", 0], ["fail", CORD_SECONDS]]);
+  });
+
+  it("a development fault order plays those faults first, then picks at random", () => {
+    const clock = fakeClock();
+    const order = ["ghost", "dirty_air_filter", "fouled_plug"];
+    const game = createGame({ machine, faults, clock, audio: silent, random: () => 0, faultOrder: order });
+    game.newRound();
+    expect(game.faultId).toBe(pickFault(faults.faults, null, () => 0).id); // an unknown id falls back to a random pick
+    game.newRound();
+    expect(game.faultId).toBe("dirty_air_filter");
+    game.newRound();
+    expect(game.faultId).toBe("fouled_plug");
+    game.newRound();
+    expect(game.faultId).not.toBe("fouled_plug");
+    expect(order).toEqual(["ghost", "dirty_air_filter", "fouled_plug"]); // the list passed in is not changed
+  });
+
+  it("resultOf is the only path to clue text: no other layer reads a fault's clues", () => {
+    const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+    const walk = (d: string): string[] =>
+      readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith(".ts") ? [join(d, e.name)] : []));
+    for (const dir of ["ui", "render", "diagnostic", "platform"]) {
+      for (const file of walk(join(src, dir))) expect(readFileSync(file, "utf8"), file).not.toMatch(/\.clues\b|clueText/);
+    }
   });
 });

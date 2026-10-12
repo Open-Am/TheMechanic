@@ -135,7 +135,9 @@ async function start(): Promise<void> {
     },
     muted.get(),
   );
-  const game = createGame({ ...data, clock, audio, random: Math.random, scores, ...(customers ? { customers } : {}) });
+  // Development only: ?faults=a,b,c plays those faults first in free play, so the browser checks reach every fault.
+  const faultOrder = import.meta.env.DEV ? (new URLSearchParams(location.search).get("faults")?.split(",").filter(Boolean) ?? []) : [];
+  const game = createGame({ ...data, clock, audio, random: Math.random, scores, ...(customers ? { customers } : {}), ...(faultOrder.length ? { faultOrder } : {}) });
   // The engine's wind-down after the ending (ADR 0028); a new round (which cuts the engine) drops a pending one.
   let runOn: ReturnType<typeof setTimeout> | null = null;
   game.events.on("arriving", () => {

@@ -1233,6 +1233,11 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     game.events.on("removed", (e) => animateRemove(e.partId)),
     game.events.on("installed", (e) => animateInstall(e.partId)),
     game.events.on("pulled", () => pressHome()),
+    // A check that runs the whole engine (listen, smoke, volts: ADR 0029) needs it whole, as a pull does: loose parts
+    // go home. The pull animation, the testers and the hand's trip wait for plan 0018 and the testers model.
+    game.events.on("checked", (e) => {
+      if (e.allOn) pressHome();
+    }),
     game.events.on("started", () => {
       homeEverything();
       turntable.visible = true;

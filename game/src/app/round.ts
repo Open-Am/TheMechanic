@@ -2,12 +2,12 @@
 // to the reducer, keeps the action log, emits events and saves results (ADR 0022, ADR 0024).
 // render and ui only propose and listen. Condition text reaches them only through conditionOf.
 
-import { apply, conditionText, hasWalked, initialState, moodFor, patienceAt, scoreState, walkOutTime } from "../core/index.ts";
-import type { Action, ActionType, Customer, CustomerFile, CustomerMoment, Fault, FaultFile, FaultId, Machine, PartId, Refusal, RoundState, ScoreBreakdown, Symptom } from "../core/index.ts";
+import { apply, CHECK_IDS, CHECK_SECONDS, checkPossible, clueText, conditionText, hasWalked, initialState, moodFor, patienceAt, scoreState, unmetNeeds, walkOutTime } from "../core/index.ts";
+import type { Action, ActionType, CheckId, Customer, CustomerFile, CustomerMoment, Fault, FaultFile, FaultId, Machine, PartId, Refusal, RoundState, ScoreBreakdown, Symptom, UnmetNeeds } from "../core/index.ts";
 import type { Clock, ScoreStore, StoredResult } from "../platform/interfaces/index.ts";
 import { dailyCustomer, recordResult, recordUnfinished } from "./daily.ts";
 import { Emitter } from "./emitter.ts";
-import { CORD_SECONDS, type CuePlayer, playCue, playMoment } from "./moments.ts";
+import { CORD_SECONDS, type CuePlayer, checkCues, playCue, playMoment } from "./moments.ts";
 import { pickCustomer, pickFault } from "./faults.ts";
 
 export interface PartEvent {
@@ -27,6 +27,8 @@ export interface GameEvents {
   inspected: PartEvent;
   fixed: PartEvent;
   pulled: { t: number; started: boolean; failedPulls: number };
+  /** A check was done (ADR 0029). Its result comes only from resultOf. `allOn` is true when it ran the whole engine. */
+  checked: { checkId: CheckId; t: number; allOn: boolean };
   refused: Refusal;
   ended: { t: number; score: ScoreBreakdown; log: readonly Action[]; line: string | null };
   /** The customer's patience crossed a threshold (ADR 0015). Never sent for a part removal. */
@@ -65,6 +67,29 @@ export interface RoundRecord {
 export interface Proposal {
   type: ActionType;
   partId?: PartId;
+  /** For a check (ADR 0029). */
+  checkId?: CheckId;
+}
+
+/**
+ * A check as the interface shows it (ADR 0029): done (with its result), possible now, waiting on parts the player can
+ * see (`needs`), not needed once the fault is fixed, or closed while no round is running.
+ */
+export interface CheckView {
+  id: CheckId;
+  seconds: number;
+  status: "done" | "possible" | "needs" | "fixed" | "closed";
+  /** The result, when done. */
+  result: string | null;
+  /** What the machine still needs, when the status is "needs". */
+  needs: UnmetNeeds | null;
+}
+
+/** A check's result in the round's notes, in the order the checks were done. */
+export interface Note {
+  checkId: CheckId;
+  t: number;
+  text: string;
 }
 
 export interface GameDeps {
@@ -77,6 +102,11 @@ export interface GameDeps {
   random: () => number;
   /** Customers (ADR 0015). Without them there is no patience, as before. */
   customers?: CustomerFile;
+  /**
+   * Development only (the browser checks): free-play rounds play these faults in this order before picking at random
+   * again. main.ts passes it only in a development build.
+   */
+  faultOrder?: readonly FaultId[];
   /** Where results are saved (ADR 0005, ADR 0022). Without it nothing is saved. */
   scores?: ScoreStore;
 }
@@ -103,6 +133,14 @@ export interface Game {
   conditionOf(partId: PartId): string | null;
   /** The fix label if this part is the unfixed culprit and is in the tray, otherwise null. */
   fixLabel(partId: PartId): string | null;
+  /** The one path to a check's result (ADR 0029): the line it showed, once done this round, otherwise null. */
+  resultOf(checkId: CheckId): string | null;
+  /** Checks that can be done now (ADR 0029). Empty while no round is running. */
+  checksPossible(): CheckId[];
+  /** Every check, in order, as the Check sheet shows it. */
+  checks(): CheckView[];
+  /** The round's notes: the result of every check done, from the log (ADR 0029). */
+  notes(): Note[];
   /** Milliseconds since begin(), or 0 before it. Stops at the end of the round. */
   elapsed(): number;
   /** Checks the clock against the customer's patience: emits patience and left. Call once a frame. */
@@ -144,6 +182,12 @@ export function createGame(deps: GameDeps): Game {
   let choice: RoundChoice | null = null;
   let recorded: Promise<RoundRecord> | null = null;
   let arriving = false;
+  /** Faults still to play in the given order (development only). */
+  const order = [...(deps.faultOrder ?? [])];
+
+  function isRunning(): boolean {
+    return startedAt !== null && state.endedAt === null && walkedAt === null;
+  }
 
   function mode(): RoundRecord["mode"] {
     return choice === null ? "free" : choice.scored ? "daily" : "practice";
@@ -208,7 +252,9 @@ export function createGame(deps: GameDeps): Game {
         fault = daily;
         customer = deps.customers ? dailyCustomer(deps.customers.customers, c.day) : null;
       } else {
-        fault = pickFault(faults.faults, fault?.id ?? null, random);
+        const next = order.shift();
+        const forced = next === undefined ? undefined : faults.faults.find((f) => f.id === next);
+        fault = forced ?? pickFault(faults.faults, fault?.id ?? null, random);
         customer = deps.customers ? (nextCustomer ?? pickCustomer(deps.customers.customers, customer?.id ?? null, random)) : null;
       }
       choice = c ? { ...c } : null;
@@ -248,7 +294,9 @@ export function createGame(deps: GameDeps): Game {
     propose(p) {
       if (!fault || startedAt === null) return false;
       if (check()) return false; // the customer has gone; nothing more can happen this round
-      const action: Action = p.partId === undefined ? { t: now(), type: p.type } : { t: now(), type: p.type, partId: p.partId };
+      const action: Action = { t: now(), type: p.type };
+      if (p.partId !== undefined) action.partId = p.partId;
+      if (p.checkId !== undefined) action.checkId = p.checkId;
       const r = apply(machine, fault, state, action, customer ?? undefined);
       if (!r.ok) {
         events.emit("refused", r.refusal);
@@ -289,6 +337,14 @@ export function createGame(deps: GameDeps): Game {
           }
           break;
         }
+        case "check": {
+          const checkId = action.checkId!;
+          // The existing moments only (ADR 0029): the cord, and the engine's answer by the fault's symptom.
+          for (const [m, delay] of checkCues(checkId, fault.symptom)) playMoment(audio, m, delay);
+          events.emit("checked", { checkId, t: action.t, allOn: machine.checks[checkId]?.allOn === true });
+          check(); // a check costs patience (ADR 0029): it may change the mood, or empty the meter at once
+          break;
+        }
       }
       return true;
     },
@@ -300,6 +356,33 @@ export function createGame(deps: GameDeps): Game {
     fixLabel(partId) {
       if (!fault || state.fixed || partId !== fault.culprit || !state.tray.includes(partId)) return null;
       return fault.fix;
+    },
+
+    resultOf(checkId) {
+      return fault ? clueText(fault, state, checkId) : null;
+    },
+
+    checksPossible() {
+      if (!fault || !isRunning() || state.fixed) return [];
+      return CHECK_IDS.filter((id) => !state.checksDone.includes(id) && checkPossible(machine, state, id));
+    },
+
+    checks() {
+      const running = fault !== null && isRunning();
+      return CHECK_IDS.map((id): CheckView => {
+        const base = { id, seconds: CHECK_SECONDS[id], result: null, needs: null };
+        if (fault && state.checksDone.includes(id)) return { ...base, status: "done", result: clueText(fault, state, id) };
+        if (!running) return { ...base, status: "closed" };
+        if (state.fixed) return { ...base, status: "fixed" };
+        if (checkPossible(machine, state, id)) return { ...base, status: "possible" };
+        return { ...base, status: "needs", needs: unmetNeeds(machine, state, id) };
+      });
+    },
+
+    notes() {
+      if (!fault) return [];
+      const f = fault;
+      return log.filter((a) => a.type === "check" && a.checkId !== undefined).map((a) => ({ checkId: a.checkId!, t: a.t, text: clueText(f, state, a.checkId!) ?? "" }));
     },
 
     elapsed: now,
@@ -327,7 +410,7 @@ export function createGame(deps: GameDeps): Game {
       return log;
     },
     get running() {
-      return startedAt !== null && state.endedAt === null && walkedAt === null;
+      return isRunning();
     },
     get customerName() {
       return customer?.name ?? null;
