@@ -227,6 +227,7 @@ class Body:
         lw = group_weights(body, ["lips"])
         lips = [v.co for v, wi in zip(body.data.vertices, lw) if wi > 0.5]
         self.mouth = sum(lips, V()) / len(lips) if lips else V((0.0, self.head_front + 0.02, self.eye_z - 0.065))
+        self.mouth_half = max((abs(p.x) for p in lips), default=0.024)
         chin = [p for p in head_pts if abs(p.x) < 0.015 and p.y < self.mouth.y + 0.03 and p.z < self.mouth.z]
         self.chin_z = min((p.z for p in chin), default=self.mouth.z - 0.05)
         self.collar = None  # (centre y, height, radius) of a robe's neck opening, set by build_robe
@@ -1542,6 +1543,9 @@ def author_factory(look, lm):
             colour = N.mix(N.math("MULTIPLY", crevice, 1.2, clamp=True), colour, tuple(c * 0.45 for c in base))
             rough = sh["upper_rough"]
             bump_strength = 0.05
+        elif name == "teeth":
+            colour, rough = lin("#e6dfcf"), 0.35
+            bump_strength = 0.0
         elif name == "sole":
             colour, rough = lin("#2a2522"), 0.8
         else:
@@ -2101,9 +2105,106 @@ def hem_band(curve, outward, name, closed=True, width=0.016, thick=0.004, lift=0
     return mesh_object(bm, name, "top")
 
 
+# ---- The smile (2026-10-12, the owner: "I do not see a good smile when it starts no money being exchanged") ----
+
+# How far (metres) each part of the face moves at a full smile. Generous, as the face is about 70 px tall in the game.
+SMILE = {"corner_up": 0.015, "corner_back": 0.006, "corner_out": 0.005, "cheek_up": 0.009, "cheek_out": 0.0025,
+         "upper_lip_up": 0.002, "lower_lip_down": 0.007, "squint": 0.0025, "teeth_show": 0.017}
+# The teeth: a thin white band inside the mouth, hidden behind the lips until the smile brings it forward.
+TEETH = {"width": 0.04, "height": 0.008, "inside": 0.012, "segments": 10}
+
+
+def build_teeth(lm):
+    """A band of upper teeth, curved like the dental arch, just inside the closed lips (hidden at rest)."""
+    bm = bmesh.new()
+    m, w, h, n = lm.mouth, TEETH["width"], TEETH["height"], TEETH["segments"]
+    rows = []
+    for zz in (m.z - h * 0.35, m.z + h * 0.65):
+        row = []
+        for k in range(n + 1):
+            u = -1 + 2 * k / n
+            x = u * w / 2
+            y = m.y + TEETH["inside"] + 0.012 * u * u  # the arch curves back at the sides
+            row.append(bm.verts.new((x, y, zz)))
+        rows.append(row)
+    for k in range(n):
+        bm.faces.new((rows[0][k], rows[0][k + 1], rows[1][k + 1], rows[1][k]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in bm.faces:
+        if f.normal.y > 0:
+            f.normal_flip()
+    obj = mesh_object(bm, "teeth", "teeth")
+    g = obj.vertex_groups.new(name="head")
+    g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+    obj["teeth"] = True
+    return obj
+
+
+def add_smile(body, lm, dz):
+    """The `smile` shape key, made from the head itself: the mouth's corners up, back and out, the cheeks lifted, the
+    lips parted a little with the teeth brought forward between them, and a slight squint of the lower eyelids. Fields
+    fall off smoothly from each feature, so nothing tears. `dz` is how far the person was lifted onto their soles."""
+    me = body.data
+    co = np.zeros(len(me.vertices) * 3)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    mouth = np.array([lm.mouth.x, lm.mouth.y, lm.mouth.z + dz])
+    eye_z = lm.eye_z + dz
+    eye_x = abs(lm.eyes[0].x)
+    rel = co - mouth
+    ax = np.abs(rel[:, 0])
+    front = co[:, 1] < mouth[1] + 0.04
+    head = co[:, 2] > lm.z_neck + dz + 0.03
+
+    def bump(x, c, r):
+        return np.exp(-((x - c) / r) ** 2)
+
+    off = np.zeros_like(co)
+    on = (front & head).astype(float)
+    # The line of the lips curves up: everything around the mouth rises with the square of its distance from the middle,
+    # most at the corners, fading out past them into the cheek and above and below the lips.
+    half = lm.mouth_half * 0.82  # the lips group runs a little past the visible corners
+    u = ax / half
+    corner = np.where(u < 1.0, u * u, np.exp(-((u - 1.0) / 0.6) ** 2))
+    corner = corner * bump(rel[:, 2], 0.0, 0.016) * on
+    side = np.sign(rel[:, 0])
+    off[:, 2] += SMILE["corner_up"] * corner
+    off[:, 1] += SMILE["corner_back"] * corner
+    off[:, 0] += SMILE["corner_out"] * corner * side
+    # Cheeks: above and outside the corners, rounding up.
+    cheek = bump(ax, half + 0.012, 0.015) * bump(rel[:, 2], 0.028, 0.016) * on
+    off[:, 2] += SMILE["cheek_up"] * cheek
+    off[:, 1] -= SMILE["cheek_out"] * cheek
+    # Lips part a little: the middle of the upper lip up, the lower lip down.
+    mid = bump(ax, 0.0, half * 0.7) * on
+    off[:, 2] += SMILE["upper_lip_up"] * mid * bump(rel[:, 2], 0.006, 0.005)
+    off[:, 2] -= SMILE["lower_lip_down"] * mid * bump(rel[:, 2], -0.007, 0.006)
+    # A slight squint: the lower eyelids rise.
+    lid = bump(ax, eye_x, 0.014) * bump(co[:, 2], eye_z - 0.011, 0.005) * (co[:, 1] < lm.eyes[0].y + 0.01) * head
+    off[:, 2] += SMILE["squint"] * lid
+    # The teeth come forward between the parted lips.
+    zone_teeth = np.zeros(len(co), dtype=bool)
+    for poly in me.polygons:
+        if me.materials[poly.material_index].name.split("@")[0] == "teeth":
+            zone_teeth[list(poly.vertices)] = True
+    off[zone_teeth, 1] -= SMILE["teeth_show"]
+    # The teeth's band is lifted to sit between the parted lips.
+    off[zone_teeth, 2] += 0.0005
+    off[zone_teeth, 2] += (rel[zone_teeth, 2]) * 0.2
+    # And the teeth's corners follow the mouth's corners up a little.
+    off[zone_teeth, 2] += SMILE["corner_up"] * 0.4 * (ax[zone_teeth] / (TEETH["width"] / 2)) ** 2
+    if not body.data.shape_keys:
+        body.shape_key_add(name="Basis", from_mix=False)
+    key = body.shape_key_add(name="smile", from_mix=False)
+    key.data.foreach_set("co", (co + off).ravel())
+    moved = int((np.linalg.norm(off, axis=1) > 1e-4).sum())
+    print(f"Smile: {moved} vertices move, most {np.linalg.norm(off, axis=1).max() * 1000:.1f} mm; mouth half-width {half * 1000:.0f} mm")
+    return key
+
+
 # ---- Assembling a person ----
 
-MATERIAL_ORDER = ("skin", "feet", "lips", "nail", "eye", "top", "bottom", "wrapper", "headwear", "shoe", "sole")
+MATERIAL_ORDER = ("skin", "feet", "lips", "nail", "eye", "top", "bottom", "wrapper", "headwear", "shoe", "sole", "teeth")
 
 
 def build_person(look, preview=False):
@@ -2149,6 +2250,7 @@ def build_person(look, preview=False):
         protected.append(build_kufi(body, lm))
     if spec["head"] == "headtie":
         extras.append(build_knot(lm))
+    protected.append(build_teeth(lm))
     for o in extras:
         a = o.data.attributes.new("zone", "INT", "POINT")
         a.data.foreach_set("value", [zone_ids[o["zone"]]] * len(o.data.vertices))
@@ -2212,6 +2314,7 @@ def build_person(look, preview=False):
     # so the materials drawn by position do not move).
     if spec.get("shoes"):
         lift(body, rig, spec["shoes"]["sole"])
+    add_smile(body, lm, spec["shoes"]["sole"] if spec.get("shoes") else 0.0)
 
     author = author_factory(look, lm)
     for i, slot in enumerate(body.material_slots):
@@ -2220,7 +2323,7 @@ def build_person(look, preview=False):
             slot.material = author(slot.material.name, "preview", None) if preview else slot.material
     remove_unused_slots(body)
 
-    Clips(rig, look, lm, spec).make_all()
+    Clips(rig, look, lm, spec, body).make_all()
     add_grips_and_notes(rig, look, lm)
     return body, rig, lm, author
 
@@ -2308,7 +2411,8 @@ HAND_SPREAD = 0.05
 # When the generator and the notes change hands in each clip (seconds); the game reads these from STATUS.md.
 CLIP_TIMES = {
     "arrive": {"generator_released": 2.5},
-    "pay_leave": {"notes_shown": 0.55, "notes_released": 1.45, "generator_taken": 2.0},
+    # 2026-10-12: the notes held out longer, at the generator's top, for the mechanic's hand to take (plan 0018).
+    "pay_leave": {"notes_shown": 0.55, "notes_released": 2.2, "hold": 2.35, "generator_taken": 2.7, "length": 4.3},
     "storm_off": {"generator_taken": 0.85},
 }
 
@@ -2324,8 +2428,8 @@ def handle_point(side, gen_at=GEN_AT, yaw=0.0):
 def add_grips_and_notes(rig, look, lm):
     """Empties at each hand's grip point, parented to the hand bones (<look>_grip_r, <look>_grip_l), and the folded
     naira notes (<look>_notes) held in the right hand. The game hangs the generator from grip_r by its handle and shows
-    the notes during pay_leave; the notes are hidden in the game otherwise. The notes are our own design: three folded
-    notes in plain colours, no printing."""
+    the notes during pay_leave; the notes are hidden in the game otherwise. The notes are our own design: five notes in
+    green and purple with lighter middle bands, no printing."""
     bpy.context.view_layer.objects.active = rig
     rig.data.pose_position = "REST"
     bpy.context.view_layer.update()
@@ -2346,27 +2450,41 @@ def add_grips_and_notes(rig, look, lm):
         bpy.context.view_layer.update()
         e.matrix_world = Matrix.Translation(grip_at)
         out[side] = e
-    # The notes: three notes, each folded once, fanned a little, about 8 by 7 cm folded.
+    # The notes (2026-10-12, larger): a bundle of five notes, each 13 by 6.5 cm, bent softly along its length and fanned,
+    # held by one end so most of the bundle shows beyond the fingers. Green and purple, each with a lighter middle band,
+    # as Nigerian notes are coloured; our own design, no artwork, numbers or text. 120 triangles.
     bm = bmesh.new()
-    for k, (dz, ang) in enumerate(((0.0, -8.0), (0.003, 0.0), (0.006, 9.0))):
-        w, h, fold = 0.075, 0.068, 0.012
+    colours = (("#3f7a4a", "#b9cfa6"), ("#6a4b8f", "#cdbfdc"), ("#4f8d57", "#c4d8b0"), ("#7a5a9e", "#d6c9e2"), ("#3a6f60", "#b7d1c3"))
+    length, width, bend = 0.13, 0.065, 0.008
+    for k, ang in enumerate((-16.0, -8.0, 0.0, 8.0, 16.0)):
         rot = Matrix.Rotation(math.radians(ang), 4, "Y")
-        pts = [(-w / 2, 0, 0), (w / 2, 0, 0), (w / 2, fold, h * 0.5), (-w / 2, fold, h * 0.5), (w / 2, 0, h), (-w / 2, 0, h)]
-        vs = [bm.verts.new((rot @ V((x_, y_ + dz, z_ - h / 2))).to_tuple()) for x_, y_, z_ in pts]
-        f1 = bm.faces.new((vs[0], vs[1], vs[2], vs[3]))
-        f2 = bm.faces.new((vs[3], vs[2], vs[4], vs[5]))
-        f1.material_index = f2.material_index = k
+        dy = 0.0012 * k
+        # Three strips across the width (edge, middle band, edge), four segments along the length, the middle raised.
+        xs = (-width / 2, -width / 6, width / 6, width / 2)
+        zs = [length * i / 4 for i in range(5)]
+        grid = []
+        for z in zs:
+            row = []
+            for x in xs:
+                y = dy + bend * (1 - (2 * x / width) ** 2)
+                row.append(bm.verts.new((rot @ V((x, y, z - 0.03))).to_tuple()))
+            grid.append(row)
+        for i in range(4):
+            for j in range(3):
+                f = bm.faces.new((grid[i][j], grid[i][j + 1], grid[i + 1][j + 1], grid[i + 1][j]))
+                f.material_index = 2 * k + (1 if j == 1 else 0)
     me = bpy.data.meshes.new(f"{look}_notes")
     bm.to_mesh(me)
     bm.free()
-    for k, hexc in enumerate(("#8a6f9e", "#5f9a83", "#6c84a8")):
-        m = bpy.data.materials.new(f"notes_{k}")
-        m.use_nodes = True
-        bsdf = m.node_tree.nodes["Principled BSDF"]
-        bsdf.inputs["Base Color"].default_value = (*lin(hexc), 1)
-        bsdf.inputs["Roughness"].default_value = 0.7
-        m.use_backface_culling = False
-        me.materials.append(m)
+    for k, (base_c, band_c) in enumerate(colours):
+        for j, hexc in enumerate((base_c, band_c)):
+            m = bpy.data.materials.new(f"notes_{k}_{j}")
+            m.use_nodes = True
+            bsdf = m.node_tree.nodes["Principled BSDF"]
+            bsdf.inputs["Base Color"].default_value = (*lin(hexc), 1)
+            bsdf.inputs["Roughness"].default_value = 0.75
+            m.use_backface_culling = False
+            me.materials.append(m)
     notes = bpy.data.objects.new(f"{look}_notes", me)
     bpy.context.scene.collection.objects.link(notes)
     hb = rig.data.bones[f"{look}_hand_r"]
@@ -2377,7 +2495,7 @@ def add_grips_and_notes(rig, look, lm):
     g = out["r"].matrix_world.translation
     wrist = rig.matrix_world @ hb.head_local
     along = (g - wrist).normalized()
-    notes.matrix_world = Matrix.Translation(g + along * 0.02) @ along.to_track_quat("Z", "Y").to_matrix().to_4x4()
+    notes.matrix_world = Matrix.Translation(g) @ along.to_track_quat("Z", "Y").to_matrix().to_4x4()
     rig.data.pose_position = "POSE"
     tris = sum(len(p_.vertices) - 2 for p_ in me.polygons)
     print(f"{look}: grips {look}_grip_r and {look}_grip_l, notes {tris} triangles")
@@ -2542,8 +2660,8 @@ HIPS = merge(arms(n3(0.62, 0.22, -0.75), n3(-0.55, -0.15, -0.55), n3(-0.3, -0.1,
 
 
 class Clips:
-    def __init__(self, rig, look, lm, spec):
-        self.rig, self.look, self.lm, self.spec = rig, look, lm, spec
+    def __init__(self, rig, look, lm, spec, body=None):
+        self.rig, self.look, self.lm, self.spec, self.body = rig, look, lm, spec, body
         self.poser = Poser(rig, look)
         self.prefix = f"{look}_"
         self.root = self.prefix + "Root"
@@ -2573,6 +2691,27 @@ class Clips:
         Pp = pp.bone.matrix_local.to_3x3()
         pp.location = Pp.inverted() @ V(pelvis)
         pp.keyframe_insert("location", frame=frame, group=self.pelvis)
+
+    def smile(self, name, keys):
+        """The smile's weight over a clip: keys (seconds, weight), on the face's shape key, on an NLA track named like the
+        clip's so the exporter puts both in the one animation <look>.<name> (export_animation_mode NLA_TRACKS)."""
+        sk = self.body.data.shape_keys if self.body else None
+        if not sk or "smile" not in sk.key_blocks:
+            return
+        sk.animation_data_create()
+        action = bpy.data.actions.new(f"{self.look}.{name}.smile")
+        sk.animation_data.action = action
+        kb = sk.key_blocks["smile"]
+        for t, w in keys:
+            kb.value = w
+            kb.keyframe_insert("value", frame=round(t * FPS))
+        action.use_fake_user = True
+        track = sk.animation_data.nla_tracks.new()
+        track.name = f"{self.look}.{name}"
+        track.strips.new(action.name, 0, action)
+        track.mute = True
+        sk.animation_data.action = None
+        kb.value = 0.0
 
     def clip(self, name, keys, loop=False):
         """keys: (seconds, pose, root, pelvis). Makes the action <look>.<name> and puts it on its own NLA track."""
@@ -2666,6 +2805,7 @@ class Clips:
             (0.65, merge(clap_in, {"head": [("rot", X, 2)]})),
             (0.85, merge(clap_in, {"head": [("rot", X, 5)]})),
         ])
+        self.smile("pleased", [(0.0, 0.0), (0.2, 1.0), (0.85, 1.0)])
 
         stride = self.spec["stride"]
 
@@ -2764,21 +2904,29 @@ class Clips:
         # Pay and leave: a nod and smile, notes from the right pocket held out across the bench at the mechanic's hand
         # height and let go, both hands take the handle, lift, turn to the customer's left and walk off pleased.
         pocket = merge(R, legs_straight, {"ik_r": [((-0.17, -0.06, 0.92), pole["r"])]}, fingers(40))
-        # Held out beside the generator (on the customer's right, the mechanic's left), at the mechanic's hand height.
-        offer = merge(R, legs_straight, {"ik_r": [((-0.32, -0.6, 1.04), (-1.0, 0.3, -0.8))]}, fingers(30), lean(10), smile, {"spine_02": [("rot", Z, -8)]})
+        # Held out across the bench beside the generator (on the customer's right, the mechanic's left), at the height of
+        # the generator's top (the bench 0.78 m plus the generator 0.375 m), towards the mechanic, and held there until
+        # the mechanic's hand takes them (2026-10-12: "no money being exchanged").
+        offer = merge(R, legs_straight, {"ik_r": [((-0.3, -0.64, 1.17), (-1.0, 0.3, -0.8))]}, fingers(30), lean(12), smile, {"spine_02": [("rot", Z, -8)]})
+        offer_nod = merge(offer, {"head": [("rot", X, 7)]})
+        pt = CLIP_TIMES["pay_leave"]
         keys = [
             (0.0, base),
             (0.3, merge(base, nod)),
-            (0.55, pocket),
-            (1.0, offer, (0.0, (0, -0.12, 0))),
-            (1.45, offer, (0.0, (0, -0.12, 0))),
-            (1.7, merge(base, smile), (0.0, (0, -0.15, 0))),
-            (2.0, merge(R, legs_straight, hands(on_bench(y_near)), lean(16)), (0.0, (0, y_near, 0))),
-            (2.3, merge(R, legs_straight, hands(lift), lean(4), smile), (0.0, (0, y_near, 0))),
-            (2.55, carry_pose, (60.0, (0.05, y_near, 0))),
+            (pt["notes_shown"], pocket),
+            (1.0, offer, (0.0, (0, -0.14, 0))),
+            (1.5, offer_nod, (0.0, (0, -0.14, 0))),
+            (1.85, offer, (0.0, (0, -0.14, 0))),
+            (pt["notes_released"], offer, (0.0, (0, -0.14, 0))),
+            (pt["hold"], merge(base, smile, nod), (0.0, (0, -0.12, 0))),
+            (pt["generator_taken"], merge(R, legs_straight, hands(on_bench(y_near)), lean(16)), (0.0, (0, y_near, 0))),
+            (3.0, merge(R, legs_straight, hands(lift), lean(4), smile), (0.0, (0, y_near, 0))),
+            (3.25, carry_pose, (60.0, (0.05, y_near, 0))),
         ]
-        walk(keys, 2.7, 3.6, 0.15, 1.35, y_near, 90.0, extra=smile)
+        walk(keys, 3.4, pt["length"], 0.15, 1.35, y_near, 90.0, extra=smile)
         self.clip("pay_leave", keys)
+        # A real smile from the start of paying, held as they leave.
+        self.smile("pay_leave", [(0.0, 0.0), (0.3, 1.0), (pt["length"], 1.0)])
 
         # Storm off: head shakes, a quick step in, both hands snatch the handle, a sharp turn and a fast walk off.
         shake = lambda d: merge(base, {"head": [("rot", Z, d), ("rot", X, -3)]}, {"spine_02": [("rot", Z, d * 0.15)]})  # noqa: E731
@@ -3011,6 +3159,13 @@ def renders(look, rig, body, out_dir, tag):
             cam.data.lens = 70
         aim_camera(cam, at, target)
         render_to(os.path.join(out_dir, f"{look}-{view}{tag}.png"), *size)
+        if view == "face-front":
+            # The same face smiling (the smile shape key at full), to set beside the neutral one.
+            kb = body.data.shape_keys.key_blocks.get("smile") if body.data.shape_keys else None
+            if kb:
+                kb.value = 1.0
+                render_to(os.path.join(out_dir, f"{look}-face-front-smile{tag}.png"), *size)
+                kb.value = 0.0
 
     # Clip strips.
     if os.environ.get("CUSTOMER_FAST"):
@@ -3142,6 +3297,10 @@ def bench_strips(look, out_dir, frames=6):
             t = f / FPS
             ct = CLIP_TIMES.get(clip, {})
             notes.hide_render = not (clip == "pay_leave" and ct["notes_shown"] <= t < ct["notes_released"])
+            body = bpy.data.objects.get(f"{look}_body")
+            kb = body.data.shape_keys.key_blocks.get("smile") if body and body.data.shape_keys else None
+            if kb:
+                kb.value = min(1.0, t / 0.3) if clip == "pay_leave" else 0.0
             bpy.context.view_layer.update()
             place_generator(gen, look, clip, t)
             path = os.path.join(out_dir, f"_{look}-{clip}-{f}.png")
@@ -3271,9 +3430,11 @@ def export(looks):
             export_skins=True,
             export_all_influences=False,
             export_def_bones=False,
-            export_morph=False,
+            export_morph=True,
+            export_morph_normal=False,
             export_animations=True,
-            export_animation_mode="ACTIONS",
+            # NLA tracks, so a clip's skeleton track and its smile track (same name) become one animation.
+            export_animation_mode="NLA_TRACKS",
             export_anim_single_armature=True,
             export_force_sampling=True,
             export_optimize_animation_size=True,

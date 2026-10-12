@@ -214,7 +214,7 @@ describe("the customers' budgets (ADR 0015, plan 0015)", () => {
 describe("a customer's file (ADRs 0015 and 0023, plan 0015 step 4)", () => {
   const looks = (JSON.parse(readFileSync(join(root, "game", "public", "customers.json"), "utf8")) as { customers: Array<{ look: string }> }).customers.map((c) => c.look);
   const look = "man_young";
-  const customerJson = (opts: { roots?: string[]; tris?: number; joints?: number; clips?: string[]; images?: Array<[number, number]>; extra?: string[]; loose?: string[] } = {}) => {
+  const customerJson = (opts: { roots?: string[]; tris?: number; joints?: number; clips?: string[]; images?: Array<[number, number]>; extra?: string[]; loose?: string[]; morphs?: string[] } = {}) => {
     const roots = opts.roots ?? [`customer_${look}`];
     const joints = opts.joints ?? 53;
     const images = opts.images ?? [];
@@ -229,7 +229,7 @@ describe("a customer's file (ADRs 0015 and 0023, plan 0015 step 4)", () => {
         ...extra.map((name) => ({ name })),
         ...(opts.loose ?? []).map((name) => ({ name })),
       ],
-      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }], extras: { targetNames: opts.morphs ?? ["smile"] } }],
       accessors: [{ count: (opts.tris ?? 100) * 3 }, { count: (opts.tris ?? 100) * 3 }],
       skins: [{ joints: Array.from({ length: joints }, (_, i) => i) }],
       animations: (opts.clips ?? CUSTOMER_CLIPS.map((c) => `${look}.${c}`)).map((name) => ({ name })),
@@ -245,6 +245,12 @@ describe("a customer's file (ADRs 0015 and 0023, plan 0015 step 4)", () => {
     return b;
   };
   const check = (json: object, bin?: Uint8Array, name = look) => checkCustomer(readGlb(makeGlb(json, bin)), name, looks, budgets).errors.join(" ");
+
+  it("needs the smile morph target on the face (2026-10-12)", () => {
+    expect(check(customerJson({ morphs: [] }))).toMatch(/no "smile" morph target/);
+    expect(check(customerJson({ morphs: ["frown"] }))).toMatch(/no "smile" morph target/);
+    expect(check(customerJson({ morphs: ["smile"] }))).toBe("");
+  });
 
   it("needs both hands' grip points and the notes under the root (plan 0017 step 1)", () => {
     expect(CUSTOMER_CLIPS).toContain("pay_leave");

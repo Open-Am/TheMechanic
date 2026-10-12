@@ -57,7 +57,8 @@ export const STORY = {
    * Nods, takes the notes out (shown), holds them across the bench and lets go (taken), stands smiling (hold: plan
    * 0018's engine runs and is switched off here, ADR 0027), takes the generator (lifted) and walks off.
    */
-  pay_leave: { length: 3.6, notesShown: 0.55, notesTaken: 1.45, hold: 1.7, lifted: 2.0 },
+  // 2026-10-12: the notes held out longer, at the generator's top, so the mechanic's hand can take them (plan 0018).
+  pay_leave: { length: 4.3, notesShown: 0.55, notesTaken: 2.2, hold: 2.35, lifted: 2.7 },
   /** Shakes the head, snatches the generator (lifted), storms off. Parts snap home in the first `snapBack` seconds. */
   storm_off: { length: 2.5, lifted: 0.85, snapBack: 0.3 },
 } as const;
