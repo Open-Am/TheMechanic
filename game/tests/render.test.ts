@@ -14,6 +14,8 @@ import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
 import { loadMachine } from "./helpers.ts";
 import { pickToolbox, renderFileCount } from "../src/render/model.ts";
 import { coughShake, coughTimes, handleOffset, hazeLevel, planShake, pullOut, pullTimes, ropeLength, runShake, runTimes, shakeAt, STARTER_FACE_YAW, startupPlan, STARTUP, starterTurn, switchAngle, turnYaw, windDownFade } from "../src/render/startup.ts";
+import { STORY } from "../src/render/customerpose.ts";
+import { EXHAUST, hazeDue, puffPose } from "../src/render/exhaust.ts";
 
 const machine = loadMachine();
 const close = (a: number, b: number, eps = 1e-9) => Math.abs(a - b) < eps;
@@ -1105,9 +1107,13 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(r.stopped).toBeLessThan(r.gone);
     for (const t of frames(r.stopped, r.gone + 1)) expect(runShake(r, t)).toBe(0);
     // ADR 0027 said about 4 to 5 seconds from the catch to the customer leaving; with the owner's longer run
-    // (ADR 0027 history, 2026-10-12) it is about 6.5 to 7 seconds.
-    expect(r.gone - r.catch).toBeGreaterThanOrEqual(6.5);
-    expect(r.gone - r.catch).toBeLessThanOrEqual(7.1);
+    // (ADR 0027 history, 2026-10-12) and the customer's whole pay_leave clip after the hold, about 7.5 to 8 seconds.
+    expect(r.gone - r.catch).toBeGreaterThanOrEqual(7);
+    expect(r.gone - r.catch).toBeLessThanOrEqual(8);
+    expect(r.gone - r.stopped).toBeCloseTo(STORY.pay_leave.length - STORY.pay_leave.hold, 9);
+    // The customer's hold (1.7 s into pay_leave) comes after the notes are taken and before the press.
+    expect(r.smile + STORY.pay_leave.hold).toBeGreaterThan(r.payEnd);
+    expect(r.smile + STORY.pay_leave.hold).toBeLessThan(r.press);
   });
 
   it("a failed pull coughs and dies in about 1.5 s, with a jolt at each cough and no shake after", () => {
@@ -1181,5 +1187,36 @@ describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)",
     expect(one).toEqual(two);
     const trace = (plan: typeof one) => frames(0, plan.end, 0.05).map((t) => [ropeLength(plan.pull!, t), planShake(plan, t), shakeAt(3, t, planShake(plan, t))]);
     expect(trace(one)).toEqual(trace(two));
+  });
+});
+
+describe("the exhaust (ADR 0027, plan 0018 step 3)", () => {
+  it("a puff appears quickly, drifts out and up, grows and thins out to nothing within its life", () => {
+    const early = puffPose("puff", 0.05);
+    const mid = puffPose("puff", 0.6);
+    expect(puffPose("puff", 0).opacity).toBe(0);
+    expect(mid.opacity).toBeGreaterThan(0);
+    expect(mid.opacity).toBeLessThanOrEqual(EXHAUST.puffOpacity);
+    expect(mid.out).toBeGreaterThan(early.out);
+    expect(mid.up).toBeGreaterThan(early.up);
+    expect(mid.size).toBeGreaterThan(early.size);
+    expect(puffPose("puff", EXHAUST.life).opacity).toBe(0);
+    expect(puffPose("cough", EXHAUST.life + 1).opacity).toBe(0);
+    // The haze is fainter than a puff.
+    expect(Math.max(...[0.1, 0.2, 0.3, 0.5].map((a) => puffPose("haze", a).opacity))).toBeLessThanOrEqual(EXHAUST.hazeOpacity);
+  });
+
+  it("haze sprites come at the haze rate, none at no haze, never more than due", () => {
+    let carry = 0;
+    let spawned = 0;
+    for (let i = 0; i < 60; i++) {
+      const d = hazeDue(1, 1 / 60, carry);
+      carry = d.carry;
+      spawned += d.spawn;
+    }
+    expect(spawned).toBe(EXHAUST.hazeRate);
+    expect(hazeDue(0, 1, 0)).toEqual({ spawn: 0, carry: 0 });
+    expect(hazeDue(-1, 1, 0.5).spawn).toBe(0);
+    expect(EXHAUST.sprites).toBeLessThanOrEqual(10);
   });
 });

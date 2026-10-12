@@ -38,7 +38,7 @@ Approved by the owner on 2026-10-12, who wrote "I am also approving adr 27 and p
 
 ## Timing
 
-From the owner's clarification of 2026-10-12 (ADR 0027 history: "The start should run a little longer and the customer smiles and then pays while it's still running and then the mechanic stops the generator"). In `render/startup.ts`, seconds from the catch on a fixed round: runs alone 0 to 3.0; smile 3.0 to 3.55; notes held out 3.55 and taken 4.45 (0.55 s and 1.45 s into `pay_leave`); the hand reaches the switch and presses it 4.9 to 5.05; wind-down 5.05 to 5.85; the customer lifts it and is gone at 6.95. About 7 s from the catch to the customer leaving, where ADR 0027 first said 4 to 5. The pull before it takes about 1 s (plus a turn of up to 0.8 s); a failed pull coughs for 1.5 s.
+From the owner's clarification of 2026-10-12 (ADR 0027 history: "The start should run a little longer and the customer smiles and then pays while it's still running and then the mechanic stops the generator"). In `render/startup.ts`, seconds from the catch on a fixed round: runs alone 0 to 3.0; smile 3.0 to 3.55; notes held out 3.55 and taken 4.45 (0.55 s and 1.45 s into `pay_leave`); the hand reaches the switch and presses it 4.9 to 5.05; wind-down 5.05 to 5.85; the customer, held 1.7 s into `pay_leave` (at 4.7) until the engine has stopped, then lifts it and is gone at 7.75 (the clip's last 1.9 s). About 7.75 s from the catch to the customer leaving, where ADR 0027 first said 4 to 5. The pull before it takes about 1 s (plus a turn of up to 0.8 s); a failed pull coughs for 1.5 s.
 
 ## Steps
 

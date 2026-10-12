@@ -6,6 +6,7 @@
 // recoil_starter.rope node, which runs along +X from the housing's outlet to the handle), "up" is the machine's +Y.
 
 import type { Vec3 } from "../core/index.ts";
+import { STORY } from "./customerpose.ts";
 import { clamp01, ease } from "./tween.ts";
 
 const DEG = Math.PI / 180;
@@ -32,7 +33,7 @@ export const STARTUP = {
   /** The rope's length at rest, from the housing's outlet to the handle: STARTER_GRIP - STARTER_OUTLET in model.py. */
   ropeRest: 0.0195,
   // The run, from the catch. ADR 0027 said about 4 to 5 seconds from the catch to the customer leaving; the owner's
-  // clarification of 2026-10-12 (ADR 0027 history) lets it run a little longer first, about 7 seconds in all: the
+  // clarification of 2026-10-12 (ADR 0027 history) lets it run a little longer first, about 7.5 seconds in all: the
   // engine runs on its own, the customer smiles, pays while it still runs, the mechanic stops it, the customer leaves.
   /** The catch: the shake jumps to catchKick times the running shake and settles over rampIn. */
   rampIn: 0.35,
@@ -42,18 +43,18 @@ export const STARTUP = {
   /** The engine runs on its own after the catch, nothing else happening: the shake settles, the haze builds. */
   runAlone: 3.0,
   /** Then the customer smiles (about 0.6 s): the start of their pay_leave clip (plan 0017). */
-  smile: 0.55,
+  smile: STORY.pay_leave.notesShown,
   /** Then the notes are held out and the hand takes them: pay_leave shows the notes from 0.55 s to 1.45 s, so the smile
    * is the clip's first 0.55 s and the hold its next 0.9 s (ADR 0026). */
-  payHold: 0.9,
+  payHold: STORY.pay_leave.notesTaken - STORY.pay_leave.notesShown,
   /** The hand moves from the notes to the red switch and presses it; the rocker flips by switchAngle about X. */
   switchReach: 0.45,
   press: 0.15,
   switchAngle: -16 * DEG,
   /** The engine winds down after the press: the shake, the haze and the `start` sound fade out (about 0.8 s). */
   windDown: 0.8,
-  /** The customer lifts the stopped generator and walks off (their clip, plan 0017; step 3 fits it to this). */
-  carryOff: 1.1,
+  /** The customer lifts the stopped generator and walks off: the rest of pay_leave after its hold (plan 0017). */
+  carryOff: STORY.pay_leave.length - STORY.pay_leave.hold,
   // The running shake (plan 0018 reading 4): a small random walk of offset and roll at about 25 Hz, 1.5 mm.
   shakeHz: 25,
   shakeAmplitude: 0.0015,
