@@ -197,3 +197,29 @@ Plan 0011 merged into `main`. The turn and give moments hook into its fastener s
 ## Release note line
 
 Added: sound and vibration. Fasteners click as they turn, parts crack, snap, pop or scrape as they give, clunk into the tray and click home. The cord, a failed start and the engine start each have a sound. A mute button turns both off and is remembered. Sounds are CC0 stand-ins until the real machine is recorded, each listed in `game/public/audio/LICENCE.md` (plan 0013, ADR 0018). Version 0.12.0.
+
+## Results (2026-10-12, step 3)
+
+The owner downloaded the shortlist and wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The shortlist's first choice for each moment ships in `game/public/audio/`: ten mono Ogg Opus files, 22,931 bytes of the 250 KB budget. Trims, gains and what to listen for are in `assets/audio/STATUS.md`. Each sound's Freesound page was checked again on 2026-10-12, and all ten link CC0 1.0. The other downloads stay, uncommitted, in `assets/audio/source/`. Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
+
+Readings that differ from the plan's:
+
+- **The engine start is 0.98 s, not about 2.5 s.** The chosen file holds two short pull-and-catch attempts split by digital silence, so the second is used.
+- **The failed start was picked from the waveform** (the broken-up stretch after the last pull), not by ear.
+- **No fade-ins except on `fail`.** Blender's volume keys step in 10 ms frames, so a fade-in swallowed any click within about 20 ms of the cut.
+
+Done when, checked on 2026-10-12:
+
+- Pass: `npm test` (369), `typecheck`, `docs:check`, `build`, `size` (190.4 KB of 350 KB).
+- Pass: `npm run audio` encodes and checks the ten files, 0 errors.
+- Pass: `LICENCE.md` lists every file as `CC0 1.0` with its Freesound URL and author.
+- Pass: `STATUS.md` marks every sound a stand-in.
+- Pass: no new dependency.
+- Pass: `npm run verify:drop`, exit 0.
+- **Intermittent:** `npm run verify:phone` (HIDDEN_DEBUG=1) ran three times. Twice it exited 0, with "files decoded: 10 of 10" and "every moment could be heard". Once it failed with "the winning pull ended with ["start","seat"] and vibrated 15".
+  - The cause: the check pulls the cord as soon as the last part is dropped back. When that part has no fasteners, nothing waits for its put-back animation. Pressing home does not touch a part that is still going back, so it seats about a second later, after the engine sound.
+  - Whether this happens depends on which fault the round draws. The sound files do not affect it.
+  - Either the check waits for the part to seat before the winning pull, or the game decides that pressing home also seats a part on its way back. That is not decided here.
+- Waiting on the owner: the phone round with sound on.
+
+So the status stays `approved`, not `done`, until `verify:phone` passes reliably and the owner has listened on the phone.
