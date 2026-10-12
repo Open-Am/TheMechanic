@@ -13,6 +13,7 @@ import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colou
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
 import { loadMachine } from "./helpers.ts";
 import { pickToolbox, renderFileCount } from "../src/render/model.ts";
+import { coughShake, coughTimes, handleOffset, hazeLevel, planShake, pullOut, pullTimes, ropeLength, runShake, runTimes, shakeAt, STARTER_FACE_YAW, startupPlan, STARTUP, starterTurn, switchAngle, turnYaw, windDownFade } from "../src/render/startup.ts";
 
 const machine = loadMachine();
 const close = (a: number, b: number, eps = 1e-9) => Math.abs(a - b) < eps;
@@ -987,5 +988,188 @@ describe("the machine's shadow on the bench top (plan 0016 step 2, ADR 0025)", (
     const bake = readFileSync(new URL("../../tools/blender/bake_ground.py", import.meta.url), "utf8");
     expect(Number(/^SPAN_FACTOR = ([0-9.]+)/m.exec(bake)?.[1])).toBe(SHADOW_SPAN);
     expect(shadowSpan([0.367, 0.375, 0.312])).toBeCloseTo(0.367 * SHADOW_SPAN, 9);
+  });
+});
+
+describe("pulling the cord and the engine running (ADR 0027, plan 0018 step 2)", () => {
+  const frames = (from: number, to: number, step = 1 / 120) => {
+    const out: number[] = [];
+    for (let t = from; t <= to + 1e-9; t += step) out.push(t);
+    return out;
+  };
+  const deg = Math.PI / 180;
+
+  it("the generator turns only when the starter is more than 40 degrees off facing the camera, by the shortest way", () => {
+    expect(starterTurn(STARTER_FACE_YAW + 30 * deg).seconds).toBe(0);
+    expect(starterTurn(STARTER_FACE_YAW - 40 * deg).to).toBe(STARTER_FACE_YAW - 40 * deg);
+    // The default view (yaw -0.55) is about 58 degrees off: it turns the short way, towards the starter, to 25 off.
+    const fromDefault = starterTurn(-0.55);
+    expect(fromDefault.seconds).toBeGreaterThan(0);
+    expect(fromDefault.to).toBeLessThan(-0.55);
+    expect(Math.abs(fromDefault.to - STARTER_FACE_YAW)).toBeCloseTo(STARTUP.turnSettle, 9);
+    // From anywhere it ends within the tolerance, never turning more than half a turn.
+    for (let yaw = -Math.PI; yaw <= Math.PI; yaw += 5 * deg) {
+      const turn = starterTurn(yaw);
+      expect(Math.abs(turn.to - turn.from)).toBeLessThanOrEqual(Math.PI);
+      const off = Math.atan2(Math.sin(turn.to - STARTER_FACE_YAW), Math.cos(turn.to - STARTER_FACE_YAW));
+      expect(Math.abs(off)).toBeLessThanOrEqual(STARTUP.faceTolerance + 1e-9);
+      expect(turn.seconds).toBeLessThanOrEqual(STARTUP.turnMaxSeconds);
+    }
+    // Facing away and a little to one side, it goes round that side.
+    const back = starterTurn(Math.PI / 2 - 0.1);
+    expect(back.to - back.from).toBeLessThan(0);
+    expect(turnYaw(fromDefault, 0)).toBe(fromDefault.from);
+    expect(turnYaw(fromDefault, fromDefault.seconds)).toBeCloseTo(fromDefault.to, 12);
+  });
+
+  it("the pull takes about a second: grip, out about 40 cm with a slight rise, let go, the rope runs back in", () => {
+    const p = pullTimes(0);
+    expect(p.home - p.reach).toBeGreaterThanOrEqual(0.8);
+    expect(p.home - p.reach).toBeLessThanOrEqual(1.2);
+    const order = [p.reach, p.grip, p.pull, p.release, p.recoil, p.home];
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(handleOffset(p, p.grip)).toEqual([0, 0, 0]);
+    const out = handleOffset(p, p.release);
+    expect(out[0]).toBeCloseTo(0.4, 9);
+    expect(out[1]).toBeGreaterThan(0);
+    expect(out[1]).toBeLessThan(0.1);
+    expect(handleOffset(p, p.home)).toEqual([0, 0, 0]);
+    // Out sharply: more than half way in the first third of the pull.
+    expect(pullOut(p, p.pull + (p.release - p.pull) / 3)).toBeGreaterThan(0.2);
+    // It only goes out until the release and only comes back in the recoil.
+    let last = 0;
+    for (const t of frames(p.reach, p.recoil)) {
+      expect(pullOut(p, t)).toBeGreaterThanOrEqual(last - 1e-12);
+      last = pullOut(p, t);
+    }
+    for (const t of frames(p.recoil, p.home)) {
+      expect(pullOut(p, t)).toBeLessThanOrEqual(last + 1e-12);
+      last = pullOut(p, t);
+    }
+    expect(pullTimes(0.5).pull - p.pull).toBeCloseTo(0.5, 12);
+  });
+
+  it("the rope is its rest length at rest, stretches to the handle, and is never negative", () => {
+    const p = pullTimes(0.3);
+    expect(ropeLength(p, 0)).toBeCloseTo(STARTUP.ropeRest, 12);
+    expect(ropeLength(p, p.home + 1)).toBeCloseTo(STARTUP.ropeRest, 12);
+    expect(ropeLength(p, p.release)).toBeGreaterThan(0.4);
+    for (const t of frames(-1, p.home + 1)) {
+      const len = ropeLength(p, t);
+      expect(len).toBeGreaterThan(0);
+      const [x, y] = handleOffset(p, t);
+      expect(len).toBeCloseTo(Math.hypot(STARTUP.ropeRest + x, y), 12);
+      expect(ropeLength(p, t, 0)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("the run: no shake before the catch, a kick, running, a wind-down of about 0.8 s after the switch, then none", () => {
+    const r = runTimes(1);
+    expect(runShake(r, r.catch)).toBe(0);
+    expect(runShake(r, r.catch - 0.5)).toBe(0);
+    expect(Math.max(...frames(r.catch, r.running).map((t) => runShake(r, t)))).toBeCloseTo(STARTUP.catchKick, 1);
+    expect(runShake(r, (r.running + r.press) / 2)).toBe(1);
+    expect(r.stopped - r.pressed).toBeCloseTo(0.8, 9);
+    expect(runShake(r, r.stopped)).toBe(0);
+    expect(runShake(r, r.gone + 5)).toBe(0);
+    let last = 1;
+    for (const t of frames(r.pressed, r.stopped)) {
+      expect(runShake(r, t)).toBeLessThanOrEqual(last + 1e-12);
+      last = runShake(r, t);
+    }
+    // The haze builds after the catch and fades with the wind-down; the sound fades the same way.
+    expect(hazeLevel(r, r.catch)).toBe(0);
+    expect(hazeLevel(r, r.payEnd)).toBe(1);
+    expect(hazeLevel(r, r.stopped)).toBe(0);
+    expect(windDownFade(r, r.press)).toBe(1);
+    expect(windDownFade(r, r.stopped)).toBe(0);
+  });
+
+  it("the customer pays while it runs, then the hand presses the switch and the rocker flips before it stops", () => {
+    const r = runTimes(0);
+    expect(r.payStart).toBeGreaterThan(r.catch);
+    expect(r.payEnd).toBeGreaterThan(r.payStart);
+    for (const t of frames(r.payStart, r.payEnd)) expect(runShake(r, t)).toBeGreaterThan(0);
+    expect(r.press).toBeGreaterThan(r.payEnd);
+    expect(switchAngle(r, r.payEnd)).toBe(0);
+    expect(switchAngle(r, r.pressed)).toBeCloseTo(STARTUP.switchAngle, 12);
+    expect(switchAngle(r, r.gone)).toBeCloseTo(STARTUP.switchAngle, 12);
+    expect(r.stopped).toBeLessThan(r.gone);
+    // ADR 0027: about 4 to 5 seconds from the catch to the customer leaving.
+    expect(r.gone - r.catch).toBeGreaterThanOrEqual(4);
+    expect(r.gone - r.catch).toBeLessThanOrEqual(5);
+  });
+
+  it("a failed pull coughs and dies in about 1.5 s, with a jolt at each cough and no shake after", () => {
+    const c = coughTimes(2);
+    expect(c.end - c.start).toBeGreaterThanOrEqual(1.3);
+    expect(c.end - c.start).toBeLessThanOrEqual(1.7);
+    expect(coughShake(c, c.start)).toBe(0);
+    expect(coughShake(c, c.start - 1)).toBe(0);
+    expect(coughShake(c, c.end)).toBe(0);
+    expect(coughShake(c, c.end + 1)).toBe(0);
+    for (const at of c.coughs) {
+      expect(at).toBeGreaterThan(c.start);
+      expect(at).toBeLessThan(c.end);
+      expect(coughShake(c, at + 0.01)).toBeGreaterThan(coughShake(c, at - 0.01));
+    }
+  });
+
+  it("the shake is a 1.5 mm random walk at about 25 Hz: the same for the same seed, different for another, none at 0", () => {
+    const a = frames(0, 2, 1 / 60).map((t) => shakeAt(7, t, 1));
+    const b = frames(0, 2, 1 / 60).map((t) => shakeAt(7, t, 1));
+    expect(a).toEqual(b);
+    expect(frames(0, 2, 1 / 60).map((t) => shakeAt(8, t, 1))).not.toEqual(a);
+    for (const s of a) {
+      for (const v of s.offset) expect(Math.abs(v)).toBeLessThanOrEqual(STARTUP.shakeAmplitude);
+      expect(Math.abs(s.roll)).toBeLessThanOrEqual(STARTUP.rollAmplitude);
+    }
+    // It moves, well over a millimetre across, and it changes direction often.
+    const xs = a.map((s) => s.offset[0]);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.001);
+    let turns = 0;
+    for (let i = 2; i < xs.length; i++) if ((xs[i]! - xs[i - 1]!) * (xs[i - 1]! - xs[i - 2]!) < 0) turns++;
+    expect(turns).toBeGreaterThan(10);
+    // Smooth between steps: no frame jumps by the whole amplitude.
+    for (let i = 1; i < xs.length; i++) expect(Math.abs(xs[i]! - xs[i - 1]!)).toBeLessThan(STARTUP.shakeAmplitude);
+    expect(shakeAt(7, 1.234, 0)).toEqual({ offset: [0, 0, 0], roll: 0 });
+  });
+
+  it("plans a fixed pull: turn, pull, catch at the release, pay, switch off, gone; moments in order", () => {
+    const plan = startupPlan({ yaw: -0.55, fixed: true, starterOn: true });
+    expect(plan.turn.seconds).toBeGreaterThan(0);
+    expect(plan.pull!.reach).toBe(plan.turn.seconds);
+    expect(plan.cough).toBeNull();
+    expect(plan.moments.cord).toBe(plan.pull!.pull);
+    expect(plan.moments.start).toBe(plan.pull!.release);
+    expect(plan.moments.fail).toBeNull();
+    expect(plan.end).toBe(plan.run!.gone);
+    for (const t of frames(0, plan.run!.catch)) expect(planShake(plan, t)).toBe(0);
+    for (const t of frames(plan.run!.stopped, plan.end)) expect(planShake(plan, t)).toBe(0);
+    // The handle is home before the customer starts paying.
+    expect(plan.pull!.home).toBeLessThan(plan.run!.payStart);
+  });
+
+  it("plans a failed pull, and a cough without a pull when the recoil starter is off the machine", () => {
+    const failed = startupPlan({ yaw: STARTER_FACE_YAW, fixed: false, starterOn: true });
+    expect(failed.turn.seconds).toBe(0);
+    expect(failed.run).toBeNull();
+    expect(failed.moments.fail).toBe(failed.pull!.release);
+    expect(failed.end).toBe(failed.cough!.end);
+    for (const t of frames(0, failed.cough!.start)) expect(planShake(failed, t)).toBe(0);
+    const noStarter = startupPlan({ yaw: 1, fixed: true, starterOn: false });
+    expect(noStarter.pull).toBeNull();
+    expect(noStarter.turn.seconds).toBe(0);
+    expect(noStarter.run).toBeNull();
+    expect(noStarter.moments).toEqual({ cord: null, start: null, fail: 0 });
+    expect(noStarter.end).toBeCloseTo(STARTUP.coughSeconds, 12);
+  });
+
+  it("the same pull always plays the same way (ADR 0007)", () => {
+    const one = startupPlan({ yaw: 0.3, fixed: true, starterOn: true });
+    const two = startupPlan({ yaw: 0.3, fixed: true, starterOn: true });
+    expect(one).toEqual(two);
+    const trace = (plan: typeof one) => frames(0, plan.end, 0.05).map((t) => [ropeLength(plan.pull!, t), planShake(plan, t), shakeAt(3, t, planShake(plan, t))]);
+    expect(trace(one)).toEqual(trace(two));
   });
 });
