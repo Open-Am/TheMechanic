@@ -5,7 +5,7 @@
 // the moments of accepted actions and render's moments are passed to playMoment here (ADR 0010).
 
 import { dailyStatus } from "./app/daily.ts";
-import { MOMENTS, type Moment, playMoment } from "./app/moments.ts";
+import { ENGINE_LOOP, MOMENTS, type Moment, playMoment, VIBRATION } from "./app/moments.ts";
 import { createGame } from "./app/round.ts";
 import { dailyFaultId, dayNumber, validateAll, validateCustomers, type CustomerFile, type FaultFile, type Machine } from "./core/index.ts";
 import { browserContext, browserVibrate, createAudio, type LocalAudio } from "./platform/local/audio.ts";
@@ -188,6 +188,16 @@ async function start(): Promise<void> {
   view.setTrayTest(mounted.overTray);
   view.onCarry(mounted.setDropState);
   view.onMoment((m) => playMoment(audio, m));
+  // The pull plays on screen (plan 0018): render plays the cord and the engine's answer as the animation reaches them,
+  // and the running engine's sound loops until the mechanic switches it off.
+  game.setPullSoundsByRender(true);
+  view.onEngine((e) => {
+    if (e.type === "run") {
+      audio.play("start", 0, ENGINE_LOOP);
+      const buzz = VIBRATION.start;
+      if (buzz !== null) audio.vibrate(buzz);
+    } else audio.fade("start", e.seconds);
+  });
   // Start pressed: the customer brings the generator; the clock starts when it lands (plan 0017 reading 1).
   game.events.on("arriving", () => (view ? view.playArrival(() => game.begin()) : game.begin()));
   mounted.onCover(view.setBottomCover);

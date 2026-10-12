@@ -12,7 +12,7 @@ import { removalOrder } from "../src/core/rules.ts";
 import { score } from "../src/core/score.ts";
 import type { CustomerFile } from "../src/core/types.ts";
 import type { Moment, ScoreStore, StoredResult, VibrationPattern } from "../src/platform/interfaces/index.ts";
-import { CORD_SECONDS, MOMENTS, VIBRATION, giveMoment, playMoment } from "../src/app/moments.ts";
+import { CORD_SECONDS, ENGINE_LOOP, MOMENTS, VIBRATION, giveMoment, playMoment } from "../src/app/moments.ts";
 import { MOTION_TYPES } from "../src/core/types.ts";
 import { createDailyProvider } from "../src/platform/local/daily.ts";
 import { loadFaults, loadMachine } from "./helpers.ts";
@@ -192,6 +192,29 @@ describe("game", () => {
     clock.advance(1000);
     game.propose({ type: "pull" });
     expect(sounds).toEqual(["seat", "cord", "start"]);
+  });
+
+  it("leaves the cord and the engine's answer to render once told to (plan 0018), and plays them itself otherwise", () => {
+    const { game, clock, sounds } = setup("fouled_plug");
+    game.setPullSoundsByRender(true);
+    game.newRound();
+    game.begin();
+    clock.advance(1000);
+    let pulled = 0;
+    game.events.on("pulled", () => pulled++);
+    game.propose({ type: "pull" });
+    expect(pulled).toBe(1);
+    expect(sounds).toEqual([]);
+    game.setPullSoundsByRender(false);
+    clock.advance(1000);
+    game.propose({ type: "pull" });
+    expect(sounds).toEqual(["cord", "fail"]);
+  });
+
+  it("the engine's loop lies inside the trimmed start file (plan 0018)", () => {
+    expect(ENGINE_LOOP.from).toBeGreaterThan(0);
+    expect(ENGINE_LOOP.to).toBeGreaterThan(ENGINE_LOOP.from + 0.5);
+    expect(ENGINE_LOOP.to).toBeLessThan(2.56 - 0.04 - 0.25); // before the file's fade-out (assets/audio/sounds.json)
   });
 
   it("every fault plays to completion through the game", () => {

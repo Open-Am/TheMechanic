@@ -10,6 +10,12 @@ export { MOMENTS, type Moment };
 /** Seconds from the cord to the engine's answer: the trimmed length of the cord file (plan 0013 reading 3). */
 export const CORD_SECONDS = 0.6;
 
+/**
+ * The part of the `start` file that loops while the engine runs (plan 0018, ADR 0027): the engine at speed, after the
+ * pull-over and before the file's fade-out. Seconds into the trimmed file.
+ */
+export const ENGINE_LOOP = { from: 1.2, to: 2.2 } as const;
+
 /** The vibration for each moment, in ms, or null for none (ADR 0018's table). */
 export const VIBRATION: Record<Moment, number | readonly number[] | null> = {
   turn: null,

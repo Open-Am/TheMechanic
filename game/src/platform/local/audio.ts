@@ -11,6 +11,17 @@ export interface SourceLike {
   buffer: unknown;
   connect(destination: never): unknown;
   start(when?: number): void;
+  /** For a looped moment (plan 0018). */
+  loop?: boolean;
+  loopStart?: number;
+  loopEnd?: number;
+  stop?(when?: number): void;
+}
+
+/** The parts of a GainNode this needs, to fade a looped moment out. */
+export interface GainLike {
+  gain: { value: number; setValueAtTime?(v: number, t: number): unknown; linearRampToValueAtTime?(v: number, t: number): unknown };
+  connect(destination: never): unknown;
 }
 
 /** The parts of AudioContext this needs. */
@@ -21,6 +32,7 @@ export interface ContextLike {
   resume(): Promise<void>;
   decodeAudioData(data: ArrayBuffer): Promise<unknown>;
   createBufferSource(): SourceLike;
+  createGain?(): GainLike;
 }
 
 export interface AudioEnv {
@@ -64,6 +76,8 @@ export function createAudio(env: AudioEnv = {}, startMuted = false): LocalAudio 
   let ctx: ContextLike | null = null;
   let tried = false;
   const buffers = new Map<Moment, unknown>();
+  /** Copies of each moment still playing that can be faded: the looped ones. */
+  const playing = new Map<Moment, Array<{ source: SourceLike; gain: GainLike | null }>>();
   /** Files that arrived before the context existed; decoded on the first unlock. */
   const pending = new Map<Moment, { data: ArrayBuffer; resolve: (ok: boolean) => void }>();
   const later = env.setTimeout ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
@@ -95,14 +109,24 @@ export function createAudio(env: AudioEnv = {}, startMuted = false): LocalAudio 
   }
 
   return {
-    play(moment, delaySeconds = 0) {
+    play(moment, delaySeconds = 0, loop) {
       let audible = false;
       try {
         const buffer = buffers.get(moment);
         if (!muted && ctx && ctx.state === "running" && buffer) {
           const source = ctx.createBufferSource();
           source.buffer = buffer;
-          source.connect(ctx.destination as never);
+          const gain = loop && ctx.createGain ? ctx.createGain() : null;
+          if (gain) {
+            source.connect(gain as never);
+            gain.connect(ctx.destination as never);
+          } else source.connect(ctx.destination as never);
+          if (loop) {
+            source.loop = true;
+            source.loopStart = loop.from;
+            source.loopEnd = loop.to;
+            playing.set(moment, [...(playing.get(moment) ?? []), { source, gain }]);
+          }
           source.start(ctx.currentTime + Math.max(0, Number.isFinite(delaySeconds) ? delaySeconds : 0));
           audible = true;
         }
@@ -110,6 +134,25 @@ export function createAudio(env: AudioEnv = {}, startMuted = false): LocalAudio 
         audible = false;
       }
       env.onPlay?.(moment, audible);
+    },
+
+    fade(moment, seconds) {
+      const list = playing.get(moment) ?? [];
+      playing.delete(moment);
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const end = now + Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+      for (const { source, gain } of list) {
+        try {
+          if (gain?.gain.setValueAtTime && gain.gain.linearRampToValueAtTime) {
+            gain.gain.setValueAtTime(gain.gain.value, now);
+            gain.gain.linearRampToValueAtTime(0, end);
+          }
+          source.stop?.(end);
+        } catch {
+          // Already stopped.
+        }
+      }
     },
 
     vibrate(pattern: VibrationPattern, delaySeconds = 0) {

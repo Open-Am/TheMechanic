@@ -47,6 +47,8 @@ import { createThumbnailer } from "./thumbnails.ts";
 import { createContactShadow, createFloor, createMachineShadow } from "./ground.ts";
 import { createLighting } from "./lighting.ts";
 import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
+import { handleOffset, hazeLevel, planShake, shakeAt, STARTUP, startupPlan, type StartupPlan, switchAngle, turnYaw } from "./startup.ts";
+import { createExhaust } from "./exhaust.ts";
 
 /** Minimum finger target, CSS px (docs/design/interface.md). */
 const FINGER_PX = 44;
@@ -90,6 +92,12 @@ export interface RenderView {
    * (the engine runs and the mechanic switches it off). Without it the ending runs straight on.
    */
   setPayHold(hold: (() => Promise<void>) | null): void;
+  /**
+   * Told when the engine starts running (the looped `start` sound) and when the mechanic switches it off (fade it out
+   * over `seconds`), plan 0018. Supplied by main.ts, which plays them; the cord, start and fail moments go to onMoment
+   * as the pull reaches them once main.ts has told app to leave them to render.
+   */
+  onEngine(fn: (e: { type: "run" } | { type: "stop"; seconds: number }) => void): void;
   dispose(): void;
 }
 
@@ -862,7 +870,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
    * "pulled", which app tells before it plays the cord: a part still going back seats now, with its `seat`, so the
    * order is always seat, cord, then start or fail. Pressing home a part that was never put back stays silent.
    */
-  function pressHome(): void {
+  function pressHome(): boolean {
     const doingUp = sequence?.mode === "do-up" ? sequence.id : null;
     const seated = [...seating];
     seating.clear();
@@ -881,7 +889,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       if (pv) setOpacity(pv, 1);
       moment("seat");
     }
-    for (const id of new Set([...loose, ...loosening, ...seated, ...(doingUp ? [doingUp] : [])])) {
+    const homing = new Set([...loose, ...loosening, ...seated, ...(doingUp ? [doingUp] : [])]);
+    for (const id of homing) {
       const pv = view.parts.get(id);
       if (!pv) continue;
       tweens.cancel(`loosen:${id}`);
@@ -905,6 +914,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     }
     loose.clear();
     loosening.clear();
+    return homing.size > 0;
   }
 
   // ---- Carrying a loose part to the tray ----
@@ -1097,6 +1107,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   /** Every part home, nothing loose, carried or seating, the hand away: a new round, or a walk-out's whole generator. */
   function homeEverything(): void {
+    stopStartup();
     tellCarry("none");
     abortSequence();
     hand?.hide();
@@ -1220,6 +1231,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   }
 
   function startEnding(clip: "pay_leave" | "storm_off"): void {
+    // A fixed round's ending is played by the start-up: the customer pays while the engine runs (plan 0018).
+    if (clip === "pay_leave" && startup) return;
     if (!customer || !customer.ready()) {
       endingPromise = Promise.resolve();
       return;
@@ -1227,10 +1240,224 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     endingPromise = startStory(clip, null);
   }
 
+  // ---- Pulling the cord, and the engine running, stopping or coughing (plan 0018, ADR 0027) ----
+
+  /** A model node by its original name (the loader keeps it in userData.name; it strips the dot from the node's name). */
+  function modelNode(root: Object3D, id: string): Object3D | null {
+    let found: Object3D | null = null;
+    root.traverse((o) => {
+      if (!found && (o.userData?.["name"] === id || o.name === id)) found = o;
+    });
+    return found;
+  }
+  const starterView = view.parts.get("recoil_starter" as PartId) ?? null;
+  const pullNodes = {
+    handle: starterView ? modelNode(starterView.visual, "recoil_starter.handle") : null,
+    rope: starterView ? modelNode(starterView.visual, "recoil_starter.rope") : null,
+    outlet: modelNode(view.root, "muffler.outlet"),
+    switch: modelNode(view.root, "base_panel.switch"),
+  };
+  /** Where each moving node rests, to put back after a start-up. */
+  const nodeRest = new Map<Object3D, { p: Vector3; q: Quaternion; s: Vector3 }>();
+  for (const n of Object.values(pullNodes)) if (n) nodeRest.set(n, { p: n.position.clone(), q: n.quaternion.clone(), s: n.scale.clone() });
+  const ropeRest = pullNodes.handle && pullNodes.rope ? pullNodes.handle.position.distanceTo(pullNodes.rope.position) : STARTUP.ropeRest;
+  const rootRest = { p: view.root.position.clone(), r: view.root.rotation.z };
+  const exhaust = createExhaust(scene, () => pullNodes.outlet, new Vector3(-1, 0, 0));
+  /** Starts (or stops) the looped engine sound; set by main.ts. */
+  let engineFn: ((e: { type: "run" } | { type: "stop"; seconds: number }) => void) | null = null;
+  function engine(e: { type: "run" } | { type: "stop"; seconds: number }): void {
+    try {
+      engineFn?.(e);
+    } catch {
+      // A sound that fails never stops the start-up.
+    }
+  }
+
+  interface Startup {
+    plan: StartupPlan;
+    /** Seconds since the press; negative while loose parts are pressed home. */
+    t: number;
+    seed: number;
+    /** One-shot steps already done, by name. */
+    did: Set<string>;
+    /** Settles when it is all over (the customer gone, or the engine still). */
+    done: () => void;
+    promise: Promise<void>;
+    /** The customer's pay_leave clip was started at the smile. */
+    paying: boolean;
+    /** Where the skips land, in order. */
+    stops: number[];
+  }
+  let startup: Startup | null = null;
+  let startups = 0;
+
+  const machineDir = (x: number, y: number, z: number): Vector3 => {
+    view.root.updateMatrixWorld(true);
+    return new Vector3(x, y, z).transformDirection(view.root.matrixWorld).normalize();
+  };
+  const worldOf = (o: Object3D | null): Vector3 | null => {
+    if (!o) return null;
+    o.updateMatrixWorld(true);
+    return o.getWorldPosition(new Vector3());
+  };
+
+  function startStartup(fixed: boolean, delay: number): void {
+    stopStartup();
+    const starterOn = !!starterView && !game.state.tray.includes("recoil_starter" as PartId);
+    const plan = startupPlan({ yaw: stage.yaw, fixed, starterOn });
+    let done: () => void = () => {};
+    const promise = new Promise<void>((r) => (done = r));
+    const stops = plan.run ? [plan.run.catch, plan.run.smile, plan.run.press, plan.run.stopped, plan.end] : [plan.cough!.end];
+    startup = { plan, t: -delay, seed: 0x5eed + ++startups, did: new Set(), done, promise, paying: false, stops };
+    if (fixed) endingPromise = promise;
+  }
+
+  /** Puts everything the start-up moved back, and says it is over. */
+  function stopStartup(): void {
+    if (!startup) return;
+    const s = startup;
+    startup = null;
+    for (const [n, r] of nodeRest) {
+      n.position.copy(r.p);
+      n.quaternion.copy(r.q);
+      n.scale.copy(r.s);
+    }
+    view.root.position.copy(rootRest.p);
+    view.root.rotation.z = rootRest.r;
+    exhaust.clear();
+    if (s.did.has("run") && !s.did.has("fade")) engine({ type: "stop", seconds: 0.2 });
+    s.done();
+  }
+
+  /** Once, when `t` first reaches `at`. */
+  function once(s: Startup, name: string, at: number, fn: () => void): void {
+    if (s.t >= at && !s.did.has(name)) {
+      s.did.add(name);
+      fn();
+    }
+  }
+
+  function startupStep(dt: number): void {
+    const s = startup;
+    if (!s) return;
+    s.t += dt;
+    const { plan } = s;
+    const t = s.t;
+    if (t < 0) return;
+    // The turn on the bench, then the pull.
+    if (plan.turn.seconds > 0 && t <= plan.turn.seconds + dt) stage = { ...stage, yaw: turnYaw(plan.turn, t) };
+    const p = plan.pull;
+    if (p && pullNodes.handle) {
+      const rest = nodeRest.get(pullNodes.handle)!;
+      const [ox, oy, oz] = handleOffset(p, t);
+      pullNodes.handle.position.set(rest.p.x + ox, rest.p.y + oy, rest.p.z + oz);
+      if (pullNodes.rope) {
+        const rr = nodeRest.get(pullNodes.rope)!;
+        const along = pullNodes.handle.position.clone().sub(rr.p);
+        const len = along.length();
+        pullNodes.rope.quaternion.setFromUnitVectors(AXES.x, along.normalize());
+        pullNodes.rope.scale.set(len / Math.max(1e-6, ropeRest), 1, 1);
+      }
+      const out = machineDir(1, 0, 0);
+      if (t >= p.reach && t < p.grip) {
+        const at = worldOf(pullNodes.handle);
+        if (at) hand?.point(at, out);
+      }
+      once(s, "grip", p.grip, () => {
+        const at = worldOf(pullNodes.handle);
+        if (at) hand?.grab(at, out, "grip");
+        if (pullNodes.handle) hand?.attachTo(pullNodes.handle);
+      });
+      once(s, "cord", p.pull, () => moment("cord"));
+      once(s, "let-go", p.recoil, () => {
+        hand?.detach();
+        hand?.open();
+      });
+      once(s, "hand-away", p.home, () => {
+        if (!plan.run) hand?.withdraw();
+      });
+    }
+    // The run: catch, the customer smiles and pays while it runs, the hand switches it off, the customer leaves.
+    const r = plan.run;
+    let haze = 0;
+    if (r) {
+      once(s, "run", r.catch, () => {
+        engine({ type: "run" });
+        exhaust.puff("puff");
+      });
+      once(s, "smile", r.smile, () => {
+        if (customer && customer.ready()) {
+          s.paying = true;
+          endingPromise = s.promise;
+          void startStory("pay_leave", null).then(() => {
+            if (startup === s) stopStartup();
+          });
+          if (story) story.holdAsked = true;
+          customer.holdAt(STORY.pay_leave.hold);
+        }
+      });
+      const grips = s.paying ? customer?.grips() : null;
+      if (grips && t >= r.payStart && t < r.payEnd) {
+        const at = grips.right.clone();
+        if (t < r.payEnd - 0.3) hand?.point(at, toCamera(at));
+        else hand?.grab(at, toCamera(at), "pinch");
+      }
+      once(s, "took-notes", r.payEnd, () => hand?.open());
+      const sw = worldOf(pullNodes.switch);
+      const front = machineDir(0, 0, 1);
+      if (sw && t >= r.payEnd && t < r.press) hand?.point(sw.clone().addScaledVector(front, 0.01), front);
+      if (sw && t >= r.press && t < r.pressed + 0.15) hand?.grab(sw, front, "pinch");
+      if (pullNodes.switch) {
+        const rest = nodeRest.get(pullNodes.switch)!;
+        pullNodes.switch.quaternion.copy(rest.q).multiply(new Quaternion().setFromAxisAngle(AXES.x, switchAngle(r, t)));
+      }
+      once(s, "fade", r.pressed, () => engine({ type: "stop", seconds: STARTUP.windDown }));
+      once(s, "hand-off-switch", r.pressed + 0.15, () => {
+        hand?.open();
+        hand?.withdraw();
+      });
+      haze = hazeLevel(r, t);
+      // Stopped: the customer is let go to lift it; with no figure, it is over.
+      once(s, "stopped", r.stopped, () => {
+        if (s.paying) customer?.release();
+        else stopStartup();
+      });
+    }
+    const c = plan.cough;
+    if (c) {
+      once(s, "fail", c.start, () => moment("fail"));
+      c.coughs.forEach((at, i) => once(s, `cough-${i}`, at, () => exhaust.puff("cough")));
+      once(s, "still", c.end, () => stopStartup());
+    }
+    if (startup !== s) return;
+    const shake = shakeAt(s.seed, t, planShake(plan, t));
+    view.root.position.set(rootRest.p.x + shake.offset[0], rootRest.p.y + shake.offset[1], rootRest.p.z + shake.offset[2]);
+    view.root.rotation.z = rootRest.r + shake.roll;
+    exhaust.update(dt, haze);
+  }
+
+  /** A tap during the start-up skips to its next step (ADR 0027): the catch, the smile, the press, stopped, gone. */
+  function skipStartup(): void {
+    const s = startup;
+    if (!s) return;
+    const next = s.stops.find((x) => x > s.t + 1e-6);
+    if (next === undefined || next >= s.plan.end) {
+      if (story) skipStory();
+      stopStartup();
+      return;
+    }
+    const dt = next - s.t;
+    // One step forward by the gap, so every one-shot step on the way runs (sounds land on the frame, not twice).
+    startupStep(dt);
+    const r = s.plan.run;
+    if (r && s.paying && customer && startup === s) customer.seek(s.t < r.stopped ? Math.min(s.t - r.smile, STORY.pay_leave.hold) : STORY.pay_leave.hold);
+  }
+
   const unsubscribe = [
     game.events.on("removed", (e) => animateRemove(e.partId)),
     game.events.on("installed", (e) => animateInstall(e.partId)),
-    game.events.on("pulled", () => pressHome()),
+    // Loose parts are pressed home first; the pull starts once they are (ADR 0020, plan 0018).
+    game.events.on("pulled", (e) => startStartup(e.started, pressHome() ? CARRY.homeSeconds : 0)),
     game.events.on("started", () => {
       homeEverything();
       turntable.visible = true;
@@ -1370,6 +1597,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   /** Rests the hand on the spot under a mouse pointer that is not pressing. */
   function hover(x: number, y: number): void {
+    if (startup) return;
     if (!hand || !game.running || drag || chip || handBusy() || carry) return;
     const s = surfaceAt(x, y);
     lastSurface = s;
@@ -1382,7 +1610,12 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   }
 
   function onDown(e: PointerEvent): void {
-    // A tap during the arrival or an ending skips it (ADR 0026).
+    // A tap during the pull or the run skips to its next step (ADR 0027); during the arrival or an ending, the rest of it
+    // (ADR 0026).
+    if (startup) {
+      skipStartup();
+      return;
+    }
     if (story) {
       skipStory();
       return;
@@ -1630,6 +1863,34 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       return edge ? { ...edge, pick: pickAt(edge.x, edge.y), solid: false } : null;
     };
     (window as unknown as Record<string, unknown>).__openAmDevRender = {
+      /** Plan 0018: the pull and the run as they play, or null when none is playing. */
+      startup: () => {
+        if (!startup) return null;
+        const s = startup;
+        const handleOut = pullNodes.handle ? pullNodes.handle.position.distanceTo(nodeRest.get(pullNodes.handle)!.p) : null;
+        const ropeLen = pullNodes.rope ? pullNodes.rope.scale.x * ropeRest : null;
+        const r = s.plan.run;
+        const phase = s.t < 0 ? "homing" : s.plan.pull && s.t < s.plan.pull.release ? "pull" : r ? (s.t < r.smile ? "running" : s.t < r.payEnd ? "paying" : s.t < r.pressed ? "switch" : s.t < r.stopped ? "winding-down" : "leaving") : "cough";
+        return {
+          t: s.t,
+          phase,
+          fixed: !!r,
+          handleOut,
+          ropeLength: ropeLen,
+          shakeMm: view.root.position.distanceTo(rootRest.p) * 1000,
+          roll: view.root.rotation.z - rootRest.r,
+          switchAngle: pullNodes.switch ? 2 * Math.asin(Math.min(1, Math.abs(pullNodes.switch.quaternion.clone().multiply(nodeRest.get(pullNodes.switch)!.q.clone().invert()).x))) : null,
+          sprites: exhaust.alive(),
+          handHolding: hand?.holding ?? null,
+          customerClip: story?.clip ?? null,
+          stops: [...s.stops],
+          end: s.plan.end,
+        };
+      },
+      /** Plan 0018: how far (mm) the machine is from its resting place: 0 unless the engine shakes it. */
+      machineOffsetMm: () => view.root.position.distanceTo(rootRest.p) * 1000,
+      /** Plan 0018: the nodes the pull moves were found in the model. */
+      pullNodes: () => Object.fromEntries(Object.entries(pullNodes).map(([k, v]) => [k, !!v])),
       probe,
       aim,
       carrying: () => carry?.id ?? null,
@@ -1847,6 +2108,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       cover = Math.abs(coverWanted - next) < 0.5 ? coverWanted : next;
       applyFraming();
     }
+    startupStep(dt);
     placeCamera();
     storyStep();
     // On a trip the forearm comes from the toolbox's side of the screen near the toolbox, and from the lower right at
@@ -1886,6 +2148,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     ending: () => new Promise<void>((r) => setTimeout(() => void (endingPromise ?? Promise.resolve()).then(r), 0)),
     setPayHold(hold) {
       payHold = hold;
+    },
+    onEngine(fn) {
+      engineFn = fn;
     },
     carryChip,
     endChipCarry,

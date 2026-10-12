@@ -44,8 +44,13 @@ export type VibrationPattern = number | readonly number[];
  * whose file is missing, late or undecodable plays nothing (ADR 0023). Every failure is swallowed.
  */
 export interface Audio {
-  /** Plays a moment now, or after delaySeconds. */
-  play(moment: Moment, delaySeconds?: number): void;
+  /**
+   * Plays a moment now, or after delaySeconds. With `loop` it plays to `loop.to` and then repeats from `loop.from` to
+   * `loop.to` (seconds into the file) until fade() (plan 0018: the engine running).
+   */
+  play(moment: Moment, delaySeconds?: number, loop?: { from: number; to: number }): void;
+  /** Fades out every playing copy of a moment over `seconds` and stops it. */
+  fade(moment: Moment, seconds: number): void;
   /** Vibrates where the phone supports it, now or after delaySeconds. */
   vibrate(pattern: VibrationPattern, delaySeconds?: number): void;
   setMuted(muted: boolean): void;

@@ -20,8 +20,12 @@ const BANNER_MS = 3000;
 const SPEECH_MS = 4000;
 /** The longest the result screen waits for the round to be saved before showing without the best, ms. */
 const RECORD_WAIT_MS = 1500;
-/** The most the result screen waits for the customer's ending (plan 0017 reading 2), so a missing figure never blocks it. */
-const ENDING_WAIT_MS = 4000;
+/**
+ * The most the result screen waits for the customer's ending (plan 0017 reading 2), so a missing figure never blocks it.
+ * A fixed round's ending is the pull, the engine running, the payment, the switch-off and the customer leaving (plan
+ * 0018): about 10 s with a turn on the bench; the cap leaves room for a slow phone.
+ */
+const ENDING_WAIT_MS = 14000;
 
 export interface UiOptions {
   /** A picture of a part for its tray chip, or null. Supplied by main.ts. */

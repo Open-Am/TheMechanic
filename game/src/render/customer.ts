@@ -47,6 +47,8 @@ export interface CustomerStage {
   release(): void;
   /** Jumps the story clip to its end. */
   skip(): void;
+  /** Jumps the story clip to `t` seconds (plan 0018: a tap skips a step of the engine's run). */
+  seek(t: number): void;
   /** World positions of the right and left hands' grip points, or null without a figure. */
   grips(): { right: Vector3; left: Vector3 } | null;
   /** Shows or hides the notes in the right hand (ADR 0026). */
@@ -239,6 +241,11 @@ export function createCustomerStage(scene: Scene, camera: Camera, load: Customer
       held = null;
       action.time = action.getClip().duration;
       mixer?.update(0.0001);
+    },
+    seek(t) {
+      if (!storyClip || !action) return;
+      action.time = Math.max(0, Math.min(t, action.getClip().duration));
+      mixer?.update(0);
     },
     grips() {
       if (!attached || !root.visible) return null;

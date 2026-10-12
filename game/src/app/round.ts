@@ -127,6 +127,11 @@ export interface Game {
   /** For diagnostic mode only. */
   readonly faultId: FaultId | null;
   readonly culprit: PartId | null;
+  /**
+   * Plan 0018 (ADR 0027): when true, the cord and the engine's answer (`cord`, `start`, `fail`) are left to render,
+   * which plays them as its pull animation reaches them. False (the default) plays them here, as before.
+   */
+  setPullSoundsByRender(on: boolean): void;
 }
 
 export function createGame(deps: GameDeps): Game {
@@ -143,6 +148,7 @@ export function createGame(deps: GameDeps): Game {
   let mood: CustomerMoment = "arrive";
   let choice: RoundChoice | null = null;
   let recorded: Promise<RoundRecord> | null = null;
+  let pullSoundsByRender = false;
   let arriving = false;
 
   function mode(): RoundRecord["mode"] {
@@ -275,8 +281,10 @@ export function createGame(deps: GameDeps): Game {
           // "pulled" first: render presses loose parts home, and a part still going back seats (and plays `seat`)
           // before the cord. Then the cord at once, the engine's answer once the cord has run (plan 0013 reading 3).
           events.emit("pulled", { t: action.t, started, failedPulls: state.failedPulls });
-          playMoment(audio, "cord");
-          playMoment(audio, started ? "start" : "fail", CORD_SECONDS);
+          if (!pullSoundsByRender) {
+            playMoment(audio, "cord");
+            playMoment(audio, started ? "start" : "fail", CORD_SECONDS);
+          }
           if (started) {
             const score = scoreState(machine, fault, state, action.t, customer ?? undefined);
             finish(score);
@@ -292,6 +300,10 @@ export function createGame(deps: GameDeps): Game {
 
     conditionOf(partId) {
       return fault ? conditionText(machine, fault, state, partId) : null;
+    },
+
+    setPullSoundsByRender(on) {
+      pullSoundsByRender = on;
     },
 
     fixLabel(partId) {

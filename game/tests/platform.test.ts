@@ -173,6 +173,54 @@ describe("audio (ADR 0018, plan 0013 step 1)", () => {
     expect(throwing.contextState()).toBe("none");
   });
 
+  it("loops a moment between two points and fades it out on fade(), through a gain (plan 0018)", async () => {
+    const { ctx } = fakeContext("running");
+    const sources: Array<{ loop: boolean; loopStart: number; loopEnd: number; stoppedAt: number | undefined }> = [];
+    const ramps: Array<[number, number]> = [];
+    const full = Object.assign(ctx, {
+      createBufferSource() {
+        const node = { buffer: null as unknown, loop: false, loopStart: 0, loopEnd: 0, stoppedAt: undefined as number | undefined, connect: () => node, start: () => {}, stop: (w?: number) => void (node.stoppedAt = w) };
+        sources.push(node);
+        return node;
+      },
+      createGain() {
+        const g = { gain: { value: 1, setValueAtTime: () => g, linearRampToValueAtTime: (v: number, t: number) => void ramps.push([v, t]) }, connect: () => g };
+        return g;
+      },
+    });
+    const audio = createAudio({ createContext: () => full });
+    audio.unlock();
+    await audio.load("start", good());
+    await audio.load("cord", good());
+    audio.play("start", 0, { from: 1.2, to: 2.2 });
+    audio.play("cord");
+    expect(sources[0]).toMatchObject({ loop: true, loopStart: 1.2, loopEnd: 2.2 });
+    expect(sources[1]!.loop).toBe(false);
+    audio.fade("start", 0.8);
+    expect(ramps).toEqual([[0, 10.8]]);
+    expect(sources[0]!.stoppedAt).toBe(10.8);
+    expect(sources[1]!.stoppedAt).toBeUndefined();
+    // Faded once: a second fade, or one with nothing playing, does nothing and never throws.
+    expect(() => audio.fade("start", 0.8)).not.toThrow();
+    expect(ramps.length).toBe(1);
+  });
+
+  it("a loop without gain nodes still stops on fade(), and fade() before any sound is harmless", async () => {
+    expect(() => createAudio({}).fade("start", 1)).not.toThrow();
+    const { ctx } = fakeContext("running");
+    let stopped: number | undefined;
+    ctx.createBufferSource = () => {
+      const node = { buffer: null as unknown, connect: () => node, start: () => {}, stop: (w?: number) => void (stopped = w) };
+      return node;
+    };
+    const audio = createAudio({ createContext: () => ctx });
+    audio.unlock();
+    await audio.load("start", good());
+    audio.play("start", 0, { from: 1, to: 2 });
+    audio.fade("start", 0.5);
+    expect(stopped).toBe(10.5);
+  });
+
   it("swallows a source that fails to start", async () => {
     const { ctx } = fakeContext("running");
     ctx.createBufferSource = () => {
