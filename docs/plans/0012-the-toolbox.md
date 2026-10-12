@@ -64,3 +64,15 @@ Plan 0011 merged into `main`, and the drop fix (release 0.9.3) merged, because t
 ## Release note line
 
 Added: a mechanic's toolbox beside the generator. Loosening a bolted part, the hand fetches the spanner or screwdriver from the toolbox, undoes the fasteners and puts the tool back (plan 0012, ADR 0021).
+
+## Results (2026-10-12)
+
+Steps 1 to 6 are built; see `docs/releases/0.11.0.md`. Readings that differ from the plan's, chosen while building:
+
+- **Size.** The open toolbox at 450 mm could not show beside the machine on 360 by 640. Its body is 360 by 180 mm, still big enough for both tools.
+- **Where and how turned.** Below and to the left of the machine in the default view, 1.85 machine radii towards the default camera and 0.4 to its left, turned 0.8 rad from facing the camera so the camera looks along its trays. The tools lie side by side in the back tray, which faces the machine, so they show just under it. On 360 by 640 its lower half is under the pull cord button (the plan's "cropped" fallback); with the tray at its largest the controls cover the tools too.
+- **Clear of the machine.** The check is that no point of the toolbox is drawn over the machine. Their bounding boxes overlap by 35 to 40 px in the corner below the machine where it draws nothing.
+- **Travel time.** A leg takes 0.35 s at 1.0 m, the default view's path from the toolbox over the machine. Four bolts plan at about 3.1 s from the default view.
+- **The part is loose once it is free,** while the hand still takes the tool back, so the drop check's wait for "loose" is unchanged in meaning; new input still waits for the end of the trip.
+
+The status stays `approved`, not `done`. `npm test` (331), `typecheck`, `docs:check`, `build`, `size` (188.6 KB), `assets` (toolbox 1,800 of 3,000 triangles, 198.4 KB of 200 KB) and `verify:drop` (96 of 96) pass. `npm run verify:phone` passes every toolbox and trip check but exits 1 on the hand hidden while it works the muffler's first bolt ("needs 10.6 cm more"), the kind of failure the owner is already deciding on (`HAND.maxPush`). Waiting on the owner: that decision, and a look on the phone. The phone preview is republished by the coordinating session.
