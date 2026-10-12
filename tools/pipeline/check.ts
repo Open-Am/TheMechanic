@@ -2,13 +2,15 @@
 // (plan 0005 step 7, brief section 9, ADR 0014). Fails on the first run with any error.
 //
 //   node tools/pipeline/check.ts [model.glb] [--no-copy]
+//   node tools/pipeline/check.ts --audio [--from <dir>] [--to <dir>] [--sounds <sounds.json>]
 //   node tools/pipeline/check.ts --hand | --tools | --toolbox [file.glb] [--no-copy]
 //
 // The checks are pure functions, exported for game/tests/pipeline.test.ts.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MOMENTS } from "../../game/src/platform/interfaces/index.ts";
 
 export interface Budgets {
   glbBytes: number;
@@ -19,6 +21,7 @@ export interface Budgets {
   atlasCount: number;
   environmentBytes: number;
   groundBytes: number;
+  audioBytes: number;
   allocation: Record<string, number>;
   hand: { triangles: number; bytes: number; texturePx: number };
   tools: { triangles: number; bytes: number; texturePx: number };
@@ -356,7 +359,228 @@ export function checkFileSize(label: string, bytes: number | null, budget: numbe
   return bytes > budget ? [`${label} is ${(bytes / 1000).toFixed(1)} KB, over the ${budget / 1000} KB budget.`] : [];
 }
 
+/// ---- Sound (ADR 0018, plan 0013 steps 3 and 4) ----
+
+/** One Ogg page: where it is in the file and which logical stream it belongs to. */
+export interface OggPage {
+  serial: number;
+  /** Beginning of stream: the first page of its logical stream. */
+  bos: boolean;
+  start: number;
+  end: number;
+  /** Where the page's packet data starts. */
+  body: number;
+}
+
+/** Splits an Ogg file into pages. Null if it is not Ogg or a page runs past the end. */
+export function oggPages(b: Uint8Array): OggPage[] | null {
+  const pages: OggPage[] = [];
+  let at = 0;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  while (at < b.length) {
+    if (at + 27 > b.length || b[at] !== 0x4f || b[at + 1] !== 0x67 || b[at + 2] !== 0x67 || b[at + 3] !== 0x53) return null;
+    const segments = b[at + 26]!;
+    if (at + 27 + segments > b.length) return null;
+    let size = 0;
+    for (let i = 0; i < segments; i++) size += b[at + 27 + i]!;
+    const body = at + 27 + segments;
+    const end = body + size;
+    if (end > b.length) return null;
+    pages.push({ serial: dv.getUint32(at + 14, true), bos: (b[at + 5]! & 0x02) !== 0, start: at, end, body });
+    at = end;
+  }
+  return pages.length ? pages : null;
+}
+
+const OPUS_HEAD = [0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64]; // "OpusHead"
+
+function startsWith(b: Uint8Array, at: number, sig: number[]): boolean {
+  return sig.every((x, i) => b[at + i] === x);
+}
+
+/** The Opus stream's serial and channel count, from its OpusHead, or null if the file has no Opus stream. */
+export function opusHead(b: Uint8Array, pages: OggPage[]): { serial: number; channels: number } | null {
+  for (const p of pages) {
+    if (p.bos && p.end - p.body >= 19 && startsWith(b, p.body, OPUS_HEAD)) return { serial: p.serial, channels: b[p.body + 9]! };
+  }
+  return null;
+}
+
+/**
+ * Keeps only the Opus stream. Blender 4.5's FFmpeg output writes an Ogg file with a Theora video stream beside the
+ * sound even with no video codec chosen; the pages of other streams are dropped whole, so every kept page and its
+ * checksum stay as Blender wrote them. Returns the input unchanged if there is nothing to drop, null if there is no
+ * Opus stream.
+ */
+export function opusOnly(b: Uint8Array): Uint8Array | null {
+  const pages = oggPages(b);
+  if (!pages) return null;
+  const head = opusHead(b, pages);
+  if (!head) return null;
+  const keep = pages.filter((p) => p.serial === head.serial);
+  if (keep.length === pages.length) return b;
+  const out = new Uint8Array(keep.reduce((n, p) => n + p.end - p.start, 0));
+  let at = 0;
+  for (const p of keep) {
+    out.set(b.subarray(p.start, p.end), at);
+    at += p.end - p.start;
+  }
+  return out;
+}
+
+/** The licences a sound may have (ADR 0018, owner's choice "4. A" on 2026-10-11). */
+export const SOUND_LICENCES = ["CC0 1.0", "own recording"] as const;
+
+/** Rows of LICENCE.md's table: file name (first cell) to licence (the "Licence" column). */
+export function licenceRows(text: string): Map<string, string> {
+  const rows = new Map<string, string>();
+  let licenceAt = -1;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim().startsWith("|")) continue;
+    const cells = line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+    if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
+    const i = cells.findIndex((c) => c.toLowerCase() === "licence");
+    if (i >= 0) {
+      licenceAt = i;
+      continue;
+    }
+    const file = cells[0]?.replace(/`/g, "");
+    if (file && licenceAt >= 0) rows.set(file, cells[licenceAt] ?? "");
+  }
+  return rows;
+}
+
+export interface AudioCheck {
+  errors: string[];
+  warnings: string[];
+  bytes: number;
+}
+
+/**
+ * The sound files against ADR 0018: each a mono Ogg Opus file with no other stream, one per moment and nothing else,
+ * 250 KB at most in all, each listed in LICENCE.md as CC0 1.0 or our own recording. `required` is false in the game's
+ * own tests while the owner has not yet chosen the files: a missing file is then a warning, and an error in
+ * `npm run audio`, the check run before a release.
+ */
+export function checkAudio(files: ReadonlyArray<{ name: string; bytes: Uint8Array }>, licence: string | null, moments: readonly string[], budget: number, required: boolean): AudioCheck {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const sounds = files.filter((f) => f.name !== "LICENCE.md");
+  const bytes = sounds.reduce((n, f) => n + f.bytes.length, 0);
+  const rows = licence === null ? new Map<string, string>() : licenceRows(licence);
+  const expected = new Set(moments.map((m) => `${m}.ogg`));
+
+  for (const f of sounds) {
+    if (!expected.has(f.name)) {
+      errors.push(`${f.name} is not one of the moments' files (${[...expected].join(", ")}): remove it.`);
+      continue;
+    }
+    const pages = oggPages(f.bytes);
+    const head = pages ? opusHead(f.bytes, pages) : null;
+    if (!pages) errors.push(`${f.name} is not an Ogg file.`);
+    else if (!head) errors.push(`${f.name} has no Opus stream: sounds are Ogg Opus (ADR 0018).`);
+    else {
+      if (head.channels !== 1) errors.push(`${f.name} has ${head.channels} channels: sounds are mono (ADR 0018).`);
+      if (pages.some((p) => p.serial !== head.serial)) errors.push(`${f.name} holds another stream beside the sound (Blender's video stream?): run it through opusOnly.`);
+    }
+    if (licence === null) continue;
+    const l = rows.get(f.name);
+    if (l === undefined) errors.push(`${f.name} has no row in LICENCE.md.`);
+    else if (!(SOUND_LICENCES as readonly string[]).includes(l)) errors.push(`${f.name} is listed as "${l}" in LICENCE.md: only ${SOUND_LICENCES.join(" or ")} is allowed (ADR 0018).`);
+  }
+  if (sounds.length && licence === null) errors.push("LICENCE.md is missing: every sound file is listed there with its source and licence (ADR 0018).");
+
+  const missing = moments.filter((m) => !sounds.some((f) => f.name === `${m}.ogg`)).map((m) => `${m}.ogg`);
+  if (missing.length) {
+    const text = `${missing.length} of ${moments.length} sound files are missing: ${missing.join(", ")}. Until they are added, those moments are silent.`;
+    (required ? errors : warnings).push(text);
+  }
+  if (bytes > budget) errors.push(`The sounds are ${(bytes / 1000).toFixed(1)} KB, over the ${budget / 1000} KB budget (ADR 0018).`);
+  return { errors, warnings, bytes };
+}
+
+/** One moment's row in assets/audio/sounds.json: where the sound came from and how it is cut. */
+export interface SoundSource {
+  /** File name in assets/audio/source/, or null until the owner has chosen and downloaded it. */
+  source: string | null;
+  url: string | null;
+  author: string | null;
+  licence: string | null;
+  /** Date the original was downloaded (YYYY-MM-DD). */
+  fetched: string | null;
+  /** Trim, seconds into the source. */
+  start: number;
+  end: number;
+  fadeIn: number;
+  fadeOut: number;
+  /** Gain in decibels. */
+  gainDb: number;
+}
+
+/** LICENCE.md for the sounds in the game, written from sounds.json for the moments that have a file. */
+export function licenceText(sounds: Record<string, SoundSource>, present: readonly string[]): string {
+  const lines = [
+    "# Sound licences",
+    "",
+    "Every sound file shipped in this folder, with its source and licence (ADR 0018). Only CC0 1.0 or our own recordings.",
+    "Written by `npm run audio` from `assets/audio/sounds.json`; do not edit by hand.",
+    "",
+    "| File | Source | Author | Licence | Fetched | Trim |",
+    "| --- | --- | --- | --- | --- | --- |",
+  ];
+  for (const m of present) {
+    const s = sounds[m];
+    if (!s) continue;
+    lines.push(`| ${m}.ogg | ${s.url ?? ""} | ${s.author ?? ""} | ${s.licence ?? ""} | ${s.fetched ?? ""} | ${s.start.toFixed(2)}–${s.end.toFixed(2)} s |`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 // ---- Command line ----
+
+/**
+ * npm run audio's last step: takes Blender's encoded files from assets/audio/export, keeps only their Opus stream,
+ * copies them into the game with LICENCE.md written from sounds.json, then checks the game's folder with every file
+ * required. `--from`, `--to` and `--sounds` point it elsewhere (used to prove the pipeline on a test sound).
+ */
+function mainAudio(root: string, argv: string[]): void {
+  const opt = (name: string, fallback: string) => {
+    const i = argv.indexOf(name);
+    return i >= 0 && argv[i + 1] ? resolve(argv[i + 1]!) : fallback;
+  };
+  const from = opt("--from", join(root, "assets", "audio", "export"));
+  const to = opt("--to", join(root, "game", "public", "audio"));
+  const soundsPath = opt("--sounds", join(root, "assets", "audio", "sounds.json"));
+  const budgets = JSON.parse(readFileSync(join(root, "tools", "pipeline", "budgets.json"), "utf8")) as Budgets;
+  const sounds = (JSON.parse(readFileSync(soundsPath, "utf8")) as { sounds: Record<string, SoundSource> }).sounds;
+
+  const copied: string[] = [];
+  for (const m of MOMENTS) {
+    const src = join(from, `${m}.ogg`);
+    if (!existsSync(src)) continue;
+    const only = opusOnly(new Uint8Array(readFileSync(src)));
+    if (!only) {
+      console.log(`error: ${src} has no Opus stream; not copied.`);
+      continue;
+    }
+    mkdirSync(to, { recursive: true });
+    writeFileSync(join(to, `${m}.ogg`), only);
+    copied.push(m);
+  }
+  if (copied.length) {
+    writeFileSync(join(to, "LICENCE.md"), licenceText(sounds, MOMENTS.filter((m) => existsSync(join(to, `${m}.ogg`)))));
+    console.log(`Copied ${copied.length} sound(s) into ${to}, with LICENCE.md: ${copied.join(", ")}`);
+  }
+
+  const files = existsSync(to) ? readdirSync(to).filter((n) => n !== "LICENCE.md").map((name) => ({ name, bytes: new Uint8Array(readFileSync(join(to, name))) })) : [];
+  const licencePath = join(to, "LICENCE.md");
+  const result = checkAudio(files, existsSync(licencePath) ? readFileSync(licencePath, "utf8") : null, MOMENTS, budgets.audioBytes, true);
+  for (const w of result.warnings) console.log(`warning: ${w}`);
+  for (const e of result.errors) console.log(`error: ${e}`);
+  console.log(`Checked ${to}: ${files.length} file(s), ${(result.bytes / 1000).toFixed(1)} KB of ${budgets.audioBytes / 1000} KB, ${result.errors.length} error(s).`);
+  if (result.errors.length) process.exit(1);
+}
+
 
 function mainToolbox(root: string, argv: string[]): void {
   const input = resolve(argv.find((a) => !a.startsWith("--")) ?? join(root, "assets", "toolbox", "export", "toolbox.optimised.glb"));
@@ -422,6 +646,7 @@ function main(): void {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const argv = process.argv.slice(2);
   if (argv.includes("--hand")) return mainHand(root, argv.filter((a) => a !== "--hand"));
+  if (argv.includes("--audio")) return mainAudio(root, argv.filter((a) => a !== "--audio"));
   if (argv.includes("--tools")) return mainTools(root, argv.filter((a) => a !== "--tools"));
   if (argv.includes("--toolbox")) return mainToolbox(root, argv.filter((a) => a !== "--toolbox"));
   const copy = !argv.includes("--no-copy");

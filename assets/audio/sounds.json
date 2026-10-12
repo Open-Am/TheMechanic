@@ -1,0 +1,125 @@
+{
+  "_source": "Plan 0013 step 3. One row per moment: the original file in assets/audio/source/ (not committed; download it again from url), its Freesound page, author, licence (CC0 1.0 or own recording only, ADR 0018), the date it was downloaded, the trim (start and end, seconds into the original), fades in and out (seconds) and gain (dB). npm run audio encodes every row with a source. Candidates: docs/reference/sound-shortlist.md. Until the owner chooses, source is null and the moment is silent.",
+  "sounds": {
+    "turn": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "give-unbolt": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "give-unclip": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "give-pull": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "give-scrape": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "land": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "seat": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "cord": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "fail": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    },
+    "start": {
+      "source": null,
+      "url": null,
+      "author": null,
+      "licence": null,
+      "fetched": null,
+      "start": 0,
+      "end": 0,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "gainDb": 0
+    }
+  }
+}

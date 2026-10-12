@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createAudio } from "../src/platform/local/audio.ts";
+import { browserVibrate, createAudio } from "../src/platform/local/audio.ts";
+import { MUTED_KEY, createFlag } from "../src/platform/local/storage.ts";
 import { createClock } from "../src/platform/local/clock.ts";
 import { createDailyProvider } from "../src/platform/local/daily.ts";
 import { type NavigatorLike, createShare, hasShareSheet } from "../src/platform/local/share.ts";
@@ -28,25 +29,202 @@ describe("daily provider (ADR 0005)", () => {
   });
 });
 
-describe("audio", () => {
-  it("does nothing when a sound is missing", () => {
-    expect(() => createAudio().play("remove")).not.toThrow();
+describe("audio (ADR 0018, plan 0013 step 1)", () => {
+  /** A fake AudioContext: records each source started and when; decodes any buffer except one starting 0xff. */
+  function fakeContext(startState = "suspended") {
+    const started: Array<{ buffer: unknown; when: number }> = [];
+    const ctx = {
+      state: startState,
+      currentTime: 10,
+      destination: {},
+      resumes: 0,
+      async resume() {
+        ctx.resumes++;
+        ctx.state = "running";
+      },
+      async decodeAudioData(data: ArrayBuffer) {
+        if (new Uint8Array(data)[0] === 0xff) throw new Error("EncodingError");
+        return { decoded: data.byteLength };
+      },
+      createBufferSource(): { buffer: unknown; connect: () => unknown; start: (when?: number) => void } {
+        const node = { buffer: null as unknown, connect: () => node, start: (when = 0) => void started.push({ buffer: node.buffer, when }) };
+        return node;
+      },
+    };
+    return { ctx, started };
+  }
+  const good = () => new Uint8Array([1, 2, 3]).buffer;
+  const bad = () => new Uint8Array([0xff]).buffer;
+
+  function ready(muted = false) {
+    const { ctx, started } = fakeContext();
+    const vibrations: Array<number | number[]> = [];
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    const heard: Array<[string, boolean]> = [];
+    const audio = createAudio(
+      {
+        createContext: () => ctx,
+        vibrate: (p) => (vibrations.push(p), true),
+        setTimeout: (fn, ms) => timers.push({ fn, ms }),
+        onPlay: (m, a) => void heard.push([m, a]),
+      },
+      muted,
+    );
+    return { audio, ctx, started, vibrations, timers, heard };
+  }
+
+  it("plays nothing before unlock, even with the file loaded", async () => {
+    const t = ready();
+    const loading = t.audio.load("land", good());
+    t.audio.play("land");
+    expect(t.started).toHaveLength(0);
+    expect(t.audio.contextState()).toBe("none");
+    t.audio.unlock();
+    expect(await loading).toBe(true);
+    t.audio.play("land");
+    expect(t.started).toHaveLength(1);
+    expect(t.heard).toEqual([["land", false], ["land", true]]);
   });
 
-  it("rewinds and plays a sound that is present", () => {
-    const s = { currentTime: 3, plays: 0, play() { this.plays++; } };
-    createAudio({ start: s }).play("start");
-    expect(s.currentTime).toBe(0);
-    expect(s.plays).toBe(1);
+  it("makes one context on the first unlock and resumes it only until it runs", async () => {
+    let made = 0;
+    const { ctx } = fakeContext();
+    const audio = createAudio({ createContext: () => (made++, ctx) });
+    audio.unlock();
+    await Promise.resolve();
+    audio.unlock();
+    audio.unlock();
+    expect(made).toBe(1);
+    expect(ctx.resumes).toBe(1);
+    expect(audio.contextState()).toBe("running");
   });
 
-  it("swallows a refused play, sync or async", async () => {
-    const rejecting = { currentTime: 0, play: () => Promise.reject(new Error("NotAllowedError")) };
-    const throwing = { currentTime: 0, play: () => { throw new Error("broken"); } };
-    const audio = createAudio({ remove: rejecting, fail: throwing });
-    expect(() => audio.play("remove")).not.toThrow();
-    expect(() => audio.play("fail")).not.toThrow();
-    await new Promise((r) => setTimeout(r, 0));
+  it("plays nothing while muted, and plays again when unmuted", async () => {
+    const t = ready(true);
+    t.audio.unlock();
+    expect(await t.audio.load("seat", good())).toBe(true);
+    t.audio.play("seat");
+    expect(t.started).toHaveLength(0);
+    t.audio.setMuted(false);
+    t.audio.play("seat");
+    expect(t.started).toHaveLength(1);
+    expect(t.audio.muted()).toBe(false);
+  });
+
+  it("plays nothing for a missing moment or a file that will not decode", async () => {
+    const t = ready();
+    t.audio.unlock();
+    expect(await t.audio.load("fail", bad())).toBe(false);
+    t.audio.play("fail");
+    t.audio.play("start");
+    expect(t.started).toHaveLength(0);
+    expect(t.audio.loaded()).toEqual([]);
+    expect(t.heard).toEqual([["fail", false], ["start", false]]);
+  });
+
+  it("schedules a delayed moment on the context's clock", async () => {
+    const t = ready();
+    t.audio.unlock();
+    await t.audio.load("start", good());
+    t.audio.play("start", 0.6);
+    t.audio.play("start");
+    t.audio.play("start", -1);
+    expect(t.started.map((s) => s.when)).toEqual([10.6, 10, 10]);
+  });
+
+  it("vibrates now or after a delay, and not while muted", () => {
+    const t = ready();
+    t.audio.vibrate(15);
+    t.audio.vibrate([60, 40, 80], 0.6);
+    expect(t.vibrations).toEqual([15]);
+    expect(t.timers.map((x) => x.ms)).toEqual([600]);
+    t.timers[0]!.fn();
+    expect(t.vibrations).toEqual([15, [60, 40, 80]]);
+    t.audio.vibrate(40, 0.6);
+    t.audio.setMuted(true);
+    t.timers[1]!.fn(); // muted while it waited
+    t.audio.vibrate(40);
+    expect(t.vibrations).toEqual([15, [60, 40, 80]]);
+  });
+
+  it("skips vibration where the phone has none, and swallows a refusal", () => {
+    expect(() => createAudio({}).vibrate(15)).not.toThrow();
+    expect(browserVibrate({})).toBeUndefined();
+    expect(browserVibrate(null)).toBeUndefined();
+    const audio = createAudio({
+      vibrate: () => {
+        throw new Error("refused");
+      },
+    });
+    expect(() => audio.vibrate(15)).not.toThrow();
+  });
+
+  it("plays nothing and throws nothing without Web Audio", async () => {
+    const audio = createAudio({ createContext: () => null });
+    audio.unlock();
+    expect(await audio.load("turn", good())).toBe(false);
+    expect(() => audio.play("turn")).not.toThrow();
+    const throwing = createAudio({
+      createContext: () => {
+        throw new Error("no audio");
+      },
+    });
+    expect(() => throwing.unlock()).not.toThrow();
+    expect(throwing.contextState()).toBe("none");
+  });
+
+  it("swallows a source that fails to start", async () => {
+    const { ctx } = fakeContext("running");
+    ctx.createBufferSource = () => {
+      throw new Error("broken");
+    };
+    const audio = createAudio({ createContext: () => ctx });
+    audio.unlock();
+    await audio.load("cord", good());
+    expect(() => audio.play("cord")).not.toThrow();
+  });
+});
+
+describe("storage and the mute setting (ADR 0018, plan 0013 reading 10)", () => {
+  function memoryStorage() {
+    const data = new Map<string, string>();
+    return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+  }
+
+  it("remembers the choice under openam.muted, with sound on by default", () => {
+    const s = memoryStorage();
+    expect(MUTED_KEY).toBe("openam.muted");
+    const flag = createFlag(s, MUTED_KEY);
+    expect(flag.get()).toBe(false);
+    flag.set(true);
+    expect(s.data.get("openam.muted")).toBe("1");
+    expect(createFlag(s, MUTED_KEY).get()).toBe(true); // after a reload
+    flag.set(false);
+    expect(createFlag(s, MUTED_KEY).get()).toBe(false);
+  });
+
+  it("falls back to memory when localStorage throws", () => {
+    const throwing = {
+      getItem: (): string | null => {
+        throw new Error("SecurityError");
+      },
+      setItem: () => {
+        throw new Error("QuotaExceededError");
+      },
+    };
+    const flag = createFlag(throwing, MUTED_KEY);
+    expect(flag.get()).toBe(false);
+    expect(() => flag.set(true)).not.toThrow();
+    expect(flag.get()).toBe(true);
+    const none = createFlag(null, MUTED_KEY);
+    none.set(true);
+    expect(none.get()).toBe(true);
+  });
+
+  it("reads a value it does not know as the default", () => {
+    const s = memoryStorage();
+    s.data.set(MUTED_KEY, "yes");
+    expect(createFlag(s, MUTED_KEY).get()).toBe(false);
   });
 });
 

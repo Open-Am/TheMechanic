@@ -11,6 +11,21 @@ Design note, first written for Phase 2 (plan 0003). The motion vocabulary is in 
 
 Install: dragging a chip carries the part in the hand under the pointer; dropped over the machine, it flies to its exploded position, then plays its motion backwards into place, and the hand lets go.
 
+## Sound and vibration (plan 0013, ADR 0018)
+
+Each moment fires with the picture, never before it and never for a part that cannot come off.
+
+| Moment | Fires when | From | Vibration |
+| --- | --- | --- | --- |
+| `turn` | a fastener or an `unscrew` part completes a whole turn, coming out or going in: a fastener's two turns click at half way and at the end of its 0.25 s (0.2 s going in), while the tool is on it | render | none |
+| `give-unbolt`, `give-unclip`, `give-pull`, `give-scrape` | the part's freeing step starts, after its fasteners (`slide` and `lift` scrape; unknown types scrape; `unscrew` has none) | render | 15 ms |
+| `land` | the part is dropped on the tray (the accepted remove) | app | none |
+| `seat` | a part put back reaches home, before its fasteners go in | render | 15 ms |
+| `cord` | the cord is pulled (the accepted pull) | app | none |
+| `fail`, `start` | 0.6 s after the cord (`CORD_SECONDS`) | app | 40 ms; 60, 40, 60, 40, 80 ms |
+
+An unscrewed part clicks for the whole turns it makes while loosening (75 percent of its turns): the spark plug clicks twice, the fuel tap (one turn) not at all. Going back in it clicks every turn. Pressing loose parts home before the cord and the walk-out are silent. Carrying a part makes no sound, and neither do the hand's trips to and from the toolbox (ADR 0021): the give comes once the last fastener is out, before the tool goes back, and the seat comes before the hand fetches the tool to do the fasteners up.
+
 ## The mechanic's hand (plans 0008 to 0010)
 
 The hand is the player's pointer. It follows the pointer with a short smoothing, its arm aimed at a point level with the camera and well below it, so the arm runs off the bottom of the screen to a body just out of view. Resting, its fingertips float just off the surface under the pointer, palm towards it; gripping, its grip point sits off the surface by about the radius of what it closes on; pinching (parts no longer than 75 mm: the spark plug, plug cap, fuel tap, capacitor), its pinch point does. While it loosens or carries a part, it rides with the part. The numbers live in `game/src/render/handpose.ts` and `motion.ts`.

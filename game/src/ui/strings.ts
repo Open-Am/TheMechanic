@@ -44,6 +44,8 @@ export const STRINGS = {
   copied: "Copied",
   copyByHand: "Copy this to share it",
   loadingLabel: "Loading the machine",
+  soundOn: "Sound on",
+  soundOff: "Sound off",
 } as const;
 
 /** Player-facing text that names someone. */

@@ -84,6 +84,11 @@ export function starText(stars: number): string {
 }
 
 /** The meter's colour band for a share of patience left (ADR 0015 thresholds: 50 and 20 percent). */
+/** The mute button's label and pressed state (plan 0013 step 7). Pressed means muted: no sound and no vibration. */
+export function soundButton(muted: boolean): { label: string; pressed: "true" | "false" } {
+  return muted ? { label: STRINGS.soundOff, pressed: "true" } : { label: STRINGS.soundOn, pressed: "false" };
+}
+
 export function patienceMood(share: number): "calm" | "waiting" | "annoyed" {
   if (share < 0.2) return "annoyed";
   if (share < 0.5) return "waiting";

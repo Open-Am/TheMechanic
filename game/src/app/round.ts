@@ -4,9 +4,10 @@
 
 import { apply, conditionText, hasWalked, initialState, moodFor, patienceAt, scoreState, walkOutTime } from "../core/index.ts";
 import type { Action, ActionType, Customer, CustomerFile, CustomerMoment, Fault, FaultFile, FaultId, Machine, PartId, Refusal, RoundState, ScoreBreakdown, Symptom } from "../core/index.ts";
-import type { Audio, Clock, ScoreStore, StoredResult } from "../platform/interfaces/index.ts";
+import type { Clock, ScoreStore, StoredResult } from "../platform/interfaces/index.ts";
 import { dailyCustomer, recordResult, recordUnfinished } from "./daily.ts";
 import { Emitter } from "./emitter.ts";
+import { CORD_SECONDS, type MomentPlayer, playMoment } from "./moments.ts";
 import { pickCustomer, pickFault } from "./faults.ts";
 
 export interface PartEvent {
@@ -65,7 +66,8 @@ export interface GameDeps {
   machine: Machine;
   faults: FaultFile;
   clock: Clock;
-  audio: Audio;
+  /** Sound and vibration for the moments that come from accepted actions (ADR 0018). */
+  audio: MomentPlayer;
   /** Returns [0, 1). Injected so tests are repeatable. */
   random: () => number;
   /** Customers (ADR 0015). Without them there is no patience, as before. */
@@ -159,7 +161,7 @@ export function createGame(deps: GameDeps): Game {
     const t = Math.max(state.t, Math.round(clock.now() - startedAt));
     if (hasWalked(state, customer, t)) {
       walkedAt = walkOutTime(state, customer);
-      audio.play("fail");
+      // Silent: ADR 0018 has no walk-out moment (plan 0013 reading 4).
       const score = scoreState(machine, fault, state, walkedAt, customer);
       finish(score);
       events.emit("left", { t: walkedAt, score, log: [...log], line: line("leaving") });
@@ -225,7 +227,7 @@ export function createGame(deps: GameDeps): Game {
       const partId = action.partId ?? "";
       switch (action.type) {
         case "remove":
-          audio.play("remove");
+          playMoment(audio, "land");
           events.emit("removed", { partId, t: action.t });
           break;
         case "install":
@@ -239,7 +241,9 @@ export function createGame(deps: GameDeps): Game {
           break;
         case "pull": {
           const started = state.endedAt !== null;
-          audio.play(started ? "start" : "fail");
+          // The cord at once, the engine's answer once the cord has run (plan 0013 reading 3).
+          playMoment(audio, "cord");
+          playMoment(audio, started ? "start" : "fail", CORD_SECONDS);
           events.emit("pulled", { t: action.t, started, failedPulls: state.failedPulls });
           if (started) {
             const score = scoreState(machine, fault, state, action.t, customer ?? undefined);

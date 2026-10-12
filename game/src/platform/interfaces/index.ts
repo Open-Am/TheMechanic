@@ -32,10 +32,27 @@ export interface Share {
   share(text: string): Promise<"sheet" | "clipboard" | "none">;
 }
 
-export type SoundName = "remove" | "fail" | "start";
+/** The moments that make a sound (ADR 0018, plan 0013 reading 1). One file each: game/public/audio/<moment>.ogg. */
+export const MOMENTS = ["turn", "give-unbolt", "give-unclip", "give-pull", "give-scrape", "land", "seat", "cord", "fail", "start"] as const;
+export type Moment = (typeof MOMENTS)[number];
 
+/** A vibration: one length in ms, or on, off, on... lengths, as navigator.vibrate takes them. */
+export type VibrationPattern = number | readonly number[];
+
+/**
+ * Sound and vibration (ADR 0018). Muted means neither. Nothing plays before unlock() has run inside a tap. A moment
+ * whose file is missing, late or undecodable plays nothing (ADR 0023). Every failure is swallowed.
+ */
 export interface Audio {
-  play(name: SoundName): void;
+  /** Plays a moment now, or after delaySeconds. */
+  play(moment: Moment, delaySeconds?: number): void;
+  /** Vibrates where the phone supports it, now or after delaySeconds. */
+  vibrate(pattern: VibrationPattern, delaySeconds?: number): void;
+  setMuted(muted: boolean): void;
+  /** Call inside a tap or key press: starts the browser's audio, which browsers allow only after a gesture. */
+  unlock(): void;
+  /** Hands over a moment's downloaded file. Resolves to true once it can play, false if it cannot be decoded. */
+  load(moment: Moment, data: ArrayBuffer): Promise<boolean>;
 }
 
 export interface Clock {

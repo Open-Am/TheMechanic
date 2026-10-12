@@ -14,3 +14,6 @@ assets/*/export/*.png
 assets/*/match/
 # Baked textures are packed into the .blend; the loose copies are build output.
 assets/*/textures/
+# Sound originals are downloaded by the owner and not committed (plan 0013); the encoded copies are build output.
+assets/audio/source/
+assets/audio/export/
