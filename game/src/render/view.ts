@@ -1287,6 +1287,9 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     paying: boolean;
     /** Where the skips land, in order. */
     stops: number[];
+    /** For the browser check: the farthest the handle came out, and whether loose parts were pressed home first. */
+    peak: number;
+    homed: boolean;
   }
   let startup: Startup | null = null;
   let startups = 0;
@@ -1314,7 +1317,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     let done: () => void = () => {};
     const promise = new Promise<void>((r) => (done = r));
     const stops = plan.run ? [plan.run.catch, plan.run.smile, plan.run.press, plan.run.stopped, plan.end] : [plan.cough!.end];
-    startup = { plan, t: -delay, seed: 0x5eed + ++startups, did: new Set(), done, promise, paying: false, stops };
+    startup = { plan, t: -delay, seed: 0x5eed + ++startups, did: new Set(), done, promise, paying: false, stops, peak: 0, homed: delay > 0 };
     if (fixed) endingPromise = promise;
   }
 
@@ -1357,6 +1360,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     if (p && pullNodes.handle) {
       const rest = nodeRest.get(pullNodes.handle)!;
       const [ox, oy, oz] = handleOffset(p, t);
+      s.peak = Math.max(s.peak, ox);
       pullNodes.handle.position.set(rest.p.x + ox, rest.p.y + oy, rest.p.z + oz);
       if (pullNodes.rope) {
         const rr = nodeRest.get(pullNodes.rope)!;
@@ -1909,6 +1913,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
           phase,
           fixed: !!r,
           handleOut,
+          handlePeak: s.peak,
+          homed: s.homed,
           ropeLength: ropeLen,
           shakeMm: view.root.position.distanceTo(rootRest.p) * 1000,
           roll: view.root.rotation.z - rootRest.r,

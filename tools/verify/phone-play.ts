@@ -203,6 +203,40 @@ async function tapSelector(selector: string): Promise<void> {
 // ---- Game state from the page ----
 
 const idle = () => waitFor("animations to finish", () => evaluate<boolean>("!window.__openAmDevRender.busy()"));
+/** Plan 0018: the pull and the run as they play, or null. */
+interface StartupNow {
+  t: number;
+  phase: string;
+  fixed: boolean;
+  handleOut: number | null;
+  handlePeak: number;
+  homed: boolean;
+  ropeLength: number | null;
+  shakeMm: number;
+  roll: number;
+  switchAngle: number | null;
+  sprites: number;
+  notesInHand: boolean;
+  handHolding: string | null;
+  customerClip: string | null;
+  stops: number[];
+  end: number;
+}
+const startupNow = () => evaluate<StartupNow | null>("window.__openAmDevRender.startup()");
+/** After a failed pull: waits for the pull and the cough to end, so the next gesture is not taken as a skip. */
+const pullOver = () => waitFor("the pull and the cough to end", async () => !(await startupNow()), 8000);
+/** Taps through the start-up and the ending, a step a tap (ADR 0027), until neither plays. */
+async function skipThrough(): Promise<number> {
+  let taps = 0;
+  for (let i = 0; i < 12; i++) {
+    const busy = (await startupNow()) || (await evaluate<boolean>("!!window.__openAmDevRender.story()"));
+    if (!busy) break;
+    await tapAt((await evaluate<number>("window.innerWidth")) * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
+    taps++;
+    await sleep(150);
+  }
+  return taps;
+}
 const diag = () => evaluate<string>(`document.querySelector('[data-marker="open-am-diagnostic-overlay"]')?.textContent ?? ""`);
 /** Share of opaque pixels in a tray chip picture: 0 means missing or blank. */
 const chipPictureFill = (id: string) =>
@@ -637,12 +671,9 @@ async function solveRound(): Promise<{ faultId: string; score: string }> {
   if (watchEnding && onWinningPull) await onWinningPull();
   if (!watchEnding) {
     await sleep(300);
-    if (await evaluate<boolean>("!!window.__openAmDevRender.story()")) {
-      const w = await evaluate<number>("window.innerWidth");
-      await tapAt(w * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
-    }
+    await skipThrough();
   }
-  await waitFor("the result screen", () => evaluate<boolean>("!!document.querySelector('.result')"), 9000);
+  await waitFor("the result screen", () => evaluate<boolean>("!!document.querySelector('.result')"), 16000);
   return { faultId: fault.id, score: await evaluate<string>("document.querySelector('.result .total').textContent") };
 }
 
@@ -710,6 +741,7 @@ const toolRound: string[] = [];
       const midway = await waitFor("the spanner out", () => evaluate<string | null>("window.__openAmDevRender.tool()"), 2000).catch(() => null);
       await tapSelector(".pull");
       await sleep(800);
+      await pullOver().catch(() => false);
       const toolAfter = await evaluate<string | null>("window.__openAmDevRender.tool()");
       const toolShown = await evaluate<boolean>("window.__openAmDevRender.toolOut()");
       const outs = await evaluate<number[]>(`window.__openAmDevRender.fasteners("recoil_starter")`);
@@ -817,10 +849,10 @@ try {
   // A failed pull: the cord, then the cough, 0.6 s later, with 40 ms.
   await clearSound();
   await tapSelector(".pull");
-  await sleep(1200);
+  await pullOver();
   h = await heardNow();
   v = await vibrationsNow();
-  sound(JSON.stringify(moments(h)) === '["cord","fail"]' && JSON.stringify(v) === "[40]", "a failed pull plays the cord then fail (40 ms)", `a failed pull logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`);
+  sound(JSON.stringify(moments(h)) === '["cord","fail"]' && JSON.stringify(v) === "[40]", "a failed pull plays the cord as the handle comes out, then fail (40 ms)", `a failed pull logged ${JSON.stringify(moments(h))} and vibrated ${JSON.stringify(v)}`);
 
   // The cord pulled while a part with no fasteners is still going back: it seats first, then the cord, then fail.
   await pullOff("plug_cap");
@@ -828,14 +860,16 @@ try {
   await clearSound();
   await putBack("plug_cap");
   await tapSelector(".pull");
-  await sleep(1500);
+  // The pull waited for the plug cap to be pressed home first (plan 0018: the start-up's homing step).
+  const homedFirst = (await startupNow())?.homed === true;
+  await pullOver();
   h = await heardNow();
   v = await vibrationsNow();
   const capHome = await evaluate<boolean>(`!document.querySelector('.tray [data-part="plug_cap"]')`);
-  // Seat and cord within 50 ms of each other: the pull caught the plug cap on its way back (its put-back takes about
-  // 0.85 s), so this is the press home seating it, not the put-back ending by itself before the tap.
+  // The pull caught the plug cap on its way back (its put-back takes about 0.85 s) and pressed it home before pulling:
+  // the seat, then the cord as the handle comes out (plan 0018).
   const at = await evaluate<number[]>("(window.__openAmDevAudio?.log() ?? []).map((x) => x.at)");
-  const caught = at.length >= 2 && Math.abs(at[1]! - at[0]!) <= 50;
+  const caught = homedFirst && at.length >= 2 && at[1]! > at[0]!;
   sound(
     JSON.stringify(moments(h)) === '["seat","cord","fail"]' && JSON.stringify(v) === "[15,40]" && capHome && caught,
     "the cord pulled while the plug cap is still going back: it seats (15 ms) before the cord, then fail (40 ms)",
@@ -1190,6 +1224,7 @@ const controlsTop = () => evaluate<number>("document.querySelector('.controls').
     if (failed) customerChecks.push("a failed pull plays failed_pull");
     else failures.push(`customer: a failed pull played ${(await customerNow())?.clip}`);
     await waitFor("back to idle", async () => ((await customerNow())?.clip === "idle" ? true : null), 4000).catch(() => failures.push("customer: did not go back to idle after the failed pull"));
+    await pullOver();
     const mm = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
     const fault = faultFile.faults.find((f) => f.id === mm?.[1]);
     if (fault) {
@@ -1253,7 +1288,7 @@ mkdirSync(endingShots, { recursive: true });
 async function watchStory(clip: string, marks: number[], name: string): Promise<{ timerDuring: Set<string>; notes: boolean; carried: boolean; bench: boolean; lastT: number }> {
   const seen = { timerDuring: new Set<string>(), notes: false, carried: false, bench: false, lastT: 0 };
   let next = 0;
-  for (const end = Date.now() + 9000; Date.now() < end; ) {
+  for (const end = Date.now() + 16000; Date.now() < end; ) {
     const st = await storyNow();
     if (!st || st.clip !== clip) {
       if (seen.lastT > 0) break;
@@ -1313,18 +1348,24 @@ try {
   endingChecks.push(`a tap skipped the arrival: the clock ran ${((Date.now() - skipAt) / 1000).toFixed(2)} s after it`);
   watchEnding = true;
   let skip2 = Date.now();
+  let skipPhases: string[] = [];
   onWinningPull = async () => {
-    await waitFor("pay_leave", async () => ((await storyNow())?.clip === "pay_leave" ? true : null), 8000);
+    await waitFor("pay_leave", async () => ((await storyNow())?.clip === "pay_leave" ? true : null), 12000);
     await sleep(500);
-    skip2 = Date.now();
-    await tapAt(w * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
+    // Plan 0018: each tap skips a step (the press, stopped, gone); the last one goes to the result.
+    for (let i = 0; i < 6 && (await startupNow()); i++) {
+      skip2 = Date.now();
+      await tapAt(w * 0.85, (await evaluate<number>("window.innerHeight")) * 0.4);
+      await sleep(200);
+      skipPhases.push((await startupNow())?.phase ?? "over");
+    }
   };
   await solveRound();
   onWinningPull = null;
   watchEnding = false;
   const toResult = (Date.now() - skip2) / 1000;
-  if (toResult < 1.6) endingChecks.push(`a tap skipped paying and leaving: the result ${toResult.toFixed(2)} s after it`);
-  else failures.push(`ending: after a tap on the ending the result took ${toResult.toFixed(2)} s`);
+  if (toResult < 1.6 && skipPhases.at(-1) === "over") endingChecks.push(`taps skipped paying and leaving a step at a time (${skipPhases.join(", ")}): the result ${toResult.toFixed(2)} s after the last`);
+  else failures.push(`ending: taps on the ending went ${skipPhases.join(", ")}; the result took ${toResult.toFixed(2)} s after the last`);
 
   // The walk-out with a part off: it snaps back, the tray empties, they storm off with a whole generator.
   await tapSelector(".result .primary");
@@ -1346,6 +1387,135 @@ try {
 } catch (e) {
   failures.push(`ending: ${(e as Error).message}`);
   await screenshot("fail-ending");
+}
+watchEnding = false;
+onWinningPull = null;
+await load(url);
+
+// Pulling the cord (plan 0018 step 4, ADR 0027). Frames to OPEN_AM_PULL_SHOTS. A failed pull: the handle travels out
+// about 40 cm and back with the rope stretched to it, the engine coughs and dies, and the round goes on. A winning pull:
+// the engine runs and shakes and smokes on its own, the customer pays while it runs, the hand presses the switch, the
+// engine stops (no shake) before the customer lifts it, then the result. The frame rate at 4x CPU throttle with the
+// exhaust showing.
+const pullChecks: string[] = [];
+const pullShots = process.env.OPEN_AM_PULL_SHOTS ?? outDir;
+mkdirSync(pullShots, { recursive: true });
+let runFps = 0;
+interface PullSeen {
+  phases: string[];
+  handleMax: number;
+  ropeMax: number;
+  ropeAtMax: number;
+  /** The farthest out the handle was seen in a sample (the rope must be at least as long then). */
+  handleSeenMax: number;
+  handleEnd: number;
+  shakeBy: Record<string, number>;
+  spritesBy: Record<string, number>;
+  notesWhile: string[];
+  switchAt: string | null;
+  liftedWhile: string[];
+  holding: string[];
+  notesInHandWhile: string[];
+}
+async function watchPull(name: string, onPhase?: (phase: string) => Promise<void>): Promise<PullSeen> {
+  const seen: PullSeen = { phases: [], handleMax: 0, ropeMax: 0, ropeAtMax: 0, handleSeenMax: 0, handleEnd: 0, shakeBy: {}, spritesBy: {}, notesWhile: [], switchAt: null, liftedWhile: [], holding: [], notesInHandWhile: [] };
+  let shotPeak = false;
+  let shotNotes = false;
+  let started = false;
+  for (const end = Date.now() + 20000; Date.now() < end; ) {
+    const st = await startupNow();
+    if (!st) {
+      if (started) break;
+      await sleep(20);
+      continue;
+    }
+    started = true;
+    const story = await storyNow();
+    if (seen.phases.at(-1) !== st.phase) {
+      seen.phases.push(st.phase);
+      await shotTo(pullShots, `${name}-${String(seen.phases.length).padStart(2, "0")}-${st.phase}-${st.t.toFixed(2)}s`);
+      if (onPhase) await onPhase(st.phase);
+    }
+    if ((st.handleOut ?? 0) > seen.handleSeenMax) {
+      seen.handleSeenMax = st.handleOut ?? 0;
+      seen.ropeAtMax = st.ropeLength ?? 0;
+    }
+    seen.handleMax = Math.max(seen.handleMax, st.handlePeak, st.handleOut ?? 0);
+    seen.ropeMax = Math.max(seen.ropeMax, st.ropeLength ?? 0);
+    seen.handleEnd = st.handleOut ?? 0;
+    if (!shotPeak && (st.handleOut ?? 0) > 0.3) {
+      shotPeak = true;
+      await shotTo(pullShots, `${name}-handle-out-${((st.handleOut ?? 0) * 100).toFixed(0)}cm`);
+    }
+    seen.shakeBy[st.phase] = Math.max(seen.shakeBy[st.phase] ?? 0, st.shakeMm);
+    seen.spritesBy[st.phase] = Math.max(seen.spritesBy[st.phase] ?? 0, st.sprites);
+    if (story?.notes) seen.notesWhile.push(st.phase);
+    if (st.notesInHand && !seen.notesInHandWhile.includes(st.phase)) seen.notesInHandWhile.push(st.phase);
+    if (story?.generator === "carried") seen.liftedWhile.push(st.phase);
+    if (seen.switchAt === null && Math.abs(st.switchAngle ?? 0) > 0.2) seen.switchAt = st.phase;
+    if (st.handHolding && !seen.holding.includes(st.handHolding)) seen.holding.push(st.handHolding);
+    // The hand at the notes, just before it takes them.
+    if (st.phase === "paying" && !shotNotes && story && story.notes && story.t > 1.2) {
+      shotNotes = true;
+      await shotTo(pullShots, `${name}-hand-at-notes-${st.t.toFixed(2)}s`);
+    }
+    await sleep(10);
+  }
+  return seen;
+}
+try {
+  await load(url.replace("?diag", "?diag&patience=600"));
+  await toBriefing();
+  await beginRound();
+  // A failed pull (nothing fixed yet).
+  await tapSelector(".pull");
+  const fail = await watchPull("fail");
+  const running = await evaluate<boolean>("window.__openAmDevRender.running()");
+  const okFail = fail.handleMax > 0.35 && fail.handleMax < 0.45 && fail.ropeMax > 0.3 && fail.ropeAtMax > fail.handleSeenMax && fail.handleEnd < 0.005 && fail.phases.includes("cough") && (fail.shakeBy["cough"] ?? 0) > 0.3 && (fail.spritesBy["cough"] ?? 0) > 0 && running;
+  if (okFail) pullChecks.push(`a failed pull: the handle out ${(fail.handleMax * 100).toFixed(0)} cm with the rope at ${(fail.ropeAtMax * 100).toFixed(0)} cm and back, a cough (shake up to ${(fail.shakeBy["cough"] ?? 0).toFixed(1)} mm, dark puffs), the round goes on`);
+  else failures.push(`pull: a failed pull saw ${JSON.stringify(fail)}, round running ${running}`);
+  const restMm = await evaluate<number>("window.__openAmDevRender.machineOffsetMm?.() ?? 0");
+  if (restMm > 0.01) failures.push(`pull: the machine was still ${restMm.toFixed(2)} mm off its place after the cough`);
+  // The winning pull, watched to the result, with the frame rate read while it runs and smokes at 4x CPU throttle.
+  watchEnding = true;
+  let win: PullSeen | null = null;
+  onWinningPull = async () => {
+    win = await watchPull("win", async (phase) => {
+      if (phase !== "running") return;
+      await send("Emulation.setCPUThrottlingRate", { rate: 4 });
+      await sleep(1500);
+      runFps = Number(/fps (\d+)/.exec(await diag())?.[1] ?? "0");
+      await send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    });
+  };
+  await solveRound();
+  onWinningPull = null;
+  watchEnding = false;
+  const w2 = win as PullSeen | null;
+  if (!w2) failures.push("pull: the winning pull was not seen");
+  else {
+    const order = ["pull", "running", "paying", "pocketing", "switch", "winding-down", "leaving"];
+    const inOrder = order.every((ph) => w2.phases.includes(ph)) && order.every((ph, i) => i === 0 || w2.phases.indexOf(ph) > w2.phases.indexOf(order[i - 1]!));
+    const shookRunning = (w2.shakeBy["running"] ?? 0) > 0.3 && (w2.shakeBy["running"] ?? 0) < 4;
+    const smoked = (w2.spritesBy["running"] ?? 0) > 0;
+    // The money changes hands while it runs: the customer holds the notes out (paying), the mechanic's hand has them and
+    // pockets them (pocketing), all before the switch (the owner, 2026-10-12).
+    const paidRunning = w2.notesWhile.length > 0 && w2.notesWhile.every((ph) => ph === "paying" || ph === "running") && w2.notesInHandWhile.includes("pocketing") && w2.notesInHandWhile.every((ph) => ph === "pocketing" || ph === "paying");
+    const stillWhenLifted = w2.liftedWhile.length > 0 && w2.liftedWhile.every((ph) => ph === "leaving") && (w2.shakeBy["leaving"] ?? 0) === 0;
+    const switched = w2.switchAt === "switch" || w2.switchAt === "winding-down";
+    if (inOrder && shookRunning && smoked && paidRunning && stillWhenLifted && switched && w2.handleMax > 0.35) {
+      pullChecks.push(`a winning pull: ${w2.phases.join(", ")}; the handle out ${(w2.handleMax * 100).toFixed(0)} cm; running shake up to ${(w2.shakeBy["running"] ?? 0).toFixed(1)} mm with up to ${w2.spritesBy["running"]} exhaust sprites; the notes passed from the customer's hand to the mechanic's and into the pocket while it ran; the rocker flipped in ${w2.switchAt}; no shake when the customer lifted it; then the result`);
+    } else failures.push(`pull: the winning pull saw ${JSON.stringify(w2)}`);
+    if (w2.holding.length) pullChecks.push(`the hand held ${w2.holding.join(", ")}`);
+  }
+  if (!(runFps > 0)) failures.push("pull: the frame rate while the engine ran could not be read");
+  else if (runFps < FPS_BUDGET) failures.push(`pull: ${runFps} fps at 4x CPU throttle with the exhaust showing, under the ${FPS_BUDGET} fps budget`);
+  else pullChecks.push(`${runFps} fps at 4x CPU throttle while it ran and smoked`);
+  await tapSelector(".result .primary");
+  await atStart();
+} catch (e) {
+  failures.push(`pull: ${(e as Error).message}`);
+  await screenshot("fail-pull");
 }
 watchEnding = false;
 onWinningPull = null;
@@ -1518,6 +1688,8 @@ for (const t of ["spanner", "screwdriver"]) if (!toolsSeen.has(t)) failures.push
 console.log(`Bench: ${benchChecks.join("; ") || "not run"}`);
 console.log(`Customer: ${customerChecks.join("; ") || "not run"}`);
 console.log(`Bringing and endings: ${endingChecks.join("; ") || "not run"}`);
+console.log(`Pulling the cord: ${pullChecks.join("; ") || "not run"}`);
+if (pullChecks.length < 3 && !failures.some((x) => x.startsWith("pull:"))) failures.push("pull: the plan 0018 checks did not all run");
 if (endingChecks.length < 5 && !failures.some((x) => x.startsWith("ending"))) failures.push("ending: the plan 0017 checks did not all run");
 if (benchChecks.length !== 4 && !failures.some((x) => x.startsWith("bench:"))) failures.push("bench: the bench checks did not all run");
 console.log(`Toolbox: ${toolboxChecks.join("; ") || "not run"}`);
