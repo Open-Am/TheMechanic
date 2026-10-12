@@ -10,11 +10,12 @@ things in it that the player never uses (a wire brush, sockets), so it reads as 
 
 One root node `toolbox` (glTF axes, metres): origin on the ground under the middle of the body, the long side along X,
 the front tray towards +Z. Under it, two empty nodes where the tools rest, each turned so a tool
-placed with the empty's transform lies in it. They lie side by side in the back tray, which the game turns towards the
-machine, so from the default camera they show just under the machine:
+placed with the empty's transform lies in it. They lie side by side in the -X half of the back tray. Since plan 0016 the
+toolbox stands on the workbench's left end with its back tray towards the camera, so its -X end is the one nearest the
+machine and the screen's middle, and the tools show while the left screen edge cuts the box's other end:
 
 - `slot_spanner`: the spanner's jaw centre; its local Z (the bolt axis) points up, its handle along +X.
-- `slot_screwdriver`: the screwdriver's tip; its shaft (local +Z) runs along -X.
+- `slot_screwdriver`: the screwdriver's tip; its shaft (local +Z) runs along +X.
 
 Scenery only (ADR 0021): no part of the game picks it. Made by script from our own materials; reference photos of real
 toolboxes are for matching only and never committed (ADR 0013).
@@ -153,8 +154,8 @@ def contents(M):
 # Where the tools rest in the back tray (glTF), and their axes: see the module docstring.
 FLOOR = TRAY_Y + WALL
 SLOT_POSES = {
-    "slot_spanner": ((-0.07, FLOOR + 0.003, -TRAY_Z - 0.02), (1, 0, 0), (0, 0, -1), (0, 1, 0)),
-    "slot_screwdriver": ((0.09, FLOOR + 0.0132, -TRAY_Z + 0.02), (0, 0, 1), (0, 1, 0), (-1, 0, 0)),
+    "slot_spanner": ((-0.14, FLOOR + 0.003, -TRAY_Z - 0.02), (1, 0, 0), (0, 0, -1), (0, 1, 0)),
+    "slot_screwdriver": ((-0.155, FLOOR + 0.0132, -TRAY_Z + 0.02), (0, 0, -1), (0, 1, 0), (1, 0, 0)),
 }
 
 # glTF axes from Blender axes: gl = C @ bl.
