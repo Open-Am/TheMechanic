@@ -42,6 +42,15 @@ Raised by the visual reference research on 2026-10-10 (`reference/visual-referen
 - The fuel tap turns one turn in `machine.json`, and loosening does 75 percent of the turns, so it makes no click while loosening, only one going back in. Is one turn right for the real tap? (Plan 0013.)
 - With no sound files, a static host that answers 404 will likely make the browser print its own "Failed to load resource" line for each of the ten requests. The game itself stays silent and logs nothing. Not seen on 2026-10-12: the dev server and `vite preview` answer a missing file with the page, and a production build in `vite preview` showed no console error. Not tested on a real host. Since 2026-10-12 the ten files ship, so this no longer arises.
 
+## More faults (research, 2026-10-12)
+
+From `reference/more-faults-research.md`, compiled from web search snippets on other small generators; nothing there is from an ET950 manual or a Lagos mechanic. For the mechanic to confirm before any of it becomes data:
+
+- Which of the 19 listed faults Lagos mechanics actually see on ET950 clones, and how often. Every frequency in the research is an estimate.
+- Whether the clones have a low-oil sensor, an AVR or a CDI unit, and the coil air gap.
+- The fuel cap vent design, and whether there is an in-line fuel filter or only a tank screen.
+- Whether bad fuel, water in fuel and the wrong oil mix should be faults of their own or causes behind the existing ones.
+
 ## Owner decisions pending
 
 - Choosing between sounds: the owner wants players to be able to choose between alternative sounds later. On 2026-10-12 the owner wrote: "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". This changes scope (what is built), so it needs an ADR first (ADR 0001). The alternatives the owner downloaded are kept locally in `assets/audio/source/`, which is git-ignored, so they exist on this machine only. Their pages are listed in `docs/reference/sound-shortlist.md`.
