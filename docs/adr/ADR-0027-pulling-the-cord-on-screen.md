@@ -19,11 +19,13 @@ Today pressing Pull cord plays the cord and engine sounds (ADR 0018) and, when t
 
 **The pull, every time.** Pressing Pull cord (after any loose parts are done up, as ADR 0020 says) plays the pull on the machine: the generator turns on the bench, if needed, so the recoil starter's handle faces the mechanic; the hand grips the handle and pulls it out sharply about 40 cm, the rope paying out of the starter, then lets it run back in. The `cord` sound and moment (ADR 0018) land on the pull. About 1 second.
 
-**When the fault is fixed: it starts and runs.** The engine catches: the generator shakes on its rubber feet, a puff of exhaust comes from the muffler and then a faint haze, and it keeps running, shaking gently, with the `start` sound. After about 1.5 seconds of running, the customer's paying and leaving (ADR 0026) plays, and they carry it off still running. The result screen's title "It starts!" stays as the heading of the result, shown after all of this.
+**When the fault is fixed: it starts and runs, the customer pays, the mechanic stops it.** The engine catches: the generator shakes on its rubber feet, a puff of exhaust comes from the muffler and then a faint haze, and it keeps running, shaking gently, with the `start` sound. While it runs, the customer smiles and holds out the folded naira notes across the bench (ADR 0026), and the mechanic's hand takes them. Then the hand presses the red engine switch on the front panel: the engine winds down, the shaking stops and the haze fades. Only then does the customer lift the generator and leave happily, carrying it stopped. About 4 to 5 seconds from the catch to the customer leaving. The result screen's title "It starts!" stays as the heading of the result, shown after all of this.
+
+This replaces one detail of ADR 0026: there the customer lifts "the running generator"; here the mechanic stops it first. The rest of ADR 0026 stands.
 
 **When it is not fixed: it coughs and dies.** The engine turns over, coughs with a small dark puff, shudders and stops, with the `fail` sound; the handle is back in its housing and the round goes on. About 1.5 seconds. Patience costs and the log are as now (ADR 0004, ADR 0015).
 
-**The model.** The recoil starter part gains two child nodes, `recoil_starter.handle` (the T-grip) and `recoil_starter.rope` (a short rope from the housing to the handle, stretched along its length by the game), named under the part like fasteners and checked by the asset check. They come off and go back with the recoil starter. If the starter is in the tray when the cord is pulled, the round cannot be fixed (as now) and the hand pulls nothing: the cough plays without a pull.
+**The model.** The panel's red engine switch becomes its own child node, `base_panel.switch`, so the hand can press it and the rocker can flip. The recoil starter part gains two child nodes, `recoil_starter.handle` (the T-grip) and `recoil_starter.rope` (a short rope from the housing to the handle, stretched along its length by the game), named under the part like fasteners and checked by the asset check. They come off and go back with the recoil starter. If the starter is in the tray when the cord is pulled, the round cannot be fixed (as now) and the hand pulls nothing: the cough plays without a pull.
 
 **Effects.** The shake is a transform on the machine group; the exhaust puff and haze are a few soft camera-facing sprites from the muffler's outlet, our own texture, no real-time lights or shadows, within ADR 0014's frame budget.
 
@@ -38,3 +40,4 @@ The round's payoff is something the player sees, not only a title. The cost: a r
 ## History
 
 - 2026-10-12: proposed by Claude, from the owner's message quoted above.
+- 2026-10-12: revised before acceptance, from the owner's next message: "Once it starts, the customer will smile and hand the money over to the mechanic who will receive the money an then stop the generator before the customer leave with it". The customer pays while it runs, the mechanic switches it off, then the customer carries it away stopped.

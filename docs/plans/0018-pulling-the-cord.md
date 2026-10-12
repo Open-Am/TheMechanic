@@ -11,14 +11,14 @@ branch: plan/0018-pulling-the-cord
 
 ## Goal
 
-Pressing Pull cord shows the mechanic's hand pulling the recoil starter's handle and the rope paying out. When the fault is fixed the engine catches, the generator shakes and puffs exhaust and keeps running until the customer pays and carries it off. When it is not fixed it coughs, puffs dark smoke and dies. Nothing changes in the rules, the log or the score.
+Pressing Pull cord shows the mechanic's hand pulling the recoil starter's handle and the rope paying out. When the fault is fixed the engine catches and the generator shakes and puffs exhaust and keeps running; the customer smiles and pays, the mechanic's hand takes the notes and then presses the red engine switch to stop it, and only then does the customer carry it off. When it is not fixed it coughs, puffs dark smoke and dies. Nothing changes in the rules, the log or the score.
 
 ## ADRs relied on
 
 - **0027** decides all of it: the pull, the turn to the starter, the start and run, the cough, the handle and rope nodes, the shake and exhaust sprites, the skip.
 - **0020**: the hand, its grip and the doing-up of loose parts before the pull.
 - **0018**: the `cord`, `start` and `fail` moments land on the animation.
-- **0026**: the paying and leaving follows the run, carrying a running generator.
+- **0026**: the paying and leaving; ADR 0027 changes one detail of it: the mechanic stops the engine before the customer lifts it.
 - **0025**: the generator turns on the bench.
 - **0003, 0013, 0014**: the model contract gains the two child nodes; our own modelling; within budgets and the frame rate.
 - **0004, 0007, 0010**: no log or rule change; same animation for every fault; all in `render`.
@@ -36,10 +36,10 @@ Pressing Pull cord shows the mechanic's hand pulling the recoil starter's handle
 
 ## Steps
 
-1. **Model.** `model.py` splits the handle into `recoil_starter.handle`, adds `recoil_starter.rope` and the empty `muffler.outlet`; `validate.py`, `export.py` and `check.ts` require them; re-bake and re-export (`npm run assets`); tests in `game/tests/pipeline.test.ts`; match image of the starter.
+1. **Model.** `model.py` splits the handle into `recoil_starter.handle`, adds `recoil_starter.rope`, the empty `muffler.outlet` and the rocker `base_panel.switch` as its own node; `validate.py`, `export.py` and `check.ts` require them; re-bake and re-export (`npm run assets`); tests in `game/tests/pipeline.test.ts`; match image of the starter.
 2. **Pure timing.** `render/motion.ts`: the pull's timeline (turn, grip, pull, release), the start and run, the cough; the rope's length at each moment; the shake. Tests.
-3. **In the game.** `render/view.ts` plays the pull, the run or the cough, the sprites (`render/exhaust.ts`), the skip, and hands over to ADR 0026's ending; the `cord`, `start` and `fail` moments are timed to it. `ui` waits for it before the result.
-4. **Browser checks.** `tools/verify/phone-play.ts`: the handle travels out and back and the rope stretches with it; a failed pull coughs and the round goes on; the winning pull runs, shakes and puffs, then the customer leaves, then the result; the skip works; all six faults and everything else pass. Both checks on a quiet machine.
+3. **In the game.** `render/view.ts` plays the pull, the run or the cough; on a fixed round, during the run, ADR 0026's payment (the customer holds out the notes, the hand takes them), then the hand presses `base_panel.switch` (the rocker flips), the engine winds down over about 0.8 s (shake and haze fade, the `start` sound fades out), then the customer lifts the stopped generator and leaves; the sprites (`render/exhaust.ts`), the skip, and hands over to ADR 0026's ending; the `cord`, `start` and `fail` moments are timed to it. `ui` waits for it before the result.
+4. **Browser checks.** `tools/verify/phone-play.ts`: the handle travels out and back and the rope stretches with it; a failed pull coughs and the round goes on; the winning pull runs, shakes and puffs; the notes pass to the hand while it runs; the hand presses the switch and the engine stops (no shake) before the customer lifts it; then the result; the skip works; all six faults and everything else pass. Both checks on a quiet machine.
 5. **Notes.** `docs/design/animation.md`; release note `docs/releases/0.17.0.md`; the phone preview republished.
 
 ## Done when
@@ -54,4 +54,4 @@ Plans 0016 (the workbench), 0015's game steps and 0017 (the customer's endings),
 
 ## Release note line
 
-Added: pulling the cord shows the mechanic's hand pulling the starter; a fixed generator starts, shakes and smokes and keeps running, and a faulty one coughs and dies (plan 0018, ADR 0027).
+Added: pulling the cord shows the mechanic's hand pulling the starter; a fixed generator starts, shakes and smokes, the customer pays while it runs and the mechanic switches it off before they carry it away; a faulty one coughs and dies (plan 0018, ADR 0027).
