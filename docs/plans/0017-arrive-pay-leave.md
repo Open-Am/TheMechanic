@@ -1,7 +1,7 @@
 ---
 id: 0017
 title: The customer brings the generator, and pays or storms off with it
-status: proposed
+status: approved
 date: 2026-10-12
 adrs: [0004, 0005, 0007, 0010, 0013, 0015, 0020, 0025, 0026]
 branch: plan/0017-arrive-pay-leave
@@ -12,6 +12,8 @@ branch: plan/0017-arrive-pay-leave
 ## Goal
 
 Each round opens with the customer carrying the generator to the bench and setting it down; the timer starts when it lands. A fixed round ends with the customer paying the mechanic with folded naira notes and walking off happily with the running generator. A walk-out ends with the customer snatching the generator and storming off. Each can be skipped with a tap. Nothing changes in the rules, the log or the score.
+
+Approved by the owner on 2026-10-12, who wrote "i accept adr 26 and plan 17".
 
 ## ADRs relied on
 

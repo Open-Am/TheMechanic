@@ -1,7 +1,7 @@
 ---
 id: 0026
 title: The customer brings the generator, and pays or storms off with it
-status: proposed
+status: accepted
 date: 2026-10-12
 supersedes: []
 superseded_by: null
@@ -37,3 +37,5 @@ The round has a beginning and an end that read as a real roadside job, and the c
 
 - 2026-10-12: proposed by Claude, from the owner's message quoted above.
 - 2026-10-12: the owner confirmed the two readings put to them (parts snap back on so the customer carries off a whole generator; the timer starts when the generator lands), writing "both decisions are correct". Still proposed until accepted in writing.
+- 2026-10-12: accepted by the owner, who wrote "i accept adr 26 and plan 17".
+- 2026-10-12: ADR 0027 changes one detail: the customer pays while the engine runs and the mechanic switches it off before the customer lifts it, so it leaves stopped, not running. The rest of this ADR stands.

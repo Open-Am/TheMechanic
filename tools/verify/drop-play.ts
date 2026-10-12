@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Machine } from "../../game/src/core/types.ts";
+import { SILENT_AUDIO_SOURCE } from "./silent-audio.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const arg = (name: string) => {
@@ -392,6 +393,9 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
 
 await send("Runtime.enable");
 await send("Page.enable");
+// The real sounds play through the speakers (the owner prefers to hear them, 2026-10-12). OPEN_AM_SILENT=1 routes them
+// through a zero gain instead, so the machine stays quiet. Never --mute-audio: see silent-audio.ts.
+if (process.env.OPEN_AM_SILENT === "1") await send("Page.addScriptToEvaluateOnNewDocument", { source: SILENT_AUDIO_SOURCE });
 await send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 2, mobile: true });
 
 const SHOTS = new Set([0, 4, 8, 11]);
