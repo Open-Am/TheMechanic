@@ -326,7 +326,7 @@ const doneUpWithTool = new Set<string>();
  * Trips to the toolbox (plan 0012), as the page logged them (`watchTrips`): every leg's path checked against the machine's
  * bounds between its stand-offs, frame by frame, and the most of the hand hidden on the legs.
  */
-type TripLog = { planned: number; metres: { pointer: number; machine: number }; phases: string[]; reach: number | null; toolAtBolts: number | null; tools: string[]; through: string[]; legHidden: number };
+type TripLog = { planned: number; metres: { pointer: number; machine: number }; armInto: Record<string, number>; phases: string[]; reach: number | null; toolAtBolts: number | null; tools: string[]; through: string[]; legHidden: number };
 let tripsRead = 0;
 const throughMachine: string[] = [];
 const DEFAULT_TRIP = "recoil starter from the default view";
@@ -820,7 +820,9 @@ try {
 // it is drawn over the machine or under the pull cord or a tray chip. Then a loosening in the default view (the recoil
 // starter) and one of the alternator cover: the hand reaches the toolbox, holds the spanner at the bolts, puts it back
 // in its slot, and its path never goes through the machine; a second loosen during the sequence is ignored. "Reaches"
-// is within 10 cm: the gripping hand sits in front of the tool's grip point by its own thickness.
+// is within 10 cm: the gripping hand sits in front of the tool's grip point by its own thickness. In the default view
+// at both sizes the forearm comes from below the toolbox while the hand is there: it reaches at most
+// ARM_AT_TOOLBOX_PX into the machine's rectangle.
 const toolboxChecks: string[] = [];
 type ToolboxRect = { toolbox: Rect | null; machine: Rect | null; slots: Array<{ x: number; y: number }>; overMachine: number; underControls: number; inView: number; screen: { width: number; height: number } };
 type Rect = { left: number; top: number; right: number; bottom: number };
@@ -885,7 +887,12 @@ async function checkToolboxInView(label: string): Promise<void> {
 }
 
 /** Loosens a part with fasteners and watches the trip. Returns false if the part was never in view. */
-async function watchTrip(id: string, label: string, shot: string | null, interrupt: string | null): Promise<boolean> {
+/**
+ * How far (CSS px) the sleeve may reach into the machine's rectangle on screen while the hand is at the toolbox in the
+ * default view (0.11.1 follow-up): the forearm comes up from the bottom edge below the toolbox, not across the machine.
+ */
+const ARM_AT_TOOLBOX_PX = 32;
+async function watchTrip(id: string, label: string, shot: string | null, interrupt: string | null, armChecked = false): Promise<boolean> {
   let p: Probe | null = null;
   for (let i = 0; i < 8 && !(p = await probe(id)); i++) await drag(ROTATE.x0, ROTATE.y0, ROTATE.x1, ROTATE.y1);
   if (!p) return false;
@@ -924,11 +931,12 @@ async function watchTrip(id: string, label: string, shot: string | null, interru
   const back = await evaluate<number | null>("window.__openAmDevRender.toolFromSlot('spanner')");
   const out = await evaluate<boolean>("window.__openAmDevRender.toolOut()");
   const loose = (await looseNow()).includes(id);
-  const say = `${label}: legs ${log.metres.pointer.toFixed(2)} m from the pointer to the toolbox and ${log.metres.machine.toFixed(2)} m from the toolbox over the machine, ${log.planned.toFixed(2)} s planned; phases ${phases.join(", ")}; hand to the slot ${(reached * 100).toFixed(1)} cm; spanner to the bolts ${(atBolts * 100).toFixed(1)} cm; spanner from its slot after ${((back ?? 0) * 1000).toFixed(1)} mm`;
+  const say = `${label}: legs ${log.metres.pointer.toFixed(2)} m from the pointer to the toolbox and ${log.metres.machine.toFixed(2)} m from the toolbox over the machine, ${log.planned.toFixed(2)} s planned; phases ${phases.join(", ")}; hand to the slot ${(reached * 100).toFixed(1)} cm; spanner to the bolts ${(atBolts * 100).toFixed(1)} cm; spanner from its slot after ${((back ?? 0) * 1000).toFixed(1)} mm; the sleeve into the machine's rectangle at the toolbox ${Math.round(log.armInto["atToolbox"] ?? 0)} px (most on any step ${Math.round(Math.max(0, ...Object.values(log.armInto)))} px)`;
   if (!loose) failures.push(`toolbox: ${label}: the part did not come loose (${say})`);
   else if (!(reached < 0.1)) failures.push(`toolbox: ${label}: the hand never reached the toolbox (${say})`);
   else if (!spannerHeld || !(atBolts < 0.03)) failures.push(`toolbox: ${label}: the spanner was not held at the bolts (${say})`);
   else if (out || !(back !== null && back < 0.002)) failures.push(`toolbox: ${label}: the spanner was not back in its slot afterwards (${say})`);
+  else if (armChecked && !((log.armInto["atToolbox"] ?? Infinity) <= ARM_AT_TOOLBOX_PX)) failures.push(`toolbox: ${label}: at the toolbox the arm lay across the machine, more than ${ARM_AT_TOOLBOX_PX} px into its rectangle (${say})`);
   else toolboxChecks.push(say);
   if (interrupt) {
     if (!interrupted) failures.push(`toolbox: ${label}: ${interrupt} was not in view to try a second loosen`);
@@ -945,7 +953,7 @@ async function watchTrip(id: string, label: string, shot: string | null, interru
     await beginRound();
     if (!(await evaluate<boolean>("window.__openAmDevRender.hasToolbox()"))) throw new Error("the game has no toolbox (toolbox.glb missing?)");
     await checkToolboxInView("390x844");
-    if (!(await watchTrip("recoil_starter", DEFAULT_TRIP, "18-hand-taking-tool", null))) failures.push("toolbox: the recoil starter was not in view");
+    if (!(await watchTrip("recoil_starter", DEFAULT_TRIP, "18-hand-taking-tool-390x844", null, true))) failures.push("toolbox: the recoil starter was not in view");
     if (!(await watchTrip("alternator_cover", "alternator cover", null, "fuel_hose"))) failures.push("toolbox: the alternator cover was never in view");
     await screenshot("19-after-trip");
     await send("Emulation.setDeviceMetricsOverride", { width: 360, height: 640, deviceScaleFactor: 2, mobile: true });
@@ -953,6 +961,7 @@ async function watchTrip(id: string, label: string, shot: string | null, interru
     await toBriefing();
     await beginRound();
     await checkToolboxInView("360x640");
+    if (!(await watchTrip("recoil_starter", "recoil starter from the default view at 360x640", "18-hand-taking-tool-360x640", null, true))) failures.push("toolbox: the recoil starter was not in view at 360x640");
   } catch (e) {
     failures.push(`toolbox: ${(e as Error).message}`);
     await screenshot("fail-toolbox");
