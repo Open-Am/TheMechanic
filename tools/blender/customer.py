@@ -20,8 +20,9 @@ How a person is made:
   2. The body's own surface becomes the fitted clothes: each vertex is given a zone from the bone that moves it most
      and its height (top, bottom, skin, hair), and clothed zones are smoothed and pushed out along their normals by the
      cloth's thickness. Loose garments (a wrapper, the long kaftan's skirt) are lofted tubes fitted round the body and
-     weighted between the pelvis and the legs; the legs inside them are removed. A cap or a head tie is shaped on the
-     head.
+     weighted between the pelvis and the legs; the legs inside them are removed. The long kaftan (second pass,
+     2026-10-12) is a lofted robe from the collar to below the shin with lofted sleeves, the body under it removed
+     (build_robe). A cap, a kufi or a head tie is shaped on the head.
   3. The mesh is decimated to the budget, keeping more of the face and less of the hands, and its weights are limited
      to four joints per vertex.
   4. The clips of plan 0015 reading 5 are keyframed on the skeleton by aiming bones in character space.
@@ -87,17 +88,21 @@ LOOKS = {
     "man_kaftan": {
         "macro": {"gender": 1.0, "age": 0.73, "muscle": 0.48, "weight": 0.58, "proportions": 0.5, "height": 0.34, "cupsize": 0.5, "firmness": 0.5},
         "skin": "#4b2e20",
-        "top": {"kind": "kaftan", "sleeve": ("lowerarm", 0.9), "neck": 0.04, "thickness": 0.01, "loose": 0.012, "hem": "hip", "taper": -0.08, "sleeve_flare": 0.25},
+        # Second pass (2026-10-12): the kaftan is one lofted robe from the collar to below the shin, hanging from the
+        # shoulders and chest in long vertical folds, with straight wide sleeves lofted along the arms; no body
+        # surface under it, so neither the chest nor a seam at the waist can show (see build_robe).
+        "top": None,
+        "robe": {"hem": 0.12, "margin": 0.012, "flare": 0.05, "fold": 0.04, "sleeve_end": 0.86, "sleeve_margin": 0.01, "cuff": 0.062},
         "bottom": {"kind": "trousers", "thickness": 0.008, "hem": 0.025, "hem_radius": 0.068},
-        "skirt": {"top": "waist", "bottom": "shin", "flare": 0.07, "margin": 0.014, "material": "top"},
-        "head": "cap",
+        "skirt": None,
+        "head": "kufi",
         "hair": {"front": 0.07, "grey": 0.35},
         "beard": True,
         "feet": "sandals",
         "materials": {
-            "top": {"kind": "fabric", "colour": "#46657f", "roughness": 0.8},
+            "top": {"kind": "fabric", "colour": "#46657f", "roughness": 0.85, "embroidery": "#a9bccb"},
             "bottom": {"kind": "fabric", "colour": "#425f78", "roughness": 0.8},
-            "headwear": {"kind": "cap", "colour": "#e4d9c1", "pattern": "#7a2a24"},
+            "headwear": {"kind": "kufi", "colour": "#e6dcc6", "pattern": ["#6e2420", "#2f4a33", "#b8892f"]},
             "strap": {"kind": "fabric", "colour": "#4a2c1a", "roughness": 0.55},
         },
         "stride": 22,
@@ -209,6 +214,14 @@ class Body:
         self.head_front = min(p.y for p in head_pts)
         self.head_back = max(p.y for p in head_pts)
         self.z_shin = self.z_ankle + (self.z_knee - self.z_ankle) * 0.45
+        # The mouth (the lips' centre) and the chin's lowest point at the front, for the beard.
+        lw = group_weights(body, ["lips"])
+        lips = [v.co for v, wi in zip(body.data.vertices, lw) if wi > 0.5]
+        self.mouth = sum(lips, V()) / len(lips) if lips else V((0.0, self.head_front + 0.02, self.eye_z - 0.065))
+        chin = [p for p in head_pts if abs(p.x) < 0.015 and p.y < self.mouth.y + 0.03 and p.z < self.mouth.z]
+        self.chin_z = min((p.z for p in chin), default=self.mouth.z - 0.05)
+        self.collar = None  # (centre y, height, radius) of a robe's neck opening, set by build_robe
+        self.kufi = None  # (centre x, centre y, front band height, back band height, side height), set by build_kufi
         print(
             f"Landmarks: ankle {self.z_ankle:.3f} knee {self.z_knee:.3f} hip {self.z_hip:.3f} belt {self.z_belt:.3f} waist {self.z_waist:.3f} "
             f"neck {self.z_neck:.3f} eyes {self.eye_z:.3f} top {self.head_top:.3f}"
@@ -256,6 +269,7 @@ def classify(body, lm, spec, dom):
     sleeve_bone, sleeve_t = top["sleeve"] if top else (None, 0)
     skirt_top = lm.level(skirt["top"]) if skirt else None
     skirt_bottom = lm.level(skirt["bottom"]) if skirt else None
+    robe = spec.get("robe")
     zones = []
     for v, d, e, li, na in zip(body.data.vertices, dom, eyes, lips, nails):
         p = v.co
@@ -291,8 +305,30 @@ def classify(body, lm, spec, dom):
                 z = "bottom"
             if skirt and (d in LEGS or d == "pelvis") and skirt_bottom + 0.07 < p.z < skirt_top - 0.06 and z != "top":
                 z = "hidden"
+            if robe and robe_hides(lm, robe, d, base, p):
+                z = "hidden"
         zones.append(z)
     return zones
+
+
+def robe_levels(lm, robe):
+    """The robe's collar and hem heights."""
+    return lm.z_neck + 0.012, lm.z_ankle + robe["hem"]
+
+
+def robe_hides(lm, robe, d, base, p):
+    """True for body vertices inside the robe or its sleeves, removed as the legs inside a skirt are. A band of skin is
+    kept just inside the collar and the cuffs, so a look into the opening finds the neck or the wrist."""
+    z_col, z_hem = robe_levels(lm, robe)
+    if d in TORSO or d == "neck_01":
+        return p.z < z_col - 0.035
+    if d in LEGS:
+        return p.z > z_hem + 0.08
+    if base == "upperarm":
+        return True
+    if base == "lowerarm":
+        return along(lm, d, p) < robe["sleeve_end"] - 0.22
+    return False
 
 
 # ---- Shaping the body ----
@@ -470,6 +506,11 @@ def shape_clothes(body, lm, spec, zones, dom):
         hm = hair_mask(co, lm, spec["hair"]["front"], zones)
         normals = vertex_normals(me, co)
         co = co + normals * (0.0022 * hm)[:, None]
+    if spec.get("beard"):
+        # The short beard stands a little off the skin, so it catches the light at the jaw's edge.
+        bm_ = beard_mask(co, lm) * np.array([zn == "skin" for zn in zones])
+        normals = vertex_normals(me, co)
+        co = co + normals * (0.0025 * bm_)[:, None]
     normals = vertex_normals(me, co)
     co = co + normals * offset[:, None]
     me.vertices.foreach_set("co", co.ravel())
@@ -508,6 +549,25 @@ def hair_mask(co, lm, front_above_eyes, zones):
         if p[2] > line:
             out[i] = 1.0
     return out
+
+
+BEARD = {"moustache": 0.019, "cheek": 0.004, "rise": 0.45, "below_chin": 0.02, "wide": 0.068, "deep": 0.055}
+
+
+def beard_mask(co, lm):
+    """0..1 for a short, neat beard: over the chin and along the jaw, rising towards the ears, with a moustache over
+    the lips, on the front of the face. The same shape as draw_face paints, so the bake and the lift agree."""
+    co = np.asarray(co)
+    dz = co[:, 2] - lm.mouth.z
+    ax = np.abs(co[:, 0])
+    line = BEARD["cheek"] + BEARD["rise"] * np.maximum(0.0, ax - 0.022)
+    line = np.where(ax < 0.03, np.maximum(line, BEARD["moustache"]), line)
+    upper = 1.0 - ramp(line - 0.004, line + 0.004, dz)
+    lower = ramp(lm.chin_z - BEARD["below_chin"] - 0.005, lm.chin_z - BEARD["below_chin"] + 0.005, co[:, 2])
+    side = 1.0 - ramp(BEARD["wide"] - 0.008, BEARD["wide"], ax)
+    front = 1.0 - ramp(lm.mouth.y + BEARD["deep"] - 0.01, lm.mouth.y + BEARD["deep"], co[:, 1])
+    head = co[:, 2] > lm.z_neck + 0.02
+    return upper * lower * side * front * head
 
 
 def remove_vertices(body, keep):
@@ -642,6 +702,270 @@ def build_cap(body, lm):
     obj = mesh_object(loft(rings, close_top=True, lip=0.006), "cap", "headwear")
     g = obj.vertex_groups.new(name="head")
     g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+    return obj
+
+
+FOLDS = ((0.5, 6, 0.4), (0.35, 9, 1.7), (0.2, 13, 0.9), (0.12, 4, 2.6))
+
+
+def folds(theta, s=0.0):
+    """-1..1 round a ring: a few waves of different counts, so the folds are long and uneven, not a regular pleat. Their
+    phase drifts a little with s, so a fold wanders slightly as it falls."""
+    total = sum(a for a, _, _ in FOLDS)
+    return sum(a * np.sin(k * (theta + 0.12 * s) + p) for a, k, p in FOLDS) / total
+
+
+def support(pts, centre, dirs):
+    """How far the points reach from `centre` in each direction (x, y only)."""
+    return ((pts[:, :2] - centre) @ dirs.T).max(axis=0)
+
+
+def body_weights(body, bone_names):
+    names = {g.index: g.name for g in body.vertex_groups if g.name in set(bone_names)}
+    return [{names[g.group]: g.weight for g in v.groups if g.group in names and g.weight > 0.0} for v in body.data.vertices]
+
+
+def copied_weights(points, body, source, weights, k=6):
+    """Joint weights for `points`, averaged from the k nearest body vertices among `source`, nearer ones counting more."""
+    from mathutils import kdtree
+
+    idx = np.nonzero(source)[0]
+    kd = kdtree.KDTree(len(idx))
+    for j, i in enumerate(idx):
+        kd.insert(body.data.vertices[int(i)].co, j)
+    kd.balance()
+    out = []
+    for p in points:
+        acc, total = {}, 0.0
+        for _, j, dist in kd.find_n(V(p), k):
+            w = 1.0 / (dist + 0.004) ** 2
+            total += w
+            for n, x in weights[int(idx[j])].items():
+                acc[n] = acc.get(n, 0.0) + x * w
+        out.append({n: x / total for n, x in acc.items()} if total else {})
+    return out
+
+
+def hanging_weights(p, lm):
+    """A long garment below the hips: the pelvis at the top, blending into each leg by side as it goes down (as
+    build_skirt weights a wrapper), but held more by the pelvis down the middle, so the cloth between the legs is not
+    pinched into a crease when they part."""
+    f = min(1.0, max(0.0, (lm.z_hipjoint - p[2]) / max(0.05, lm.z_hipjoint - lm.z_knee))) * 0.85
+    f *= 1.0 - 0.6 * math.exp(-((p[0] / 0.07) ** 2))
+    g = min(1.0, max(0.0, (lm.z_knee - p[2]) / max(0.05, lm.z_knee - lm.z_ankle))) * 0.6
+    wl = min(1.0, max(0.0, 0.5 + p[0] / 0.16))
+    out = {"pelvis": 1 - f}
+    for side, w in (("l", wl), ("r", 1 - wl)):
+        if f * w * (1 - g) > 0:
+            out[f"thigh_{side}"] = f * w * (1 - g)
+        if f * w * g > 0:
+            out[f"calf_{side}"] = f * w * g
+    return out
+
+
+def apply_weights(obj, weights):
+    groups = {}
+    for i, wd in enumerate(weights):
+        for n, w in wd.items():
+            if w <= 0:
+                continue
+            if n not in groups:
+                groups[n] = obj.vertex_groups.new(name=n)
+            groups[n].add([i], w, "REPLACE")
+
+
+def build_robe(body, lm, spec, dom, bone_names):
+    """The long kaftan, one lofted garment from the collar to below the shin (second pass, 2026-10-12). Each ring
+    reaches as far as the body does at its height in every direction (so the cloth spans across the chest, never
+    into it), and from the chest down never comes in by more than a little: it hangs from the shoulders and chest
+    rather than following the waist. Below the chest it widens gently and falls in long, uneven vertical folds that
+    deepen towards the hem. The sleeves are straight wide tubes along the arms (build_sleeve). Weighted from the body
+    above the hips and like a skirt below them."""
+    rb = spec["robe"]
+    z_col, z_hem = robe_levels(lm, rb)
+    co = np.array([v.co[:] for v in body.data.vertices])
+    d = np.array([x or "" for x in dom])
+    torso = np.isin(d, list(TORSO | LEGS | {"neck_01"}))
+    neck = d == "neck_01"
+    seg = 56
+    theta = np.linspace(-math.pi, math.pi, seg, endpoint=False)
+    dirs = np.stack([np.cos(theta), np.sin(theta)], axis=1)
+    z_chest = lm.z_chest - 0.03
+    z_shoulders = z_col - 0.1
+    zs = [z_col - 0.014 * k for k in range(8)]
+    while zs[-1] - 0.035 > z_chest:
+        zs.append(zs[-1] - 0.035)
+    step = (zs[-1] - z_hem) / max(1, round((zs[-1] - z_hem) / 0.06))
+    while zs[-1] - step > z_hem + 1e-4:
+        zs.append(zs[-1] - step)
+    zs.append(z_hem)
+    neck_pts = co[neck & (np.abs(co[:, 2] - z_col) < 0.012)]
+    cy_neck = float(neck_pts[:, 1].mean()) if len(neck_pts) else lm.neck_y
+    chest = co[torso & (co[:, 2] < z_shoulders) & (co[:, 2] > z_chest - 0.1)]
+    # One centre for the whole body of the robe, so the rings line up and no ridge runs round it.
+    centre = np.array([0.0, float((chest[:, 1].min() + chest[:, 1].max()) / 2)])
+
+    def round_smooth(h, passes):
+        for _ in range(passes):
+            h = (np.roll(h, 1) + 2 * h + np.roll(h, -1)) / 4
+        return h
+
+    hs, prev = [], None
+    for i, z in enumerate(zs):
+        if i == 0:
+            hs.append(None)
+            continue
+        half = 0.008 if z > z_shoulders else 0.02
+        slab = np.abs(co[:, 2] - z) < half
+        pts = co[torso & slab]
+        h = support(pts, centre, dirs) if len(pts) else prev
+        h = round_smooth(h, 3)
+        hs.append(h)
+        prev = h
+    # Smooth down the length below the shoulders, then let the cloth hang: from the chest down a ring never comes in
+    # by more than a little from the one above.
+    first = next(i for i, z in enumerate(zs) if z <= z_shoulders)
+    for _ in range(4):
+        new = [h.copy() if h is not None else None for h in hs]
+        for i in range(first + 1, len(zs) - 1):
+            new[i] = (hs[i - 1] + 2 * hs[i] + hs[i + 1]) / 4
+        hs = new
+    for i in range(first + 1, len(zs)):
+        if zs[i] < z_chest:
+            hs[i] = np.maximum(hs[i], hs[i - 1] - 0.0015)
+    rings = []
+    r_collar = 0.0
+    for i, z in enumerate(zs):
+        if i == 0:
+            c0 = np.array([0.0, cy_neck])
+            h = support(neck_pts, c0, dirs) + 0.006 if len(neck_pts) else np.full(seg, 0.065)
+            h = round_smooth(h, 4)
+            r_collar = float(h.mean())
+            r, zz = h, z
+        else:
+            c0 = centre
+            s = float(np.clip((z_chest - z) / (z_chest - z_hem), 0.0, 1.0))
+            h = hs[i] + rb["margin"] * min(1.0, i / 3) + rb["flare"] * s ** 1.5
+            f = folds(theta, s)
+            r = np.maximum(h + rb["fold"] * s ** 0.5 * f, hs[i] + 0.006)
+            zz = z + 0.006 * f if i == len(zs) - 1 else z
+        ring = [V((c0[0] + r[j] * dirs[j, 0], c0[1] + r[j] * dirs[j, 1], zz[j] if np.ndim(zz) else zz)) for j in range(seg)]
+        rings.append(ring)
+    lm.collar = (cy_neck, z_col, r_collar)
+    print(f"Robe: collar {z_col:.3f} radius {r_collar:.3f}, chest {z_chest:.3f}, hem {z_hem:.3f}, {len(zs)} rings of {seg}")
+    obj = mesh_object(loft(rings, lip=0.008), "robe", "top")
+    weights = body_weights(body, bone_names)
+    pts = [v.co[:] for v in obj.data.vertices]
+    near = copied_weights(pts, body, torso, weights)
+    blended = []
+    for p, wd in zip(pts, near):
+        # The robe's shoulders do not follow the arms (the sleeves do): skin there rolls up as an arm comes down,
+        # which a deltoid hides and cloth would show as a hump.
+        wd = {n: w for n, w in wd.items() if not n.startswith(("upperarm", "lowerarm", "hand"))}
+        total = sum(wd.values()) or 1.0
+        wd = {n: w / total for n, w in wd.items()}
+        a = min(1.0, max(0.0, (p[2] - (lm.z_hipjoint - 0.12)) / 0.15))
+        low = hanging_weights(p, lm)
+        out = {n: w * (1 - a) for n, w in low.items()}
+        for n, w in wd.items():
+            out[n] = out.get(n, 0.0) + w * a
+        blended.append(out)
+    apply_weights(obj, blended)
+    sleeves = [build_sleeve(body, lm, rb, d, side, weights) for side in ("l", "r")]
+    return [obj] + sleeves
+
+
+def build_sleeve(body, lm, rb, d, side, weights):
+    """A kaftan sleeve: a straight tube along the arm from inside the shoulder to near the wrist, as wide as the arm
+    needs at the top and widening evenly to an open cuff, never narrowing, so it neither clings nor balloons."""
+    co = np.array([v.co[:] for v in body.data.vertices])
+    arm = np.isin(d, [f"upperarm_{side}", f"lowerarm_{side}"])
+    A, E, H = (np.array(lm.head(f"{b}_{side}")[:]) for b in ("upperarm", "lowerarm", "hand"))
+    end = E + (H - E) * rb["sleeve_end"]
+    L1, L2 = float(np.linalg.norm(E - A)), float(np.linalg.norm(end - E))
+    u1, u2 = (E - A) / L1, (end - E) / L2
+    n, seg = 15, 24
+    ls = np.linspace(0.065, L1 + L2, n)
+    cs, ds, rs = [], [], []
+    for l in ls:
+        b = float(ramp(L1 - 0.07, L1 + 0.07, np.array(l)))
+        D = u1 * (1 - b) + u2 * b
+        D = D / np.linalg.norm(D)
+        P = A + u1 * l if l < L1 else E + u2 * (l - L1)
+        rel = co - P
+        along_d = rel @ D
+        sel = arm & (np.abs(along_d) < 0.018) & (np.linalg.norm(rel, axis=1) < 0.15)
+        C = co[sel].mean(axis=0) if sel.sum() >= 5 else P
+        radial = co[sel] - C
+        radial = radial - np.outer(radial @ D, D)
+        r = float(np.percentile(np.linalg.norm(radial, axis=1), 92)) if sel.sum() >= 5 else 0.05
+        cs.append(C)
+        ds.append(D)
+        rs.append(r)
+    cs = np.array(cs)
+    smooth_c = cs.copy()
+    for i in range(1, n - 1):
+        smooth_c[i] = (cs[i - 1] + 2 * cs[i] + cs[i + 1]) / 4
+    rs = np.array(rs) + rb["sleeve_margin"]
+    top = rs[2]
+    lin_r = top + (rb["cuff"] - top) * np.clip((ls - ls[2]) / (ls[-1] - ls[2]), 0, 1)
+    rs = np.maximum(rs, lin_r)
+    rs[2:] = np.maximum.accumulate(rs[2:])
+    rs[:2] = rs[2] * np.array([0.55, 0.85])  # rounded into the shoulder, inside the robe
+    rings = []
+    for i in range(n):
+        D = ds[i]
+        ref = np.array([0.0, 1.0, 0.0])
+        u = ref - (ref @ D) * D
+        u /= np.linalg.norm(u)
+        v = np.cross(D, u)
+        frac = max(0.0, (ls[i] - ls[2]) / (ls[-1] - ls[2]))
+        ring = []
+        for j in range(seg):
+            t = 2 * math.pi * j / seg
+            r = rs[i] * (1 + 0.05 * frac * math.sin(5 * t + 0.7) + 0.03 * frac * math.sin(3 * t + 2.1))
+            p = smooth_c[i] + r * (math.cos(t) * u + math.sin(t) * v)
+            ring.append(V(p.tolist()))
+        rings.append(ring)
+    # The cuff turned in, so the hem has thickness.
+    C, D = smooth_c[-1], ds[-1]
+    rings.append([V((C + (np.array(p[:]) - C) * (1 - 0.008 / rs[-1]) - D * 0.015).tolist()) for p in rings[-1]])
+    obj = mesh_object(loft(rings, close_top=True), f"sleeve_{side}", "top")
+    source = arm | np.isin(d, [f"clavicle_{side}"])
+    apply_weights(obj, copied_weights([v.co[:] for v in obj.data.vertices], body, source, weights))
+    return obj
+
+
+def build_kufi(body, lm):
+    """A taller, straight-sided cap (a kufi) set a little back on the head: its band sits just above the brows at
+    the front and lower at the back, its sides rise about 10 cm, and its crown is nearly flat with a rounded edge.
+    Patterned by kufi_pattern."""
+    co = np.array([v.co[:] for v in body.data.vertices])
+    c = lm.head_centre
+    front, back, height = lm.eye_z + 0.04, lm.eye_z + 0.012, 0.098
+    seg = 32
+    theta = np.linspace(-math.pi, math.pi, seg, endpoint=False)
+    dirs = np.stack([np.cos(theta), np.sin(theta)], axis=1)
+    z_base = front + (back - front) * (np.sin(theta) + 1) / 2  # +Y is the back of the head
+    # The head above the ears, smoothed round, so the band is an even oval and not dented by the ears.
+    head = co[(co[:, 2] > lm.eye_z + 0.03) & (co[:, 2] < front + 0.035)]
+    r0 = support(head, np.array([c.x, c.y]), dirs) + 0.011
+    for _ in range(6):
+        r0 = (np.roll(r0, 1) + 2 * r0 + np.roll(r0, -1)) / 4
+    rings = []
+    for s in (0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.88, 0.95, 1.0):
+        r = r0 * (1 - 0.035 * s)
+        z = z_base + height * s
+        rings.append((r, z))
+    r_top = rings[-1][0]
+    for t in (0.35, 0.65, 0.88):  # the rounded edge and the crown
+        rings.append((r_top * (1 - 0.12 * t * t) * (1 - 0.6 * max(0.0, t - 0.6)), z_base + height + 0.012 * math.sin(t * math.pi / 2)))
+    pts = [[V((c.x + r[j] * dirs[j, 0], c.y + r[j] * dirs[j, 1], z[j])) for j in range(seg)] for r, z in rings]
+    pts.reverse()
+    obj = mesh_object(loft(pts, close_top=True, lip=0.006), "kufi", "headwear")
+    g = obj.vertex_groups.new(name="head")
+    g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
+    lm.kufi = (c.x, c.y, front, back, height)
     return obj
 
 
@@ -780,10 +1104,17 @@ def author_factory(look, lm):
             colour = N.mix(N.math("MULTIPLY", crevice, 1.1, clamp=True), colour, (0.02, 0.02, 0.03))
             rough = 0.75
             bump_strength = 0.12
+        elif kind == "kufi":
+            colour = kufi_pattern(N, pos, sep, lm, mspec)
+            colour = N.mix(N.math("MULTIPLY", crevice, 1.2, clamp=True), colour, tuple(c * 0.4 for c in lin(mspec["colour"])))
+            rough = 0.8
+            bump_strength = 0.14
         elif kind in ("fabric", "denim", "cap"):
             base = lin(mspec["colour"])
             var = N.smoothstep(0.3, 0.7, N.noise(pos, 22.0, 6.0))
             colour = N.mix(N.math("MULTIPLY", var, 0.18), base, tuple(c * 1.25 for c in base))
+            if mspec.get("embroidery") and lm.collar:
+                colour = embroidery(N, pos, sep, lm, colour, lin(mspec["embroidery"]))
             if kind == "denim":
                 fade = N.smoothstep(0.45, 0.75, N.noise(pos, 6.0, 3.0))
                 colour = N.mix(N.math("MULTIPLY", fade, 0.45), colour, tuple(min(1, c * 1.9 + 0.03) for c in base))
@@ -874,13 +1205,89 @@ def draw_face(N, pos, sep, colour, lm, eyes, spec):
         hair_mask = N.math("MULTIPLY", above, N.math("ADD", 0.84, N.math("MULTIPLY", grain, 0.16)))
         colour = N.mix(hair_mask, colour, hair_col)
         if spec.get("beard"):
-            # A short, neat, greying beard along the jaw and chin, and a moustache.
-            jaw = ellipse_mask(N, pos, (0.0, lm.head_front + 0.03, lm.eye_z - 0.085), 0.06, 0.03, 4.0, lm.head_front + 0.07)
-            moustache = ellipse_mask(N, pos, (0.0, lm.head_front + 0.01, lm.eye_z - 0.058), 0.024, 0.006, 6.0, lm.head_front + 0.03)
-            beard = N.math("MAXIMUM", jaw, moustache)
-            colour = N.mix(N.math("MULTIPLY", beard, N.math("ADD", 0.45, N.math("MULTIPLY", hairy, 0.35))), colour, hair_col)
+            # A short, neat, greying beard along the jaw and chin, and a moustache (beard_mask, in nodes). Salt and
+            # pepper: dark hairs and grey ones, lighter than the skin so it reads on dark skin after the bake.
+            beard = beard_nodes(N, sep, lm)
+            pepper = N.smoothstep(0.35, 0.65, N.noise(pos, 520.0, 2.0, 0.9))
+            beard_col = N.mix(N.math("MULTIPLY", pepper, 0.75), lin("#7d776f"), lin("#1c1714"))
+            colour = N.mix(N.math("MULTIPLY", beard, N.math("ADD", 0.62, N.math("MULTIPLY", hairy, 0.3))), colour, beard_col)
             hair_mask = N.math("MAXIMUM", hair_mask, beard)
     return colour, hair_mask
+
+
+def embroidery(N, pos, sep, lm, colour, thread):
+    """Tone-on-tone embroidery round a kaftan's neck and down a short placket at the front, as Lagos kaftans have: a
+    band of dense stitches with a firm edge line."""
+    cy, z_col, r_col = lm.collar
+    x, y, z = sep.outputs["X"], sep.outputs["Y"], sep.outputs["Z"]
+    dy = N.math("SUBTRACT", y, cy)
+    dist = N.math("SQRT", N.math("ADD", N.math("MULTIPLY", x, x), N.math("MULTIPLY", dy, dy)))
+    width = 0.032
+    collar = N.math("SUBTRACT", 1.0, N.smoothstep(r_col + width - 0.002, r_col + width + 0.002, dist))
+    collar = N.math("MULTIPLY", collar, N.smoothstep(z_col - 0.1, z_col - 0.09, z))
+    ax = N.math("ABSOLUTE", x)
+    placket = N.math("SUBTRACT", 1.0, N.smoothstep(0.019, 0.023, ax))
+    placket = N.math("MULTIPLY", placket, N.math("LESS_THAN", y, cy))
+    placket = N.math("MULTIPLY", placket, N.smoothstep(z_col - 0.25, z_col - 0.24, z))
+    region = N.math("MAXIMUM", collar, placket)
+    dots = N.new("ShaderNodeTexVoronoi", Scale=190.0)
+    N.link(pos, dots.inputs["Vector"])
+    stitch = N.math("LESS_THAN", dots.outputs["Distance"], 0.32)
+    edge = N.math("SUBTRACT", 1.0, N.smoothstep(0.0012, 0.0024, N.math("ABSOLUTE", N.math("SUBTRACT", dist, r_col + width - 0.004))))
+    edge = N.math("MULTIPLY", edge, N.smoothstep(z_col - 0.1, z_col - 0.09, z))
+    pedge = N.math("MULTIPLY", N.math("SUBTRACT", 1.0, N.smoothstep(0.0012, 0.0024, N.math("ABSOLUTE", N.math("SUBTRACT", ax, 0.017)))), placket)
+    amount = N.math("ADD", N.math("MULTIPLY", region, N.math("ADD", 0.35, N.math("MULTIPLY", stitch, 0.45))), N.math("MAXIMUM", edge, pedge))
+    return N.mix(N.math("MINIMUM", amount, 0.95), colour, thread)
+
+
+def kufi_pattern(N, pos, sep, lm, mspec):
+    """An embroidered kufi: rows of small diamonds in two thread colours on the cap's cloth, a solid band at the brim
+    and a plain crown with a stitched ring."""
+    cx, cy, front, back, height = lm.kufi
+    base = lin(mspec["colour"])
+    c1, c2, c3 = (lin(h) for h in mspec["pattern"])
+    x, y, z = sep.outputs["X"], sep.outputs["Y"], sep.outputs["Z"]
+    dx, dy = N.math("SUBTRACT", x, cx), N.math("SUBTRACT", y, cy)
+    dist = N.math("SQRT", N.math("ADD", N.math("MULTIPLY", dx, dx), N.math("MULTIPLY", dy, dy)))
+    sin_t = N.math("DIVIDE", dy, N.math("MAXIMUM", dist, 1e-4))
+    z_base = N.math("ADD", front, N.math("MULTIPLY", (back - front) / 2, N.math("ADD", sin_t, 1.0)))
+    v = N.math("DIVIDE", N.math("SUBTRACT", z, z_base), height)
+    theta = N.math("ARCTAN2", dy, dx)
+    u = N.math("MULTIPLY", theta, 22 / (2 * math.pi))
+    rows = N.math("MULTIPLY", N.math("SUBTRACT", v, 0.16), 4.2)
+    fu = N.math("ABSOLUTE", N.math("SUBTRACT", N.math("FRACT", u), 0.5))
+    fv = N.math("ABSOLUTE", N.math("SUBTRACT", N.math("FRACT", rows), 0.5))
+    dd = N.math("ADD", fu, fv)
+    outline = N.math("LESS_THAN", N.math("ABSOLUTE", N.math("SUBTRACT", dd, 0.36)), 0.07)
+    centre = N.math("LESS_THAN", dd, 0.13)
+    alt = N.math("MODULO", N.math("ADD", N.math("FLOOR", u), N.math("FLOOR", rows)), 2.0)
+    in_sides = N.math("MULTIPLY", N.math("GREATER_THAN", v, 0.16), N.math("LESS_THAN", v, 0.97))
+    brim = N.math("LESS_THAN", v, 0.12)
+    colour = N.mix(N.math("MULTIPLY", N.smoothstep(0.3, 0.7, N.noise(pos, 22.0, 6.0)), 0.12), base, tuple(c * 1.15 for c in base))
+    colour = N.mix(N.math("MULTIPLY", outline, in_sides), colour, N.mix(alt, c1, c2))
+    colour = N.mix(N.math("MULTIPLY", centre, in_sides), colour, c3)
+    colour = N.mix(brim, colour, c1)
+    ring = N.math("MULTIPLY", N.math("GREATER_THAN", v, 1.0), N.math("LESS_THAN", N.math("ABSOLUTE", N.math("SUBTRACT", dist, 0.045)), 0.004))
+    return N.mix(ring, colour, c3)
+
+
+def beard_nodes(N, sep, lm):
+    """beard_mask as shader nodes, on the rest position."""
+    x, y, z = sep.outputs["X"], sep.outputs["Y"], sep.outputs["Z"]
+    dz = N.math("SUBTRACT", z, lm.mouth.z)
+    ax = N.math("ABSOLUTE", x)
+    line = N.math("ADD", BEARD["cheek"], N.math("MULTIPLY", BEARD["rise"], N.math("MAXIMUM", 0.0, N.math("SUBTRACT", ax, 0.022))))
+    near = N.math("LESS_THAN", ax, 0.03)
+    line = N.math("MAXIMUM", line, N.math("MULTIPLY", near, BEARD["moustache"]))
+    upper = N.math("SUBTRACT", 1.0, N.smoothstep(-0.004, 0.004, N.math("SUBTRACT", dz, line)))
+    lower = N.smoothstep(lm.chin_z - BEARD["below_chin"] - 0.005, lm.chin_z - BEARD["below_chin"] + 0.005, z)
+    side = N.math("SUBTRACT", 1.0, N.smoothstep(BEARD["wide"] - 0.008, BEARD["wide"], ax))
+    front = N.math("SUBTRACT", 1.0, N.smoothstep(lm.mouth.y + BEARD["deep"] - 0.01, lm.mouth.y + BEARD["deep"], y))
+    head = N.math("GREATER_THAN", z, lm.z_neck + 0.02)
+    m = N.math("MULTIPLY", upper, lower)
+    m = N.math("MULTIPLY", m, side)
+    m = N.math("MULTIPLY", m, front)
+    return N.math("MULTIPLY", m, head)
 
 
 def draw_eye(N, pos, eyes):
@@ -994,12 +1401,18 @@ def build_person(look, preview=False):
     attr = body.data.attributes.new("zone", "INT", "POINT")
     attr.data.foreach_set("value", [zone_ids.get(z, 0) for z in zones])
     extras = []
+    # Garments built at their final density, joined after the body is decimated so their folds and hems survive.
+    protected = []
     if spec["skirt"]:
         fit = np.array([(d in LEGS or d in ("pelvis", "spine_01", "spine_02")) for d in dom])
         extras.append(build_skirt(body, lm, spec, fit))
+    if spec.get("robe"):
+        protected += build_robe(body, lm, spec, dom, bone_names)
     remove_vertices(body, keep)
     if spec["head"] == "cap":
         extras.append(build_cap(body, lm))
+    if spec["head"] == "kufi":
+        protected.append(build_kufi(body, lm))
     if spec["head"] == "headtie":
         extras.append(build_knot(lm))
     for o in extras:
@@ -1028,7 +1441,18 @@ def build_person(look, preview=False):
         poly.use_smooth = True
     body.data.attributes.remove(body.data.attributes["zone"])
 
-    decimate(body, lm)
+    protected_tris = sum(common.triangle_count(o) for o in protected)
+    decimate(body, lm, TRI_TARGET - protected_tris if protected else None)
+    if protected:
+        for o in protected:
+            o.data.materials.append(bpy.data.materials[o["zone"]])
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in protected:
+            o.select_set(True)
+        body.select_set(True)
+        bpy.context.view_layer.objects.active = body
+        bpy.ops.object.join()
+        print(f"{look}: {protected_tris} triangles of garments joined after decimation")
     clean_weights(body, bone_names)
 
     # Name the joints after the look, and the armature as the file's root.
@@ -1063,8 +1487,9 @@ def remove_unused_slots(obj):
     bpy.ops.object.material_slot_remove_unused()
 
 
-def decimate(body, lm):
+def decimate(body, lm, target=None):
     """Collapses the mesh to the triangle target, keeping the face and head densest and the hands lightest."""
+    TRI_TARGET = target or globals()["TRI_TARGET"]
     me = body.data
     me.calc_loop_triangles()
     total = len(me.loop_triangles)
@@ -1515,33 +1940,51 @@ def strip(paths, out):
         os.remove(p)
 
 
+# Plan 0015 reading 7 as revised on 2026-10-12: about 2.5 to 3 m behind the machine; the renders use the middle.
+SPOT_BEHIND = 2.75
+SPOT_RIGHT = 0.35
+# CSS px the pull cord and the empty tray cover at the bottom of the screen (game/src/ui/styles.css: 8 + 52 + 10 + 52
+# + 12), which render/orbit.ts frameAbove frames the machine above.
+CONTROLS_PX = 134
+
+
 def game_spot():
     """Where plan 0015 reading 7 puts the customer for the default camera: behind the machine as seen and to its
-    right, about 0.6 m behind its back edge, facing the camera. Returns (Blender position, turn about Z in radians).
-    An approximation for these renders; the game works it out in render/customerpose.ts (plan 0015 step 7)."""
-    sx, sy, sz = common.load_machine()["size"]
+    right, SPOT_BEHIND m behind the machine's centre along the camera's line of sight and SPOT_RIGHT m to its right,
+    facing the camera. Returns (Blender position, turn about Z in radians). An approximation for these renders; the
+    game works it out in render/customerpose.ts (plan 0015 step 7)."""
     a = common.GAME_CAMERA["azimuth"]
     back = (-math.sin(a), -math.cos(a))  # glTF x, z: away from the camera
     right = (math.cos(a), -math.sin(a))
-    half = abs(sx / 2 * math.sin(a)) + abs(sz / 2 * math.cos(a))
-    d, r = half + 0.6 + 0.1, 0.35
+    d, r = SPOT_BEHIND, SPOT_RIGHT
     gx, gz = back[0] * d + right[0] * r, back[1] * d + right[1] * r
     return V(common.gl(gx, 0.0, gz)), a
 
 
-def game_camera(cam, aspect=390 / 844):
-    """The game's default camera (render/view.ts, orbit.ts): orbiting the machine's centre at azimuth 0.55 and polar
-    1.12, at the distance that fits the machine's bounding sphere in the narrower field of view, no controls cover."""
+def game_camera(cam, size_px=(390, 844), cover_px=CONTROLS_PX):
+    """The game's default camera (render/view.ts, orbit.ts on main): orbiting the machine's centre at azimuth 0.55 and
+    polar 1.12, at the distance that fits the machine's bounding sphere in the narrower field of view, with the
+    picture moved up as frameAbove does for controls covering cover_px at the bottom of a size_px screen."""
     sx, sy, sz = common.load_machine()["size"]
+    w, h = size_px
+    aspect = w / h
     radius = math.sqrt(sx * sx + sy * sy + sz * sz) / 2
     fov_y = math.radians(common.GAME_CAMERA["fov_deg"])
-    fov_x = 2 * math.atan(math.tan(fov_y / 2) * aspect)
-    dist = radius * 1.15 / math.sin(min(fov_x, fov_y) / 2)
+
+    def fit(r, fov, asp):
+        fx = 2 * math.atan(math.tan(fov / 2) * asp)
+        return r * 1.15 / math.sin(min(fov, fx) / 2)
+
+    free = max(h * 0.4, h - cover_px)
+    fov_free = 2 * math.atan(math.tan(fov_y / 2) * free / h)
+    scale = max(1.0, fit(1, fov_free, w / free) / fit(1, fov_y, aspect))
+    dist = fit(radius, fov_y, aspect) * scale
     a, p = common.GAME_CAMERA["azimuth"], common.GAME_CAMERA["polar"]
     target = (0.0, sy / 2, 0.0)
     pos = (target[0] + dist * math.sin(p) * math.sin(a), target[1] + dist * math.cos(p), target[2] + dist * math.sin(p) * math.cos(a))
     cam.data.sensor_fit = "VERTICAL"
     cam.data.angle_y = fov_y
+    cam.data.shift_y = -((h - free) / 2) / h if cover_px else 0.0
     aim_camera(cam, V(common.gl(*pos)), V(common.gl(*target)))
     return V(common.gl(*pos))
 
@@ -1621,9 +2064,11 @@ def renders(look, rig, body, out_dir, tag):
     rig.rotation_euler = (0, 0, turn)
     game_camera(cam)
     render_to(os.path.join(out_dir, f"{look}-game{tag}.png"), 780, 1688)
+    game_camera(cam, (360, 640))
+    render_to(os.path.join(out_dir, f"{look}-game-360{tag}.png"), 720, 1280)
     # The same camera position turned up until the head is in frame: how big the person reads at the game's distance.
     # The default view itself does not show the head (see assets/customers/STATUS.md).
-    cam_pos = game_camera(cam)
+    cam_pos = game_camera(cam, cover_px=0)
     head = rig.matrix_world @ rig.pose.bones[f"{look}_head"].tail
     fov = math.radians(common.GAME_CAMERA["fov_deg"])
     look_dir = (cam.matrix_world.to_3x3() @ V((0, 0, -1))).normalized()
@@ -1631,7 +2076,7 @@ def renders(look, rig, body, out_dir, tag):
     horiz = math.hypot(to_head.x, to_head.y)
     top_angle = math.atan2(-look_dir.z, math.hypot(look_dir.x, look_dir.y)) - fov / 2
     top_z = cam_pos.z - math.tan(top_angle) * horiz
-    print(f"{look}: head top at {head.z:.2f} m, {horiz:.2f} m from the game camera (height {cam_pos.z:.2f} m); the default view's top edge is {top_z:.2f} m above the ground there")
+    print(f"{look}: head top at {head.z:.2f} m, {horiz:.2f} m from the game camera (height {cam_pos.z:.2f} m); before the picture moves up above the controls, the view's top edge is {top_z:.2f} m above the ground there")
     pitch = math.atan2(head.z + 0.12 - cam_pos.z, horiz) - fov / 2 + 0.02
     yaw = math.atan2(to_head.y, to_head.x)
     tgt = cam_pos + V((math.cos(yaw) * math.cos(pitch + 0.0), math.sin(yaw) * math.cos(pitch), math.sin(pitch)))
@@ -1640,6 +2085,7 @@ def renders(look, rig, body, out_dir, tag):
     yaw = math.atan2(dirh.y, dirh.x)
     aim_camera(cam, cam_pos, cam_pos + V((math.cos(yaw) * math.cos(pitch), math.sin(yaw) * math.cos(pitch), math.sin(pitch))))
     render_to(os.path.join(out_dir, f"{look}-game-tilted{tag}.png"), 780, 1688)
+    cam.data.shift_y = 0.0
     for o in machine:
         bpy.data.objects.remove(o, do_unlink=True)
     rig.location = (0, 0, 0)
