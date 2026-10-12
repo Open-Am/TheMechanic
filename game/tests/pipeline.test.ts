@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MOMENTS } from "../src/platform/interfaces/index.ts";
 import { checkAudio, licenceRows, licenceText, oggPages, opusHead, opusOnly, type SoundSource } from "../../tools/pipeline/check.ts";
-import { checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
+import { checkBench, checkFileSize, checkHand, checkModel, checkToolbox, checkTools, imageSize, materialsUsingImages, nodeTriangles, readGlb, rootNodes, type Budgets, type Glb } from "../../tools/pipeline/check.ts";
 import { loadMachine } from "./helpers.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -467,5 +467,48 @@ describe("the toolbox (ADR 0021, plan 0012)", () => {
   it("rejects a file over 200 KB", () => {
     const big = readGlb(makeGlb(toolboxJson(), new Uint8Array(200_001)));
     expect(checkToolbox(big, budgets).errors.join(" ")).toMatch(/over its 200 KB budget/);
+  });
+});
+
+describe("the workbench (ADR 0025, plan 0016)", () => {
+  /** A bench JSON: one root node named `name` drawing `tris`, with `images` embedded images. */
+  const benchJson = (name = "bench", tris = 900, images = 3) => ({
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ name, mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+    accessors: [{ count: tris * 3 }, { count: tris * 3 }],
+    images: Array.from({ length: images }, () => ({ mimeType: "image/webp" })),
+  });
+
+  it("has its own budget: 3,000 triangles, 300 KB, one 1024 px texture set", () => {
+    expect(budgets.bench).toEqual({ _source: expect.any(String), triangles: 3000, bytes: 300000, texturePx: 1024 });
+  });
+
+  it("passes one bench node within budget", () => {
+    const r = checkBench(readGlb(makeGlb(benchJson())), budgets);
+    expect(r.errors).toEqual([]);
+    expect(r.triangles).toBe(900);
+  });
+
+  it("rejects a wrong root name, a second root, too many triangles and a second texture set", () => {
+    expect(checkBench(readGlb(makeGlb(benchJson("table"))), budgets).errors.join(" ")).toMatch(/one root node named "bench"; found table/);
+    const two = { ...benchJson(), scenes: [{ nodes: [0, 1] }], nodes: [{ name: "bench", mesh: 0 }, { name: "stool" }] };
+    expect(checkBench(readGlb(makeGlb(two)), budgets).errors.join(" ")).toMatch(/found bench, stool/);
+    expect(checkBench(readGlb(makeGlb(benchJson("bench", 3001))), budgets).errors.join(" ")).toMatch(/3001 triangles, over its budget of 3000/);
+    expect(checkBench(readGlb(makeGlb(benchJson("bench", 900, 6))), budgets).errors.join(" ")).toMatch(/6 images; one texture set is at most 3/);
+  });
+
+  it("rejects a file over 300 KB", () => {
+    const big = readGlb(makeGlb(benchJson(), new Uint8Array(300_001)));
+    expect(checkBench(big, budgets).errors.join(" ")).toMatch(/over its 300 KB budget/);
+  });
+
+  it("the shipped bench passes its check", () => {
+    const file = join(root, "game", "public", "scene", "bench.glb");
+    expect(existsSync(file)).toBe(true);
+    const r = checkBench(readGlb(new Uint8Array(readFileSync(file))), budgets);
+    expect(r.errors).toEqual([]);
+    expect(r.triangles).toBeGreaterThan(0);
   });
 });
