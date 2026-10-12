@@ -6,7 +6,9 @@
 //   fresh temporary folder on every run.
 //
 // Starts the Vite dev server, opens the game with ?diag, takes each part off (double tap, then drag to the tray), fixes the culprit, drags the
-// chips back, pulls the cord, and repeats with "Next customer" and "Free play" until all six faults are solved. Saves
+// chips back, pulls the cord, and repeats with "Next customer" and "Free play" until all twelve faults are solved (in a
+// fixed order through the development-only ?faults= list, plan 0020), doing each diagnosis check once on the way and
+// checking its sheet, result, notes, cost and the clean-job bonus (plan 0019). Saves
 // screenshots, reports console errors and fails below 30 fps at 4x CPU throttle (ADR 0014). Plan 0014 adds: the loading
 // bar with Start disabled, today's fault scored once then practice, Share text on the clipboard, a daily left mid-round
 // reading "Not finished" (ADR 0024), the next day's daily, and a round with localStorage throwing. Plan 0013 adds sound
@@ -27,6 +29,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { removalOrder } from "../../game/src/core/rules.ts";
+import { CHECK_SECONDS } from "../../game/src/core/constants.ts";
+import { CHECK_IDS } from "../../game/src/core/types.ts";
 import type { FaultFile, Machine, ScoreBreakdown } from "../../game/src/core/types.ts";
 import { shareText } from "../../game/src/ui/format.ts";
 import { MOMENTS } from "../../game/src/platform/interfaces/index.ts";
@@ -469,6 +473,8 @@ const loadingChecks: string[] = [];
 
 const solved = new Map<string, string>();
 const shots = new Set<string>();
+/** Every fault once: the fouled plug first (its plug comes out), then one whose fuel hose comes off, then the rest. */
+const FAULT_ORDER = ["fouled_plug", "clogged_jet", ...faultFile.faults.map((f) => f.id).filter((id) => id !== "fouled_plug" && id !== "clogged_jet")];
 
 // The hand and deliberate removal (ADR 0020), on a fresh round where the fuel tank is blocked by the tap:
 // the open hand is the same over a removable and a blocked part; a double tap on a blocked part does nothing; a drag on
@@ -599,21 +605,126 @@ async function noteHidden(where: string): Promise<void> {
       await screenshot("fail-hose-tank");
     }
   }
-  // Back to a fresh round for the faults.
-  await load(url);
+  // Back to a fresh round for the faults: every fault once, in an order that reaches every check early (the plug out
+  // on the first, the fuel hose off on the second), through the development-only ?faults= list (plan 0020).
+  await load(`${url}&faults=${FAULT_ORDER.join(",")}`);
+}
+
+// Diagnosis checks (plan 0019 step 10, ADR 0029). In the rounds that solve every fault, each check is done once from
+// the Check sheet, as a player does: the first round reads a greyed check's needs, checks the result card against the
+// fault's line, the notes, the patience dropping by the check's cost, that a done check is not done twice, and that
+// checks are not needed once the fault is fixed. Every solved round must show the clean-job bonus, and a round with
+// checks the Checks row. Screenshots of the sheet, a result, the notes and the result screen go in the output folder.
+const diagnosisChecks: string[] = [];
+/** Checks done at least once in the browser, with the fault they were done on. */
+const exercised = new Map<string, string>();
+const checkShots = new Set<string>();
+const leavesAt = async () => Number(/leaves at ([\d.]+)s/.exec(await diag())?.[1] ?? Number.NaN);
+const possibleNow = async () => (/checks possible: ([^\n]*)/.exec(await diag())?.[1] ?? "-").split(", ").filter((x) => x && x !== "-");
+const checkLogCount = async (id: string) => ((await diag()).match(new RegExp(`s check ${id}\\b`, "g")) ?? []).length;
+/** Folds the diagnostic panel for a clean screenshot, or opens it again (a click toggles it). */
+async function foldDiag(fold: boolean): Promise<void> {
+  await evaluate(`(() => { const p = document.querySelector('[data-marker="open-am-diagnostic-overlay"]'); if (p && p.textContent.startsWith("diag ") !== ${fold}) p.click(); })()`);
+  await sleep(50);
+}
+async function cleanShot(name: string): Promise<void> {
+  if (checkShots.has(name)) return;
+  checkShots.add(name);
+  await foldDiag(true);
+  await sleep(150);
+  await screenshot(name);
+  await foldDiag(false);
+}
+/** Taps an element near its right end: the diagnostic panel covers the top left of the sheet. */
+async function tapRight(selector: string): Promise<void> {
+  const r = await waitFor(selector, () =>
+    evaluate<{ x: number; y: number } | null>(
+      `(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e || e.offsetParent === null) return null; const r = e.getBoundingClientRect(); return { x: r.right - 24, y: r.top + r.height / 2 }; })()`,
+    ),
+  );
+  await tapAt(r.x, r.y);
+}
+async function openCheckSheet(): Promise<void> {
+  await tapSelector(".check-open");
+  await waitFor("the Check sheet", () => evaluate<boolean>("!!document.querySelector('.checks-sheet.list')"), 3000);
+}
+const rowOf = (id: string) =>
+  evaluate<{ status: string; disabled: boolean; note: string } | null>(
+    `(() => { const b = document.querySelector('.check-row[data-check="${id}"]'); return b ? { status: b.dataset.status, disabled: b.disabled, note: b.querySelector('.check-note')?.textContent ?? "" } : null; })()`,
+  );
+async function closeCard(): Promise<void> {
+  await tapSelector(".card .close");
+  await waitFor("the card closed", () => evaluate<boolean>("!document.querySelector('.card')"), 3000);
+}
+/** Does one check from the Check sheet and checks what it shows. `roundChecks` counts this round's checks. */
+async function runCheck(fault: (typeof faultFile.faults)[number], id: string, roundChecks: number): Promise<void> {
+  await idle();
+  const before = await leavesAt();
+  await openCheckSheet();
+  if (!checkShots.has("checks-1-sheet")) {
+    // A greyed check says what it needs, from what the player can see (ADR 0029, ADR 0007).
+    const plug = await rowOf("look_plug");
+    if (plug?.disabled && plug.status === "needs" && plug.note === "Needs the spark plug out") diagnosisChecks.push(`a greyed check reads "${plug.note}"`);
+    else failures.push(`checks: with every part on, "Read the plug" was ${JSON.stringify(plug)}, not greyed with "Needs the spark plug out"`);
+    await cleanShot("checks-1-sheet");
+  }
+  const row = await rowOf(id);
+  if (row?.status !== "possible" || row.disabled) throw new Error(`check ${id} was not offered: ${JSON.stringify(row)}`);
+  await tapRight(`.check-row[data-check="${id}"]`);
+  await waitFor(`the result of ${id}`, () => evaluate<boolean>("!!document.querySelector('.check-result')"), 3000);
+  const shown = await textOf(".check-result .condition");
+  if (shown !== fault.clues[id as keyof typeof fault.clues]) failures.push(`checks: ${id} on ${fault.id} showed ${JSON.stringify(shown)}, not the fault's line`);
+  const after = await leavesAt();
+  const cost = CHECK_SECONDS[id as keyof typeof CHECK_SECONDS];
+  if (Math.abs(before - after - cost) > 0.051) failures.push(`checks: ${id} moved the walk-out from ${before}s to ${after}s, not by its ${cost} s`);
+  else if (!diagnosisChecks.some((c) => c.startsWith("patience drops"))) diagnosisChecks.push(`patience drops by the check's cost (${id}: ${before}s to ${after}s)`);
+  exercised.set(id, fault.id);
+  await cleanShot("checks-2-result");
+  if (!checkShots.has("checks-3-notes")) {
+    // The notes list every result of the round, in order.
+    await tapSelector(".check-result .notes-open");
+    await waitFor("the notes", () => evaluate<boolean>("!!document.querySelector('.notes-list')"), 3000);
+    const notes = await evaluate<string[]>("[...document.querySelectorAll('.notes-list li')].map((li) => li.textContent)");
+    if (notes.length === roundChecks + 1 && notes[notes.length - 1]!.endsWith(shown ?? "?")) diagnosisChecks.push(`the notes list the round's ${notes.length} result(s)`);
+    else failures.push(`checks: the notes showed ${JSON.stringify(notes)}`);
+    await cleanShot("checks-3-notes");
+  }
+  await closeCard();
+  if (!diagnosisChecks.some((c) => c.startsWith("a check is done once"))) {
+    // Done once: the sheet shows the result in its row, and tapping it shows the result again without checking twice.
+    await openCheckSheet();
+    const done = await rowOf(id);
+    await tapRight(`.check-row[data-check="${id}"]`);
+    await waitFor("the result again", () => evaluate<boolean>("!!document.querySelector('.check-result')"), 3000);
+    await closeCard();
+    const n = await checkLogCount(id);
+    if (done?.status === "done" && done.note === shown && n === 1) diagnosisChecks.push(`a check is done once: its row shows the result and a second tap logs nothing (${id})`);
+    else failures.push(`checks: after ${id} its row was ${JSON.stringify(done)} and the log had it ${n} times`);
+  }
+}
+/** Does every check possible now that has not been done in the browser yet. */
+async function checksNow(fault: (typeof faultFile.faults)[number], done: string[]): Promise<void> {
+  for (const id of await possibleNow()) {
+    if (exercised.has(id)) continue;
+    await runCheck(fault, id, done.length);
+    done.push(id);
+  }
 }
 
 /** Plays the running round's fault to the result screen, as a player does. Returns the fault and the shown total. */
 let watchEnding = false;
 /** Plan 0017: called right after the winning pull, to watch the ending, when watchEnding is set. */
 let onWinningPull: (() => Promise<void>) | null = null;
-async function solveRound(): Promise<{ faultId: string; score: string }> {
+async function solveRound(diagnose = false): Promise<{ faultId: string; score: string }> {
   const m = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
   if (!m) throw new Error("diagnostic overlay did not show the fault");
   const fault = faultFile.faults.find((f) => f.id === m[1])!;
   const order = removalOrder(machine, fault);
+  const done: string[] = [];
+  if (diagnose) await checksNow(fault, done);
   for (const id of order) {
     await pullOff(id);
+    if (diagnose) await checksNow(fault, done);
     const fill = await chipPictureFill(id);
     if (fill < 0.03) throw new Error(`tray picture for ${id} is missing or blank (${(fill * 100).toFixed(1)}% opaque)`);
     if (!shots.has("working")) {
@@ -632,6 +743,16 @@ async function solveRound(): Promise<{ faultId: string; score: string }> {
   await tapSelector(".card .primary");
   await waitFor("the fix", async () => /fixed true/.test(await diag()), 5000);
   await tapSelector(".card .close");
+  if (diagnose && !diagnosisChecks.some((c) => c.startsWith("after the fix"))) {
+    // Once the fault is fixed, every check not done is greyed as not needed (ADR 0029).
+    await openCheckSheet();
+    const rows = await evaluate<Array<{ status: string; disabled: boolean }>>("[...document.querySelectorAll('.check-row')].map((b) => ({ status: b.dataset.status, disabled: b.disabled }))");
+    const open = rows.filter((r) => r.status !== "done");
+    if (open.length > 0 && open.every((r) => r.status === "fixed" && r.disabled)) diagnosisChecks.push(`after the fix the ${open.length} checks not done are greyed as not needed`);
+    else failures.push(`checks: after the fix the rows were ${JSON.stringify(rows)}`);
+    await cleanShot("checks-5-after-fix");
+    await closeCard();
+  }
   for (const id of [...order].reverse()) await putBack(id);
   await tapSelector(".pull");
   // The customer pays and leaves before the result (plan 0017): skip it unless the caller watches it.
@@ -644,17 +765,28 @@ async function solveRound(): Promise<{ faultId: string; score: string }> {
     }
   }
   await waitFor("the result screen", () => evaluate<boolean>("!!document.querySelector('.result')"), 9000);
+  if (diagnose) {
+    // Every round here is clean: only the necessary parts, no failed pull (ADR 0029).
+    const rows = await evaluate<{ clean: string | null; checks: string | null }>(
+      "({ clean: document.querySelector('.result .clean span:last-child')?.textContent ?? null, checks: document.querySelector('.result .checks span:last-child')?.textContent ?? null })",
+    );
+    const cost = done.reduce((n, id) => n + CHECK_SECONDS[id as keyof typeof CHECK_SECONDS], 0);
+    if (rows.clean !== "−10") failures.push(`checks: ${fault.id}'s clean round showed the Clean job row as ${JSON.stringify(rows.clean)}`);
+    else if (done.length && rows.checks !== `+${cost} s`) failures.push(`checks: ${fault.id}'s result showed Checks ${JSON.stringify(rows.checks)}, not +${cost} s`);
+    else if (done.length && !checkShots.has("checks-4-result-screen")) diagnosisChecks.push(`the result shows Checks +${cost} s and Clean job −10`);
+    if (done.length) await cleanShot("checks-4-result-screen");
+  }
   return { faultId: fault.id, score: await evaluate<string>("document.querySelector('.result .total').textContent") };
 }
 
-for (let round = 1; round <= 30 && solved.size < faultFile.faults.length; round++) {
+for (let round = 1; round <= faultFile.faults.length + 2 && solved.size < faultFile.faults.length; round++) {
   await toBriefing();
   await beginRound();
   const m = /fault (\S+)\s+culprit (\S+)/.exec(await diag());
   if (!m) throw new Error("diagnostic overlay did not show the fault");
   const fault = faultFile.faults.find((f) => f.id === m[1])!;
   try {
-    const { score } = await solveRound();
+    const { score } = await solveRound(true);
     if (!shots.has("result")) {
       shots.add("result");
       await screenshot("4-result");
@@ -1542,6 +1674,8 @@ console.log(`Daily: ${dailyChecks.join("; ") || "not run"}`);
 console.log(`Storage blocked: ${blockedOk ? "a round played to the result with no console errors" : "FAILED"}`);
 console.log(`Hand: ${handSeen ? "seen carrying a part to the tray" : "not seen"}; ${pinchSeen ? "seen pinching a small part" : "pinch not seen"}`);
 console.log(`Checks: ${checks.join("; ") || "not run"}`);
+console.log(`Diagnosis checks: done ${[...exercised].map(([id, f]) => `${id} (${f})`).join(", ") || "none"}; ${diagnosisChecks.join("; ") || "not run"}`);
+for (const id of CHECK_IDS) if (!exercised.has(id)) failures.push(`checks: ${id} was never done in the browser`);
 console.log(`Sound: ${soundChecks.join("; ") || "not run"}; files decoded: ${soundFiles} of ${MOMENT_FILES}`);
 console.log(`Fasteners: undone on ${[...fastenedOut].join(", ") || "none"}; done up again on ${[...fastenedBackIn].join(", ") || "none"}; tools seen: ${[...toolsSeen].join(", ") || "none"}`);
 if (fastenedOut.size === 0) failures.push("fasteners: no part was seen with its fasteners undone");

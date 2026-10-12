@@ -69,6 +69,21 @@ Risks: the controls row is already full on a 360 px phone; the check animations 
 
 Plan 0018 (the pull on screen) merged first. Plan 0020's model parts can be built at the same time on its own branch. Plan 0020's game logic builds on this plan's validator and `clues` and is merged right after it. Plans 0021, 0022 and 0023 follow.
 
+## Build record
+
+Built by Claude (Opus) on branch `plan/0019-diagnosis-and-faults` (with plan 0020's game logic), 2026-10-12, before plan 0018 merged. The owner's instruction for this branch: everything except the Blender modelling, which waits for plan 0018's branch (it edits `gen950.blend`).
+
+Readings added while building:
+
+7. `apply()` keeps its optional `customer` argument; the `{ customer?, kit? }` setup waits for plan 0023, the first plan with a kit. Nothing reads a kit before then.
+8. An unknown `checkId` is refused as `check_unavailable`: ADR 0029 names only three refusals.
+9. Sounds are one-shots only: listen, smoke and volts play `cord` then `fail` (`no_start`) or `start` (every other symptom); the spark test `cord` alone; plug and fuel nothing. A check never starts the engine's loop (ADR 0028), so "fires and dies" and "runs" sound the same until plan 0018; the clue line says which.
+10. The render shows no check animation yet (the pull of plan 0018 and the testers model are not here). A check that runs the engine presses loose parts home, as a pull does. Nothing else moves.
+11. The result shows on the inspect card (`card.openResult`), with a "Notes (n)" button; the notes are a second view of the Check sheet.
+12. A development-only `?faults=a,b,c` list (main.ts, `GameDeps.faultOrder`) lets `verify:phone` play every fault once in a fixed order instead of by luck.
+
+Steps done: 1 to 5, 7, 9, 10 (as far as the render goes), 11. Pending: step 6 (the testers model, with the Blender work), step 8's tester trip and check animations (need plan 0018 and the testers), and the owner's look on the phone.
+
 ## Release note line
 
 Added: six diagnosis checks (listen, look at the smoke, read the plug, spark test, fuel flow, volts test) from a Check button; each costs a few seconds and shows what the engine does; a clean job earns a bonus (plan 0019, ADR 0029).

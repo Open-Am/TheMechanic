@@ -1,4 +1,4 @@
-// Browser check for removal (ADR 0020, release 0.9.3): takes all twelve parts off one after another, as a player does,
+// Browser check for removal (ADR 0020, release 0.9.3): takes every part off (fifteen since plan 0020) one after another, as a player does,
 // and records how many tries each step needed. No dependencies: drives Edge or Chrome over the DevTools protocol.
 //
 //   node tools/verify/drop-play.ts [--out <dir>] [--browser <path>] [--input mouse,touch] [--drop chips,above-cord,bottom,cord]
@@ -9,7 +9,7 @@
 //
 // For every input (mouse events, or touch events with touch emulation so pointerType is "touch") and every drop place
 // (on the tray chips, just above the pull cord, at the very bottom of the screen, on the pull cord button) it plays one
-// round, taking the twelve parts off in an order the rules allow. Each removal is:
+// round, taking every part off in an order the rules allow. Each removal is:
 //   1. a double tap (double click) where a player would aim: the visible point of the part nearest the middle of its
 //      picture, not a point searched out of its hit volume;
 //   2. a press on the loose part, again where it shows, and a drag; the carry must start on that press;

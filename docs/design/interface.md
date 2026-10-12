@@ -9,7 +9,7 @@ Portrait first. From top to bottom:
 - Timer, top centre. `m:ss`. Hidden on the briefing and result screens.
 - Mute button, top right beside the timer: a speaker, slashed when muted, 44 px square, labelled "Sound on" or "Sound off" with `aria-pressed`. Muted means no sound and no vibration. The choice is kept in the browser under `openam.muted`, with a memory fallback when storage is blocked. Sound starts on (plan 0013, ADR 0018).
 - The machine, standing on a worn wooden workbench (plan 0016, ADR 0025), seen from a standing mechanic's eye on the near side: the camera is 1.6 m above the floor and looks down about 12 degrees. At 390 by 844 the generator fills 60 percent of the width, its middle a little right of centre (so the toolbox on the bench's left end shows its tools), and its lowest point 60 px above the controls; above it there is room across the bench for the customer (plan 0015 places them). On shorter screens the camera stands back until a 1.76 m customer's head would clear the timer, but never so far that the generator is under 40 percent of the width: at 360 by 640 it stands about 2.4 m back and the generator is about 42 percent wide. The framing is computed (`frameBench` in `game/src/render/stage.ts`), not hand-set. The canvas sits behind everything else and runs to the bottom of the screen, so a carried part and the hand stay drawn over the controls. As the tray wraps onto more rows the camera tilts and stands back so the machine glides up to stay clear of them (since 0.9.3), and the machine always keeps at least 40 percent of the screen's height.
-- "Pull cord" button, full width, above the tray. Enabled only when the tray is empty.
+- "Pull cord" button, above the tray. Enabled only when the tray is empty. Since plan 0019 it shares its row with "Check" (ADR 0029), an outlined button on the right, so the controls are no taller than before. Check is enabled while the round runs.
 - The tray, chips along the bottom, wrapping onto more rows as parts come off. It does not scroll: chips take every drag for putting parts back, so a scrolling tray could not be scrolled by touch.
 
 Landscape works but is not tuned. Safe-area insets are respected (`viewport-fit=cover`).
@@ -20,7 +20,7 @@ Landscape works but is not tuned. Safe-area insets are respected (`viewport-fit=
 - **Start.** "Open Am", then "Today's fault · Day N" and "Free play". Once today's scored attempt is used the daily button reads "Today's fault · practice", and the screen shows today's result ("Day N: score 52 ★★☆", "Day N: the customer walked", or "Day N: Not finished" for a daily left mid-round, ADR 0024). "Next customer" on the result screen comes back here (plan 0014).
 - **Briefing.** For today's fault, "Today's fault · Day N", or "Practice, not scored". Then the customer's complaint in quotes, the symptom text, and "Start". The model, environment and hand load behind it: until they are in, a progress bar (files arrived out of files requested) sits above "Start", which is disabled. The timer starts when "Start" is pressed; for a scored daily that also uses up the day's attempt (ADR 0024).
 - **Working.** The layout above.
-- **Result.** "It starts!", the time, wrong parts and failed pulls, the total score and the stars, then "Best" (the lowest fixed total for this fault, kept in the browser) and "New best" when this round set it. Practice shows "Not scored" and no best. A scored daily that ended with the engine running shows "Share": the phone's share sheet, otherwise the clipboard ("Copied"), otherwise the text in a box to copy by hand. Then "Next customer".
+- **Result.** "It starts!", the time, wrong parts and failed pulls, "Checks" ("+9 s") when any check was done and "Clean job" ("−10") for a fixed round with no wrong parts and no failed pulls (ADR 0029), the total score and the stars, then "Best" (the lowest fixed total for this fault, kept in the browser) and "New best" when this round set it. Practice shows "Not scored" and no best. A scored daily that ended with the engine running shows "Share": the phone's share sheet, otherwise the clipboard ("Copied"), otherwise the text in a box to copy by hand. Then "Next customer".
 - **Cannot run.** A plain message when WebGL is missing or the data is invalid. No retry loop.
 
 ## Gestures
@@ -48,6 +48,17 @@ A bottom sheet over the lower part of the screen, dismissed by tapping outside i
 - What it does (`does`).
 - Its condition, from `app.conditionOf`.
 - "Fix" button, labelled with the fault's `fix` text, shown only on the unfixed culprit. Pressing it disables the card's buttons for 2 seconds, shows a thin progress bar, then logs the fix. The clock keeps running.
+
+## Checks (plan 0019, ADR 0029)
+
+The Check button opens a bottom sheet, "Check the engine", with a line about the cost, then the six checks in a fixed order, each a full-width row with its name and its cost in seconds ("Listen to a pull 3 s"):
+
+- **Possible now:** outlined in the accent colour. A tap does the check: the sheet closes and the card shows the check's name, "Result" and what it showed, from `app.resultOf`, with a "Notes (n)" button.
+- **Needs something first:** greyed and disabled, with what it needs in words about the machine the player can see, from the machine's `checks` data: "Needs the spark plug out", "Needs every part on", "Needs the spark plug out and the recoil starter on". Never anything about the fault (ADR 0007).
+- **Done:** its result shown under its name. A tap shows the result card again; it is never checked twice.
+- **After the fix:** every check not done is greyed, "Not needed: you have fixed it."
+
+Under the list, "Notes (n)" opens "What you found": every result of the round in the order the checks were done, built from the log, with "Back" to the list. The sheet closes on its × or a tap outside it. Each check costs its seconds on the score and the customer's patience at once (the meter drops). The sounds are the existing moments: the cord, then the failed start or the catch (listen, smoke, volts), the cord alone (spark test), or nothing (plug, fuel). Until plan 0018 and the testers model, nothing else moves on screen, except that a check which runs the engine presses loose parts home as the pull does.
 
 ## Failed pull
 

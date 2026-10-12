@@ -64,6 +64,19 @@ Risks: where the coil and filter really sit is unknown, so the model is a guess 
 
 Steps 1 and 2 (the model parts) can start at once. Steps 3 to 7 need plan 0019's validator and `clues`, and are merged right after plan 0019. Plans 0021 to 0023 follow.
 
+## Build record
+
+Built by Claude (Opus) on branch `plan/0019-diagnosis-and-faults`, with plan 0019, on 2026-10-12. The model step waits for plan 0018's branch, which edits `gen950.blend`.
+
+Readings added while building:
+
+6. The three new parts are drawn from their placeholders in `machine.json` (`render/placeholders.ts` already falls back to a part's placeholder when the model has no node, with a console warning). The placeholders sit where the model's bounds suggest: the cap on the tank's top (y 0.405), the filter left of the tap and under it (x -0.192, y 0.178), the coil inside the recoil starter's housing on the engine side (x 0.131), its two bolts drawn as stand-in bolts.
+7. The asset check did not tolerate a part the model lacks: `checkModel` in `tools/pipeline/check.ts` failed with "No node named ...". It now warns, naming each missing part node and the fasteners of a missing part, and still fails on a missing base node, a duplicate, a stray node, or a missing fastener of a part the model has. `tools/blender/validate.py` does the same for objects missing from `parts`. The pipeline test that called a missing part an error now checks the warning.
+8. The daily's fault changes from the release day, as ADR 0030 accepts.
+9. `npm run play` printed "Some faults did not complete" before this work: its walk-out was scored at 60 s, before any customer leaves since release 0.11. It now scores a second after the walk-out.
+
+Steps done: 1 (data and allocation; the reducer tests of the new removal orders), 3, 4, 5, 6 (the browser checks play all twelve faults with the placeholders), 7. Pending: step 2 (model the three parts and the tank's filler neck in Blender, `validate.py` requiring them again, `npm run assets`, match images), and the owner's look on the phone.
+
 ## Release note line
 
 Added: six more faults (a blocked fuel cap vent, a blocked fuel filter, a stuck float, a broken recoil spring, a weak capacitor and a failed ignition coil) and three new parts (fuel cap, fuel filter, ignition coil), all unverified drafts for the mechanic (plan 0020, ADR 0030).

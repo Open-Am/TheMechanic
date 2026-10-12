@@ -29,7 +29,7 @@ Stop after five match rounds on one part, and report what still differs and why,
 
 ## Triangle allocation
 
-Total budget 60,000 (ADR 0014). The parts below add up to 50,000, keeping 10,000 spare for detail where the match loop shows it is needed.
+Total budget 60,000 (ADR 0014). The parts below add up to 51,700 (with 3,000 for fasteners in `budgets.json`, 54,700), keeping the rest spare for detail where the match loop shows it is needed. ADR 0030 added the last three rows.
 
 | Object | Triangles |
 | --- | --- |
@@ -45,10 +45,21 @@ Total budget 60,000 (ADR 0014). The parts below add up to 50,000, keeping 10,000
 | `plug_cap` | 1,000 |
 | `spark_plug` | 1,400 |
 | `capacitor` | 800 |
+| `fuel_cap` (on the tank's top, its filler neck in `fuel_tank`) | 400 |
+| `fuel_filter` (short clear cylinder on the tap's outlet, under the hose's end) | 400 |
+| `ignition_coil` (small black block with two bolts, beside the flywheel behind the recoil starter) | 900 |
 | `base_frame` (tube frame, feet) | 6,000 |
 | `base_engine` (cylinder, cooling fins, crankcase) | 9,000 |
 | `base_alternator` | 3,000 |
 | `base_panel` (socket, breaker, switch, DC posts) | 2,000 |
+
+### The three parts of ADR 0030 (plan 0020)
+
+Not modelled yet: plan 0020's model step waits for plan 0018's branch, which also edits `gen950.blend`. Until then the game draws them from their placeholders in `machine.json`, and `npm run assets` warns, naming them and the coil's bolts, instead of failing.
+
+- **Fuel cap.** A separate node on the tank's top, unscrewing about two turns; the tank's mesh gets a filler neck under it. Its vent design is unknown (open questions).
+- **Fuel filter.** A short clear cylinder on a stub from the tap's outlet, under the hose's end, so the hose comes off first and the tap after it. Whether the clones have one at all is unknown.
+- **Ignition coil.** A small black block with two bolts (`ignition_coil.bolt_1`, `bolt_2`) on the engine side behind the recoil starter's housing, in reach once the starter is off. No plug lead is modelled. Coil or CDI unit is unknown.
 
 ## Textures
 

@@ -24,6 +24,8 @@ Each moment fires with the picture, never before it and never for a part that ca
 | `cord` | the cord is pulled (the accepted pull) | app | none |
 | `fail`, `start` | 0.6 s after the cord (`CORD_SECONDS`) | app | 40 ms; 60, 40, 60, 40, 80 ms |
 
+Checks (plan 0019, ADR 0029) use the same moments, from app: listening, watching the smoke and the volts test play `cord`, then `fail` for a `no_start` fault or `start` for every other symptom, 0.6 s later; the spark test plays `cord` alone (the plug is out); reading the plug and the fuel flow are silent. A check never starts the engine's running loop (ADR 0028); the run and the switch press wait for plan 0018.
+
 An unscrewed part clicks for the whole turns it makes while loosening (75 percent of its turns): the spark plug clicks twice, the fuel tap (one turn) not at all. Going back in it clicks every turn. Pressing loose parts home before the cord and the walk-out are silent. Carrying a part makes no sound, and neither do the hand's trips to and from the toolbox (ADR 0021): the give comes once the last fastener is out, before the tool goes back, and the seat comes before the hand fetches the tool to do the fasteners up.
 
 ## The mechanic's hand (plans 0008 to 0010)
