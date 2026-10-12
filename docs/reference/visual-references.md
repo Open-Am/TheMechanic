@@ -186,3 +186,18 @@ Gathered after the owner wrote "Also lets give everyone of them footware. The sa
 | `feet-08.jpg` | `Abdullahi_Bayero,_Emir_of_Kano.jpg` | The Emir of Kano in ceremonial dress and slippers (ceremonial, not everyday). | E. H. Duckworth | Public domain |
 
 Gap: no clear photo of an older Lagos man's everyday leather slippers under a kaftan; the mule shape is taken from the babouche photos and is a reading, not a match.
+
+### The kaftan's shoulder (round 10, 2026-10-12)
+
+Gathered after the owner wrote "this should is off - please get a real human wearing a similar attair on the internet and use it as a guide". Local copies in `assets/customers/reference/shoulders/` (git-ignored), used only for how the cloth runs over the shoulder and arm. The notes are in `assets/customers/STATUS.md` round 11 (the shoulder rebuild).
+
+| Local file | Commons file | Shows | Author | Licence |
+| --- | --- | --- | --- | --- |
+| `shoulder-08.jpg` | `Boubou_homme.jpg` | A West African man standing, front, arms at rest, in a plain light-blue long kaftan with front embroidery and blue babouches. The closest match. | Leunajones | CC BY-SA 4.0 |
+| `shoulder-01.jpg` | `Jellabiya_Sudan2008.jpg` | An older man standing, three-quarter, in a loose white jalabiya, one hand on the hip: dropped shoulder, wide sleeve. | Maureen Lunn | CC BY 2.0 |
+| `shoulder-02.jpg` | `Egyptian_galabeya.jpg` | Three galabeyas on mannequins, front: raglan seams from the neck, sloping shoulders, sleeves widening to the cuff. | عبدالرحمن | CC0 |
+| `shoulder-07.jpg` | `Sudan_Envoy_-_Family.jpg` | A man in a white kaftan and embroidered cap, front, one arm round a child: soft shoulder, sleeve folds. | Sudan Envoy | CC BY 2.0 |
+| `shoulder-06.jpg` | `Homme_devant_une_à_coudre_au_Soudan.jpg` | A tailor at work in a white jalabiya; finished jalabiyas hanging behind, showing the cut flat. | MOHAMEDOSMAN27 | CC BY-SA 4.0 |
+| `shoulder-04.jpg` | `Nathaniel_Ajibola_Hausa_Men_Nigeria.jpg` | Hausa men in babban riga and caps at a durbar, front. | Jibofoto - Nathaniel Ajibola | CC BY-SA 4.0 |
+| `shoulder-05.jpg` | `Men_in_traditional_attires.jpg` | Three Yoruba men in agbada, front: the cloth falls from the shoulder without a step. | Zaynab05 | CC BY-SA 4.0 |
+| `shoulder-03.jpg`, `shoulder-09.jpg` | `Man_Wearing_Agbada.jpg`, `Igbo_Native_Wear_Shot.jpg` | Agbada and senator wear, kept for contrast. | Reflect photo; UCtrade | CC BY-SA 4.0; CC BY-SA 3.0 |

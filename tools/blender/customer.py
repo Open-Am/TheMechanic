@@ -96,7 +96,7 @@ LOOKS = {
         # shoulders and chest in long vertical folds, with straight wide sleeves lofted along the arms; no body
         # surface under it, so neither the chest nor a seam at the waist can show (see build_robe).
         "top": None,
-        "robe": {"hem": 0.12, "margin": 0.012, "flare": 0.05, "fold": 0.04, "sleeve_end": 0.94, "sleeve_margin": 0.008, "cuff": 0.06, "sag": 0.035},
+        "robe": {"hem": 0.12, "margin": 0.012, "flare": 0.05, "fold": 0.04, "sleeve_end": 0.94, "sleeve_margin": 0.008, "cuff": 0.06, "sag": 0.035, "shell": True},
         "bottom": {"kind": "trousers", "thickness": 0.008, "hem": 0.025, "hem_radius": 0.068},
         "skirt": None,
         "head": "kufi",
@@ -866,6 +866,8 @@ def build_robe(body, lm, spec, dom, bone_names):
         ring = [V((c0[0] + r[j] * dirs[j, 0], c0[1] + r[j] * dirs[j, 1], zz[j] if np.ndim(zz) else zz)) for j in range(seg)]
         rings.append(ring)
     lm.collar = (cy_neck, z_col, r_collar)
+    if rb.get("shell"):
+        return build_robe_shell(body, lm, spec, d, bone_names, rings, zs, centre, theta, z_chest)
     print(f"Robe: collar {z_col:.3f} radius {r_collar:.3f}, chest {z_chest:.3f}, hem {z_hem:.3f}, {len(zs)} rings of {seg}")
     obj = mesh_object(loft(rings, lip=0.008), "robe", "top")
     weights = body_weights(body, bone_names)
@@ -887,6 +889,268 @@ def build_robe(body, lm, spec, dom, bone_names):
     apply_weights(obj, blended)
     sleeves = [build_sleeve(body, lm, rb, d, side, weights) for side in ("l", "r")]
     return [obj] + sleeves
+
+
+def build_robe_shell(body, lm, spec, d, bone_names, rings, zs, centre, theta, z_chest):
+    """Round 10 (2026-10-12): the kaftan's top and sleeves as one garment surface, so there is no separate sleeve
+    meeting the body. The body's own surface over the chest, back, shoulders and arms down to the sleeve's end is
+    copied, smoothed so no muscle shows, and pushed out by the cloth's ease: the shoulder keeps the body's own slope,
+    the cloth runs on from it over the arm with the armpit's fold under it, and from the elbow the sleeve opens out
+    to a wide, soft cuff hanging lower on its underside. Below the chest the shell blends onto the lofted robe, which
+    starts under it, so there is no step. A rolled hem finishes the collar and each cuff."""
+    rb = spec["robe"]
+    me = body.data
+    co = np.array([v.co[:] for v in me.vertices])
+    skin = np.array(group_weights(body, ["body"])) > 0.5
+    z_col = lm.collar[1]
+    z_cut = z_chest - 0.02
+    arm_info = {}
+    for side in ("l", "r"):
+        A, E, H = (np.array(lm.head(f"{b}_{side}")[:]) for b in ("upperarm", "lowerarm", "hand"))
+        end = E + (H - E) * rb["sleeve_end"]
+        arm_info[side] = (A, E, end)
+
+    def arm_t(side, p_):
+        A, E, end = arm_info[side]
+        L1, L2 = np.linalg.norm(E - A), np.linalg.norm(end - E)
+        u1, u2 = (E - A) / L1, (end - E) / L2
+        t1 = (p_ - A) @ u1
+        t2 = (p_ - E) @ u2
+        return np.where(t1 < L1, t1, L1 + t2), L1, L2
+
+    sel = np.zeros(len(co), dtype=bool)
+    torso = np.isin(d, list(TORSO | {"neck_01"}))
+    sel |= torso & (co[:, 2] > z_cut) & (co[:, 2] < z_col)
+    for side in ("l", "r"):
+        arm = np.isin(d, [f"upperarm_{side}", f"lowerarm_{side}", f"clavicle_{side}"])
+        t, L1, L2 = arm_t(side, co)
+        sel |= arm & (t < L1 + L2)
+    sel &= skin
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.verts.ensure_lookup_table()
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if not all(sel[v.index] for v in f.verts)], context="FACES")
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
+    bm.verts.ensure_lookup_table()
+    me_tmp = bpy.data.meshes.new("shell_src")
+    bm.to_mesh(me_tmp)
+    # The kept vertices' original body indices, found by position, for their zones and weights.
+    from mathutils import kdtree
+    kd = kdtree.KDTree(len(co))
+    for i, p_ in enumerate(co):
+        kd.insert(p_, i)
+    kd.balance()
+    bm.free()
+    bm = bmesh.new()
+    bm.from_mesh(me_tmp)
+    bpy.data.meshes.remove(me_tmp)
+    bm.verts.ensure_lookup_table()
+    orig = np.array([kd.find(v.co)[1] for v in bm.verts])
+    inner = [v for v in bm.verts if not v.is_boundary]
+    for _ in range(10):
+        bmesh.ops.smooth_vert(bm, verts=inner, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    bm.normal_update()
+    pos = np.array([v.co[:] for v in bm.verts])
+    nrm = np.array([v.normal[:] for v in bm.verts])
+    # The cloth's ease over the body: more over the shoulders and upper arm than at the collar.
+    ease = np.full(len(pos), 0.014)
+    ease[pos[:, 2] > z_col - 0.03] = 0.008
+    pos = pos + nrm * ease[:, None]
+    dd = d[orig]
+    # The sleeves open out from the elbow to the cuff and hang lower on their underside.
+    for side in ("l", "r"):
+        A, E, end = arm_info[side]
+        armv = np.isin(dd, [f"upperarm_{side}", f"lowerarm_{side}"])
+        if not armv.any():
+            continue
+        t, L1, L2 = arm_t(side, pos)
+        fore = np.clip((t - L1 + 0.04) / (L2 + 0.04), 0.0, 1.0)
+        on_fore = t >= L1
+        foot = np.where(on_fore[:, None], E + np.outer(t - L1, (end - E) / L2), A + np.outer(t, (E - A) / L1))
+        radial = pos - foot
+        r = np.linalg.norm(radial, axis=1)
+        unit = radial / np.maximum(r, 1e-6)[:, None]
+        D = np.where(on_fore[:, None], (end - E) / L2, (E - A) / L1)
+        g = np.array([0.0, 0.55, -1.0])
+        g = g - (D @ g)[:, None] * D
+        g /= np.linalg.norm(g, axis=1, keepdims=True)
+        under = np.clip(np.sum(unit * g, axis=1), 0.0, 1.0) ** 2
+        target = np.maximum(r, r + (rb["cuff"] - r) * fore ** 1.3) + rb["sag"] * fore ** 1.2 * under
+        grow = armv & (target > r)
+        pos[grow] = foot[grow] + unit[grow] * target[grow][:, None]
+    # Below the chest the shell lies on the lofted robe (whose rings it covers), so the two join without a step.
+    ring_r = np.array([[math.hypot(p_.x - centre[0], p_.y - centre[1]) for p_ in ring] for ring in rings])
+    ring_z = np.array([ring[0].z for ring in rings])
+    tors = np.isin(dd, list(TORSO))
+    blend = np.clip((z_cut + 0.07 - pos[:, 2]) / 0.07, 0.0, 1.0) * tors
+    rel = pos[:, :2] - centre
+    th = np.arctan2(rel[:, 1], rel[:, 0])
+    rr = np.linalg.norm(rel, axis=1)
+    seg = len(theta)
+    j = ((th + math.pi) / (2 * math.pi) * seg) % seg
+    j0 = np.floor(j).astype(int) % seg
+    j1 = (j0 + 1) % seg
+    fj = j - np.floor(j)
+    order = np.argsort(ring_z)
+    # Over the chest and back the cloth spans the body as the lofted rings do (it hangs from the chest, so the chest
+    # does not show through), easing in from the shoulders down; at the bottom it lies exactly on the robe.
+    floor_w = np.clip((z_col - 0.06 - pos[:, 2]) / 0.06, 0.0, 1.0) * tors
+    loft_r = rr.copy()
+    for k in np.nonzero(floor_w > 0)[0]:
+        zk = pos[k, 2]
+        rad_j0 = np.interp(zk, ring_z[order], ring_r[order, j0[k]])
+        rad_j1 = np.interp(zk, ring_z[order], ring_r[order, j1[k]])
+        loft_r[k] = rad_j0 * (1 - fj[k]) + rad_j1 * fj[k]
+    new_r = rr + (np.maximum(rr, loft_r + 0.002) - rr) * floor_w
+    new_r = new_r * (1 - blend) + (loft_r + 0.0008) * blend
+    pos[:, 0] = centre[0] + rel[:, 0] / np.maximum(rr, 1e-6) * new_r
+    pos[:, 1] = centre[1] + rel[:, 1] / np.maximum(rr, 1e-6) * new_r
+    # The shell's lower edge, where it lies on the robe, is made level, so it reads as nothing rather than a ragged line.
+    edge = np.array([v.is_boundary for v in bm.verts]) & tors & (pos[:, 2] < z_cut + 0.03)
+    pos[edge, 2] = z_cut
+    for v, p_ in zip(bm.verts, pos):
+        v.co = V(p_.tolist())
+    # Hems along the collar and the cuffs: the shell's open edges above the chest.
+    edges = [e for e in bm.edges if e.is_boundary]
+    loops = boundary_loops(edges)
+    me2 = bpy.data.meshes.new("robe_top")
+    bm.to_mesh(me2)
+    bm.free()
+    for poly in me2.polygons:
+        poly.use_smooth = True
+    shell = bpy.data.objects.new("robe_top", me2)
+    bpy.context.scene.collection.objects.link(shell)
+    shell["zone"] = "top"
+    for a in list(me2.attributes):
+        if a.name in ("zone", "orig"):
+            me2.attributes.remove(a)
+    shell.vertex_groups.clear()
+    weights = body_weights(body, bone_names)
+    shell_w = [dict(weights[int(i)]) for i in orig]
+    # Where the shell lies on the robe, take the robe's weights' rule: no arm joints, so the two move together.
+    for k, b_ in enumerate(blend):
+        if b_ > 0:
+            wd = {n: w for n, w in shell_w[k].items() if not n.startswith(("upperarm", "lowerarm", "hand"))}
+            tot = sum(wd.values()) or 1.0
+            shell_w[k] = {n: w / tot for n, w in wd.items()}
+    apply_weights(shell, shell_w)
+    tris = common.triangle_count(shell)
+    if tris > SHELL_TRIS:
+        mod = shell.modifiers.new("dec", "DECIMATE")
+        mod.ratio = SHELL_TRIS / tris
+        bpy.ops.object.select_all(action="DESELECT")
+        shell.select_set(True)
+        bpy.context.view_layer.objects.active = shell
+        bpy.ops.object.modifier_apply(modifier="dec")
+    hems = []
+    for loop in loops:
+        pts = np.array([q[:] for q in loop])
+        if pts[:, 2].min() < z_cut + 0.005 and pts[:, 2].max() < z_cut + 0.08:
+            continue  # the bottom edge lies on the robe
+        c_ = pts.mean(axis=0)
+        outward = [(q - c_) / max(1e-6, np.linalg.norm(q - c_)) for q in pts]
+        sm = pts.copy()
+        for _ in range(3):
+            sm = (np.roll(sm, 1, axis=0) + 2 * sm + np.roll(sm, -1, axis=0)) / 4
+        hems.append(hem_band(list(sm), outward, "hem_robe", closed=True, width=0.014, thick=0.004, lift=0.001))
+    hem_src = np.zeros(len(co), dtype=bool)
+    hem_src[orig] = True
+    for h in hems:
+        apply_weights(h, copied_weights([v_.co[:] for v_ in h.data.vertices], body, hem_src, weights, k=6))
+    # The lofted robe from just under the shell's lower edge down: drop the rings above it.
+    low = [ring for ring, z in zip(rings, zs) if z < z_cut - 0.005]
+    obj = mesh_object(loft(low, lip=0.008), "robe", "top")
+    pts_ = [v_.co[:] for v_ in obj.data.vertices]
+    near = copied_weights(pts_, body, np.isin(d, list(TORSO | LEGS | {"neck_01"})), weights)
+    blended = []
+    for p_, wd in zip(pts_, near):
+        wd = {n: w for n, w in wd.items() if not n.startswith(("upperarm", "lowerarm", "hand"))}
+        total = sum(wd.values()) or 1.0
+        wd = {n: w / total for n, w in wd.items()}
+        a = min(1.0, max(0.0, (p_[2] - (lm.z_hipjoint - 0.12)) / 0.15))
+        lowr = hanging_weights(p_, lm)
+        out = {n: w * (1 - a) for n, w in lowr.items()}
+        for n, w in wd.items():
+            out[n] = out.get(n, 0.0) + w * a
+        blended.append(out)
+    apply_weights(obj, blended)
+    # Weld the shell's lower edge to the robe's top ring with a strip of triangles, so the two are one surface with
+    # no step, no gap and no line in the bake.
+    bm = bmesh.new()
+    bm.from_mesh(shell.data)
+    loops = boundary_loops([e for e in bm.edges if e.is_boundary])
+    bm.free()
+    bottom = min(loops, key=lambda lp: abs(float(np.mean([q[2] for q in lp])) - z_cut))
+    A = np.array(bottom)
+    angA = np.arctan2(A[:, 1] - centre[1], A[:, 0] - centre[0])
+    A, angA = A[np.argsort(angA)], np.sort(angA)
+    B = np.array([q[:] for q in low[0]])
+    angB = np.arctan2(B[:, 1] - centre[1], B[:, 0] - centre[0])
+    B, angB = B[np.argsort(angB)], np.sort(angB)
+    bm = bmesh.new()
+    va = [bm.verts.new(q.tolist()) for q in A]
+    vb = [bm.verts.new(q.tolist()) for q in B]
+    na, nb = len(va), len(vb)
+    ea = np.concatenate([angA, [angA[0] + 2 * math.pi]])
+    eb = np.concatenate([angB, [angB[0] + 2 * math.pi]])
+    i = j = 0
+    while i < na or j < nb:
+        if j >= nb or (i < na and ea[i + 1] <= eb[j + 1]):
+            bm.faces.new((va[i], va[(i + 1) % na], vb[j % nb]))
+            i += 1
+        else:
+            bm.faces.new((va[i % na], vb[(j + 1) % nb], vb[j]))
+            j += 1
+    strip = mesh_object(bm, "robe_weld", "top")
+    sp = [v_.co[:] for v_ in strip.data.vertices]
+    sw = copied_weights(sp, body, np.isin(d, list(TORSO)), weights)
+    sw = [{n: w for n, w in wd.items() if not n.startswith(("upperarm", "lowerarm", "hand"))} for wd in sw]
+    sw = [{n: w / (sum(wd.values()) or 1.0) for n, w in wd.items()} for wd in sw]
+    apply_weights(strip, sw)
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in (obj, shell, strip):
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.join()
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(obj.data)
+    bm.free()
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
+    obj["zone"] = "top"
+    print(f"Robe: one shell over the shoulders and sleeves, welded to a robe from {z_cut:.3f} down ({common.triangle_count(obj)} triangles), {len(hems)} hems")
+    return [obj] + hems
+
+
+SHELL_TRIS = 3000
+
+
+def boundary_loops(edges):
+    """Closed loops of boundary edges, as lists of vertex positions in order."""
+    adj = {}
+    for e in edges:
+        a, b = e.verts
+        adj.setdefault(a.index, []).append(b)
+        adj.setdefault(b.index, []).append(a)
+    seen, loops = set(), []
+    by_index = {v.index: v for e in edges for v in e.verts}
+    for start in list(adj):
+        if start in seen:
+            continue
+        loop, prev, cur = [], None, by_index[start]
+        while cur.index not in seen:
+            seen.add(cur.index)
+            loop.append(np.array(cur.co[:]))
+            nxt = [w for w in adj[cur.index] if (prev is None or w.index != prev.index) and w.index not in seen]
+            if not nxt:
+                break
+            prev, cur = cur, nxt[0]
+        if len(loop) > 8:
+            loops.append(loop)
+    return loops
 
 
 def build_sleeve(body, lm, rb, d, side, weights):
