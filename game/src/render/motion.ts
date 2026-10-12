@@ -251,12 +251,18 @@ export const TRIP = {
   /** Seconds for one leg at the default view's distance, and the most any leg takes, however far. */
   minSeconds: 0.35,
   maxSeconds: 0.6,
-  /** Metres from the toolbox to the machine in the default view: a leg this long takes minSeconds. */
-  refMetres: 0.6,
+  /** Metres from the toolbox to the machine in the default view, over the top where the path climbs: a leg this long
+   *  takes minSeconds. */
+  refMetres: 1.0,
   /** Seconds to take a tool out of its slot, or to lay it back in. */
   pickSeconds: 0.12,
   /** Metres the hand's path keeps above the machine's top where it crosses over, and out from a fastener. */
   clearance: 0.05,
+  /** The most the path stands off a point inside the machine's bounds before it climbs, metres. */
+  maxStandOff: 0.3,
+  /** Metres a point may sit inside the bounds along its own outward direction (a recess) before the path leaves by
+   *  the nearest way out instead. */
+  maxRecess: 0.1,
 } as const;
 
 /** The tool a fastener needs (ADR 0020): a screwdriver for screws, a spanner for bolts and nuts. */
@@ -304,8 +310,8 @@ export function tripPlan(kinds: readonly FastenerKind[], mode: "undo" | "do-up",
   const work = mode === "undo" ? FASTEN.outSeconds : FASTEN.doUpSeconds;
   const steps: TripStep[] = [];
   tools.forEach((tool, n) => {
-    // The first leg comes from the pointer; after a tool change it comes back from the part.
-    steps.push({ kind: "toToolbox", tool, seconds: n === 0 ? toBox : across });
+    // The first leg comes from the pointer; after a tool change the hand is already at the toolbox.
+    if (n === 0) steps.push({ kind: "toToolbox", tool, seconds: toBox });
     steps.push({ kind: "pick", tool, seconds: TRIP.pickSeconds });
     const mine = order.filter((i) => tripToolFor(kinds[i]!) === tool);
     steps.push({ kind: "toFastener", tool, index: mine[0]!, seconds: across });
@@ -322,6 +328,17 @@ export function tripPlan(kinds: readonly FastenerKind[], mode: "undo" | "do-up",
 export interface Bounds {
   min: Vec3;
   max: Vec3;
+}
+
+/** How far from `p` along the unit direction `d` the box ends: 0 if `p` is outside it. */
+export function exitDistance(p: Vec3, d: Vec3, box: Bounds): number {
+  if (p.some((v, i) => v < box.min[i]! || v > box.max[i]!)) return 0;
+  let t = Infinity;
+  for (let i = 0; i < 3; i++) {
+    if (d[i]! > 1e-9) t = Math.min(t, (box.max[i]! - p[i]!) / d[i]!);
+    else if (d[i]! < -1e-9) t = Math.min(t, (box.min[i]! - p[i]!) / d[i]!);
+  }
+  return Number.isFinite(t) ? t : 0;
 }
 
 /** True if the segment from a to b passes through the box (slab test). */
@@ -344,18 +361,37 @@ export function segmentHitsBox(a: Vec3, b: Vec3, box: Bounds): boolean {
   return true;
 }
 
+/** Ways out of the machine's bounds when a point's own outward direction runs through it: up, then the four sides. */
+const OUTWARD: readonly Vec3[] = [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+
 const addScaled = (a: Vec3, b: Vec3, k: number): Vec3 => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 
 /**
  * The hand's path between two points, over the machine rather than through it. A point on the machine (the pointer's
- * spot, a fastener) comes with its outward direction `out`, and the path stands off it by TRIP.clearance first. If the
- * straight line between the stand-off points would pass through the machine's bounds, the path rises above the
- * machine's top by TRIP.clearance, crosses there, and comes down. Returns the corner points, first and last included.
+ * spot, a fastener) comes with its outward direction `out`, and the path first stands off it along `out` until it is out
+ * of the machine's bounds, plus TRIP.clearance: a fastener tucked under the tank's overhang comes out from under it
+ * before the hand climbs. If that direction runs more than TRIP.maxRecess inside the bounds, it leaves by the nearest
+ * way out instead. If the straight line between the stand-off points would pass through the machine's bounds,
+ * the path rises above the machine's top by TRIP.clearance, crosses there, and comes down. Returns the corner points,
+ * first and last included.
  */
 export function overPath(from: Vec3, fromOut: Vec3 | null, to: Vec3, toOut: Vec3 | null, box: Bounds): Vec3[] {
   const c = TRIP.clearance;
-  const s0 = fromOut ? addScaled(from, unit(fromOut), c) : from;
-  const s1 = toOut ? addScaled(to, unit(toOut), c) : to;
+  const standOff = (p: Vec3, out: Vec3): Vec3 => {
+    let d = unit(out);
+    let t = exitDistance(p, d, box);
+    // A direction that runs a long way inside the bounds goes through the machine (a normal that points in, or along a
+    // face): leave by the nearest way out instead, up or to a side.
+    if (t > TRIP.maxRecess) {
+      for (const alt of OUTWARD) {
+        const ta = exitDistance(p, alt, box);
+        if (ta < t) [t, d] = [ta, alt];
+      }
+    }
+    return addScaled(p, d, Math.min(t, TRIP.maxStandOff) + c);
+  };
+  const s0 = fromOut ? standOff(from, fromOut) : from;
+  const s1 = toOut ? standOff(to, toOut) : to;
   const points: Vec3[] = [from];
   if (fromOut) points.push(s0);
   if (segmentHitsBox(s0, s1, box)) {

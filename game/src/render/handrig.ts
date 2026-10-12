@@ -19,6 +19,11 @@ export interface HandRig {
   /** Holds on to an object and moves with it, keeping its own attitude: it follows the part's position, never its
    *  spin (a part being loosened or carried). */
   attachTo(object: Object3D): void;
+  /**
+   * Holding a tool on a fastener (plan 0012): checked against the whole machine every frame, with more of its points,
+   * and following closely, as when it holds a part, so it stays in view while it works.
+   */
+  firm(on: boolean): void;
   /** Lets go of the object it rides with; it follows the pointer again from where it is. */
   detach(): void;
   /** Opens the hand where it is. */
@@ -107,6 +112,8 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
   let wantClosed = 0;
   let target: { at: Vector3; normal: Vector3 } | null = null;
   let attached: Object3D | null = null;
+  /** Holding a tool on a fastener: kept out of the machine as closely as when holding a part. */
+  let firm = false;
   /** While following an object: the held spot's offset from the object's position, in world axes. */
   const attachOffset = new Vector3();
   let withdrawing: { to: Vector3; left: number } | null = null;
@@ -149,9 +156,9 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
     // Then against the whole machine: a hand pinching a small part low down must not end inside the tank above it.
     if (collide) {
       // Holding a part, the hand moves with it and is checked every frame; hovering, every few frames is enough.
-      if (attached || collideFrame++ % COLLIDE_FRAMES === 0) {
+      if (attached || firm || collideFrame++ % COLLIDE_FRAMES === 0) {
         const checked: Vector3[] = [];
-        for (let i = 0; i < world.length; i += attached ? COLLIDE_EVERY_HOLDING : COLLIDE_EVERY) checked.push(new Vector3(...world[i]!).add(push));
+        for (let i = 0; i < world.length; i += attached || firm ? COLLIDE_EVERY_HOLDING : COLLIDE_EVERY) checked.push(new Vector3(...world[i]!).add(push));
         lastMore = Math.min(collide(checked), HAND.maxPush);
       }
       if (lastMore > 0) goalPos.addScaledVector(toward, lastMore);
@@ -199,6 +206,10 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
       onState?.();
     },
 
+    firm(on) {
+      firm = on;
+    },
+
     detach() {
       letGo();
       onState?.();
@@ -220,6 +231,7 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
 
     hide() {
       letGo();
+      firm = false;
       target = null;
       withdrawing = null;
       root.visible = false;
@@ -245,7 +257,7 @@ export function createHandRig(scene: Scene, camera: Camera, model: Object3D, col
         return;
       }
       if (!goal()) return;
-      const k = followShare(dt, attached ? HOLD_HALF_LIFE : HAND.followHalfLife);
+      const k = followShare(dt, attached || firm ? HOLD_HALF_LIFE : HAND.followHalfLife);
       root.position.lerp(goalPos, k);
       root.quaternion.slerp(goalQ, k);
     },

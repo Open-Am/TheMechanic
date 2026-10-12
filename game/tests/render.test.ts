@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { awaitingSecondTap, DOUBLE_TAP, doubleTapGrasp, doubleTapPart, dragMode, screenDirection } from "../src/render/gesture.ts";
-import { alongPath, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, legSeconds, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, overPath, pathLength, poseAt, resolveMotion, segmentHitsBox, spannerSwing, TRIP, tripPlan, type Bounds } from "../src/render/motion.ts";
+import { alongPath, CARRY, exitDistance, carryPose, carryProgress, FASTEN, fastenerPose, legSeconds, LOOSEN, loosenPlan, loosePose, MOTION_DEFAULTS, overPath, pathLength, poseAt, resolveMotion, segmentHitsBox, spannerSwing, TRIP, tripPlan, type Bounds } from "../src/render/motion.ts";
 import { clampOrbit, fitDistance, FRAME, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits } from "../src/render/orbit.ts";
 import { ease, Tweens } from "../src/render/tween.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes } from "../src/render/placeholders.ts";
@@ -12,6 +12,7 @@ import { chooseRig, LIGHTING } from "../src/render/lighting.ts";
 import { encodePicture, linearToSrgb, neutralToneMap } from "../src/render/colour.ts";
 import { MOTION_TYPES, type Vec3 } from "../src/core/types.ts";
 import { loadMachine } from "./helpers.ts";
+import { pickToolbox, renderFileCount } from "../src/render/model.ts";
 
 const machine = loadMachine();
 const close = (a: number, b: number, eps = 1e-9) => Math.abs(a - b) < eps;
@@ -777,9 +778,10 @@ describe("the toolbox trip (plan 0012, ADR 0021)", () => {
     // Grouped by tool: both screws, then the bolt and the nut.
     expect(plan.order).toEqual([0, 2, 1, 3]);
     expect(plan.steps.filter((s) => s.kind === "fasten").map((s) => ("index" in s ? s.index : -1))).toEqual([0, 2, 1, 3]);
-    // The change happens between the two groups: put the screwdriver back, take the spanner.
+    // The change happens at the toolbox between the two groups: put the screwdriver back, take the spanner, go back.
     const k = kinds(plan.steps);
-    expect(k.slice(k.indexOf("toSlot"), k.indexOf("toSlot") + 4)).toEqual(["toSlot", "putBack", "toToolbox", "pick"]);
+    expect(k.slice(k.indexOf("toSlot"), k.indexOf("toSlot") + 4)).toEqual(["toSlot", "putBack", "pick", "toFastener"]);
+    expect(k.filter((x) => x === "toToolbox").length).toBe(1);
     // The part comes free only once, after the last fastener.
     expect(k.filter((x) => x === "free").length).toBe(1);
     expect(k.indexOf("free")).toBeGreaterThan(k.lastIndexOf("fasten"));
@@ -791,7 +793,7 @@ describe("the toolbox trip (plan 0012, ADR 0021)", () => {
       expect(legSeconds(m)).toBeGreaterThanOrEqual(0.35);
       expect(legSeconds(m)).toBeLessThanOrEqual(0.6);
     }
-    expect(legSeconds(0.8)).toBeGreaterThan(legSeconds(0.6));
+    expect(legSeconds(TRIP.refMetres * 1.3)).toBeGreaterThan(legSeconds(TRIP.refMetres));
     const far = tripPlan(["bolt"], "undo", { pointer: 3, machine: 3 });
     for (const s of far.steps) if (["toToolbox", "toFastener", "toSlot", "home"].includes(s.kind)) expect(s.seconds).toBe(0.6);
   });
@@ -864,5 +866,68 @@ describe("the toolbox trip (plan 0012, ADR 0021)", () => {
     expect(alongPath(line, 0.75)).toEqual([1, 0.5, 0]);
     expect(alongPath(line, 2)).toEqual([1, 1, 0]);
     expect(alongPath(line, -1)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("loading the toolbox (plan 0012)", () => {
+  const named = (name: string, ...children: Group[]) => {
+    const g = new Group();
+    g.userData = { name };
+    for (const c of children) g.add(c);
+    return g;
+  };
+
+  it("finds the toolbox and its two slots, the slots moving with it", () => {
+    const scene = named("Scene", named("toolbox", named("slot_spanner"), named("slot_screwdriver")));
+    const box = pickToolbox(scene)!;
+    expect(box.object.userData["name"]).toBe("toolbox");
+    expect(box.object.parent).toBeNull();
+    expect(box.slots.spanner.parent).toBe(box.object);
+    expect(box.slots.screwdriver.userData["name"]).toBe("slot_screwdriver");
+  });
+
+  it("without the file or a slot there is no toolbox, and the tools come from off screen", () => {
+    expect(pickToolbox(null)).toBeNull();
+    expect(pickToolbox(named("Scene", named("toolbox", named("slot_spanner"))))).toBeNull();
+  });
+
+  it("the loading bar counts the toolbox as one more file", () => {
+    expect(renderFileCount("hand.glb", "tools.glb", "toolbox.glb")).toBe(6);
+    expect(renderFileCount("hand.glb", "tools.glb", null)).toBe(5);
+    expect(renderFileCount()).toBe(3);
+  });
+});
+
+describe("the trip's path out from under an overhang (plan 0012)", () => {
+  const box: Bounds = { min: [-0.18, 0, -0.16], max: [0.18, 0.375, 0.16] };
+  const inside = (p: Vec3, margin = 1e-6) => p.every((v, i) => v > box.min[i]! + margin && v < box.max[i]! - margin);
+
+  it("a fastener tucked inside the bounds stands off until it is out of them, then the path never goes back in", () => {
+    const recessed: Vec3 = [0.12, 0.1, 0.05];
+    const path = overPath(recessed, [1, 0, 0], [0.1, 0.14, 0.7], null, box);
+    expect(path[1]![0]).toBeCloseTo(0.18 + TRIP.clearance);
+    const after = path.slice(1);
+    for (let t = 0; t <= 1; t += 0.005) expect(inside(alongPath(after, t))).toBe(false);
+  });
+
+  it("measures how far the bounds go along a direction, and nothing from outside", () => {
+    expect(exitDistance([0.12, 0.1, 0.05], [1, 0, 0], box)).toBeCloseTo(0.06);
+    expect(exitDistance([0, 0.3, 0], [0, 1, 0], box)).toBeCloseTo(0.075);
+    expect(exitDistance([0.5, 0.1, 0], [1, 0, 0], box)).toBe(0);
+  });
+});
+
+describe("the trip's path from a point whose outward direction points in (plan 0012)", () => {
+  const box: Bounds = { min: [-0.18, 0, -0.16], max: [0.18, 0.375, 0.16] };
+  const inside = (p: Vec3, margin = 1e-6) => p.every((v, i) => v > box.min[i]! + margin && v < box.max[i]! - margin);
+
+  it("leaves by the nearest way out, not through the machine, and the rest of the path stays out", () => {
+    // On the front face, but with an outward direction that points back through the machine.
+    const spot: Vec3 = [-0.05, 0.14, 0.159];
+    const path = overPath([0.16, 0.19, 0.41], null, spot, [0, 0, -1], box);
+    const standOff = path[path.length - 2]!;
+    expect(standOff[2]).toBeGreaterThan(box.max[2]); // out of the front, the way that is nearest
+    const before = path.slice(0, -1);
+    for (let t = 0; t <= 1; t += 0.005) expect(inside(alongPath(before, t))).toBe(false);
   });
 });
