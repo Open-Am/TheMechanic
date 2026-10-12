@@ -33,7 +33,7 @@ import { armAnchor, armSideOnTrip, basisToQuaternion, cheapest, gripShapeFor, ty
 import type { RenderAssets, Tool } from "./model.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
-import { createContactShadow, createGround } from "./ground.ts";
+import { createContactShadow, createMachineShadow } from "./ground.ts";
 import { createLighting } from "./lighting.ts";
 import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
 
@@ -96,7 +96,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   lighting.addTo(scene);
   // Diagnostic mode reads this; it may not import render (ADR 0010).
   document.documentElement.dataset.lighting = lighting.rig;
-  scene.add(createGround(machine.size, assets.ground));
+  scene.add(createMachineShadow(machine.size, assets.ground));
 
   const view = buildMachine(machine, assets.model);
   document.documentElement.dataset.model = assets.model ? (view.fallbacks.length ? "partial" : "glb") : "placeholders";

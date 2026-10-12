@@ -1098,3 +1098,13 @@ describe("the arm reaches the toolbox's side early (0.11.1 follow-up)", () => {
     expect(armSideOnTrip("toToolbox", 0.35, -1)).toBeLessThan(1);
   });
 });
+
+describe("the machine's shadow on the bench top (plan 0016 step 2, ADR 0025)", () => {
+  it("the shadow plane and the Blender bake span the same share of the machine", async () => {
+    const { SHADOW_SPAN, shadowSpan } = await import("../src/render/ground.ts");
+    const { readFileSync } = await import("node:fs");
+    const bake = readFileSync(new URL("../../tools/blender/bake_ground.py", import.meta.url), "utf8");
+    expect(Number(/^SPAN_FACTOR = ([0-9.]+)/m.exec(bake)?.[1])).toBe(SHADOW_SPAN);
+    expect(shadowSpan([0.367, 0.375, 0.312])).toBeCloseTo(0.367 * SHADOW_SPAN, 9);
+  });
+});
