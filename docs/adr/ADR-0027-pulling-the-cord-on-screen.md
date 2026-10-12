@@ -1,7 +1,7 @@
 ---
 id: 0027
 title: The mechanic pulls the cord on screen, and the engine runs
-status: proposed
+status: accepted
 date: 2026-10-12
 supersedes: []
 superseded_by: null
@@ -41,3 +41,4 @@ The round's payoff is something the player sees, not only a title. The cost: a r
 
 - 2026-10-12: proposed by Claude, from the owner's message quoted above.
 - 2026-10-12: revised before acceptance, from the owner's next message: "Once it starts, the customer will smile and hand the money over to the mechanic who will receive the money an then stop the generator before the customer leave with it". The customer pays while it runs, the mechanic switches it off, then the customer carries it away stopped.
+- 2026-10-12: accepted by the owner, who wrote "I am also approving adr 27 and plan 18".

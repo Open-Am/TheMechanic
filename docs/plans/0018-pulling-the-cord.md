@@ -1,7 +1,7 @@
 ---
 id: 0018
 title: The mechanic pulls the cord on screen, and the engine runs
-status: proposed
+status: approved
 date: 2026-10-12
 adrs: [0003, 0004, 0007, 0010, 0013, 0014, 0018, 0020, 0025, 0026, 0027]
 branch: plan/0018-pulling-the-cord
@@ -12,6 +12,8 @@ branch: plan/0018-pulling-the-cord
 ## Goal
 
 Pressing Pull cord shows the mechanic's hand pulling the recoil starter's handle and the rope paying out. When the fault is fixed the engine catches and the generator shakes and puffs exhaust and keeps running; the customer smiles and pays, the mechanic's hand takes the notes and then presses the red engine switch to stop it, and only then does the customer carry it off. When it is not fixed it coughs, puffs dark smoke and dies. Nothing changes in the rules, the log or the score.
+
+Approved by the owner on 2026-10-12, who wrote "I am also approving adr 27 and plan 18".
 
 ## ADRs relied on
 
