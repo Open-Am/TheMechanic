@@ -1,7 +1,7 @@
 ---
 id: 0013
 title: Sound and vibration
-status: approved
+status: done
 date: 2026-10-11
 adrs: [0002, 0004, 0007, 0010, 0012, 0014, 0018, 0020, 0021, 0022, 0023]
 branch: plan/0013-sound-and-vibration
@@ -197,3 +197,29 @@ Plan 0011 merged into `main`. The turn and give moments hook into its fastener s
 ## Release note line
 
 Added: sound and vibration. Fasteners click as they turn, parts crack, snap, pop or scrape as they give, clunk into the tray and click home. The cord, a failed start and the engine start each have a sound. A mute button turns both off and is remembered. Sounds are CC0 stand-ins until the real machine is recorded, each listed in `game/public/audio/LICENCE.md` (plan 0013, ADR 0018). Version 0.12.0.
+
+## Results (2026-10-12, step 3)
+
+The owner downloaded the shortlist and wrote "Yes go with the recommendations but also keep the rest. Later we will provide options for customization for the users later". The recommended sounds ship in `game/public/audio/`: ten mono Ogg Opus files, 29,332 bytes of the 250 KB budget. Trims, gains and what to listen for are in `assets/audio/STATUS.md`. Each sound's Freesound page was checked again on 2026-10-12, and all link CC0 1.0. The other downloads stay, uncommitted, in `assets/audio/source/`. Letting players choose between sounds needs an ADR first (`docs/open-questions.md`).
+
+Readings that differ from the plan's:
+
+- **The engine start is esperri 118971, 2.52 s.** The first choice, damsur 443239, gave only 0.98 s: two short tries split by digital silence. The owner's recommendation named both. esperri's file is the engine already firing through three revs, then slowing, with no cord pull.
+- **The failed start was picked from the waveform** (the broken-up stretch after the last pull), not by ear.
+- **No fade-ins except on `fail`.** Blender's volume keys step in 10 ms frames, so a fade-in swallowed any click within about 20 ms of the cut.
+- **The cord seats a part still going back.** `app` tells `pulled` before it plays the cord. `render`'s press-home then seats every part still going back, with one `seat` and its 15 ms vibration. So the order is always seat, cord, then start or fail.
+  - Before this, a part with no fasteners caught by the pull seated after the engine sound, and `verify:phone` failed on it once in three runs. A part with fasteners never seated at all.
+  - Pressing home a part that was never put back stays silent (reading 5).
+
+Done when, checked on 2026-10-12, after the fix and the new engine start:
+
+- Pass: `npm test` (370), `typecheck`, `docs:check`, `build`, `size` (190.5 KB of 350 KB).
+- Pass: `npm run audio` encodes and checks the ten files, 0 errors.
+- Pass: `npm run verify:phone` (HIDDEN_DEBUG=1), exit 0 on both runs. "files decoded: 10 of 10", "every moment could be heard", and the new step that pulls the cord while the plug cap is going back.
+- Pass: `LICENCE.md` lists every file as `CC0 1.0` with its Freesound URL and author.
+- Pass: `STATUS.md` marks every sound a stand-in.
+- Pass: no new dependency.
+- `npm run verify:drop`: exit 0 on two runs back to back on a quiet machine (2026-10-12, after merging main 35e8659 and replacing `--mute-audio`), frame rate held, 96 of 96 first time. Per round: 75 to 120 fps, and 8 to 27 ms touch lag (`main`: 14 to 41 ms). Earlier runs that exited 1 or read about 27 fps with 60 to 100 ms of touch lag were all made with Edge's `--mute-audio` switch, which turned out to cause it (see the 0.12.0 release note) (not one of this plan's Done-when items).
+- **Waiting on the owner:** the phone round with sound on. Hear and feel each moment, check a blocked part is silent, mute holds after a reload, and nothing plays before Start.
+
+Every item an agent can check passes, so the status is `done`. The owner's phone check above is still to come.

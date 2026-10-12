@@ -241,10 +241,11 @@ export function createGame(deps: GameDeps): Game {
           break;
         case "pull": {
           const started = state.endedAt !== null;
-          // The cord at once, the engine's answer once the cord has run (plan 0013 reading 3).
+          // "pulled" first: render presses loose parts home, and a part still going back seats (and plays `seat`)
+          // before the cord. Then the cord at once, the engine's answer once the cord has run (plan 0013 reading 3).
+          events.emit("pulled", { t: action.t, started, failedPulls: state.failedPulls });
           playMoment(audio, "cord");
           playMoment(audio, started ? "start" : "fail", CORD_SECONDS);
-          events.emit("pulled", { t: action.t, started, failedPulls: state.failedPulls });
           if (started) {
             const score = scoreState(machine, fault, state, action.t, customer ?? undefined);
             finish(score);
