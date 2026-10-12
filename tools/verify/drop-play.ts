@@ -324,7 +324,8 @@ async function removeOne(n: number, id: string, place: DropPlace): Promise<Row> 
     if (v.at.pick !== id && !row.pickedOther) row.pickedOther = v.at.pick ?? "none";
     await evaluate("window.__pe = []");
     await doubleTap(v.at.x, v.at.y);
-    const worked = await waitFor("loose", async () => (await looseNow()).includes(id), 2500).catch(() => false);
+    // A part with fasteners first makes the trip to the toolbox for its tool (plan 0012): up to about 3 s.
+    const worked = await waitFor("loose", async () => (await looseNow()).includes(id), 5000).catch(() => false);
     if (row.loosenTries === 1) {
       const ev = await evaluate<Array<[string, string, number, number, number, number, string]>>("window.__pe");
       const ups = ev.filter((e) => e[0] === "pointerup").map((e) => e[4]);
