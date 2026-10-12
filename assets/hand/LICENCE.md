@@ -15,3 +15,7 @@ Not used: MakeHuman's skin, eye and clothing images, and any community asset (AD
 MPFB's code is GPL-3.0-or-later. It is a build tool that runs inside Blender and is never shipped, so its licence does not reach the game.
 
 No credit is legally required for CC0 material. If the game gets a credits screen, "Hand made with MakeHuman (makehumancommunity.org)" is a courtesy worth adding.
+
+## The toolbox (plan 0012)
+
+`game/public/hand/toolbox.glb` and `assets/toolbox/blend/toolbox.blend` are made by `tools/blender/toolbox.py` and baked by `tools/blender/texture.py` from the project's own procedural materials: the project's own work, no outside asset. The reference photos in `assets/toolbox/reference/` (Wikimedia Commons) are for matching only, git-ignored and never shipped (ADR 0013).

@@ -1,5 +1,5 @@
 // Loads what the scene needs from the machine folder at startup (plan 0005 step 8): the model, its baked ground shadow,
-// and the shared environment map. Fetched with the machine data, before the game starts; nothing is fetched after
+// and the shared environment map; and the hand, its tools and the toolbox (plans 0008, 0011, 0012). Fetched with the machine data, before the game starts; nothing is fetched after
 // (ADR 0010). Each file is optional: whatever is missing falls back (placeholders, RoomEnvironment, a drawn shadow).
 
 import { DataTexture, EquirectangularReflectionMapping, LinearFilter, type Object3D } from "three";
@@ -19,6 +19,37 @@ export interface RenderAssets {
   hand: Object3D | null;
   /** The spanner and screwdriver (plan 0011), or null: the hand then turns fasteners with its fingers. */
   tools?: Tools | null;
+  /** The toolbox with the tools' slots (plan 0012), or null: the tools then come from just off screen. */
+  toolbox?: Toolbox | null;
+}
+
+export interface Toolbox {
+  object: Object3D;
+  /** Empty nodes under the toolbox: where each tool rests, as the tool's own origin and axes. */
+  slots: { spanner: Object3D; screwdriver: Object3D };
+}
+
+/** Picks the toolbox and its two slots out of toolbox.glb by name. Null if any is missing. */
+export function pickToolbox(scene: Object3D | null): Toolbox | null {
+  if (!scene) return null;
+  const named = (name: string): Object3D | null => {
+    let found: Object3D | null = null;
+    scene.traverse((o) => {
+      if (!found && (o.userData?.["name"] === name || o.name === name)) found = o;
+    });
+    return found;
+  };
+  const object = named("toolbox");
+  const spanner = named("slot_spanner");
+  const screwdriver = named("slot_screwdriver");
+  if (!object || !spanner || !screwdriver) return null;
+  object.removeFromParent();
+  return { object, slots: { spanner, screwdriver } };
+}
+
+/** How many files loadRenderAssets fetches: the model, environment and ground, and each optional file given. */
+export function renderFileCount(...optional: Array<string | null | undefined>): number {
+  return 3 + optional.filter((u) => !!u).length;
 }
 
 export interface Tool {
@@ -104,15 +135,16 @@ async function loadImage(url: string): Promise<ImageBitmap | null> {
   }
 }
 
-/** `machineBase`, `envUrl`, `handUrl` and `toolsUrl` are URLs relative to the page. Never throws. */
-export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null, toolsUrl: string | null = null, onProgress?: LoadProgress): Promise<RenderAssets> {
-  const counted = progressCounter(3 + (handUrl ? 1 : 0) + (toolsUrl ? 1 : 0), onProgress);
-  const [model, environment, ground, hand, tools] = await Promise.all([
+/** `machineBase`, `envUrl`, `handUrl`, `toolsUrl` and `toolboxUrl` are URLs relative to the page. Never throws. */
+export async function loadRenderAssets(machineBase: string, envUrl: string, handUrl: string | null = null, toolsUrl: string | null = null, toolboxUrl: string | null = null, onProgress?: LoadProgress): Promise<RenderAssets> {
+  const counted = progressCounter(renderFileCount(handUrl, toolsUrl, toolboxUrl), onProgress);
+  const [model, environment, ground, hand, tools, toolbox] = await Promise.all([
     counted(loadModel(`${machineBase}model.glb`)),
     counted(loadEnvironment(envUrl)),
     counted(loadImage(`${machineBase}ground.png`)),
     handUrl ? counted(loadModel(handUrl)) : Promise.resolve(null),
     toolsUrl ? counted(loadModel(toolsUrl)) : Promise.resolve(null),
+    toolboxUrl ? counted(loadModel(toolboxUrl)) : Promise.resolve(null),
   ]);
-  return { model, environment, ground, hand, tools: pickTools(tools) };
+  return { model, environment, ground, hand, tools: pickTools(tools), toolbox: pickToolbox(toolbox) };
 }

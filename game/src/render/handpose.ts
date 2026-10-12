@@ -180,3 +180,24 @@ export function toolBasis(axis: Vec3, screenRight: Vec3, screenUp: Vec3, angle: 
   const yr = cross(z, xr);
   return { x: xr, y: yr, z };
 }
+
+// ---- Where the spanner's handle lies (plan 0012 follow-up) ----
+
+/**
+ * How many turns of the spanner about its bolt are tried when choosing where its handle lies. The handle towards the
+ * lower right of the screen (turn 0) can put the hand holding it behind the machine, for a bolt under the tank's
+ * overhang: the hand would have to come forward further than HAND.maxPush to show. One of the other turns shows it.
+ */
+export const SPANNER_TURNS = 12;
+
+/** The angle about the bolt of turn `k`, radians. */
+export function spannerTurn(k: number): number {
+  return (2 * Math.PI * k) / SPANNER_TURNS;
+}
+
+/** The index of the cheapest option, or the first within `tie` of it: the turn that hides the hand least. */
+export function cheapest(costs: readonly number[], tie = 0.001): number {
+  if (costs.length === 0) return 0;
+  const best = Math.min(...costs);
+  return Math.max(0, costs.findIndex((c) => c <= best + tie));
+}

@@ -9,6 +9,8 @@
 import {
   Box3,
   Color,
+  Group,
+  Matrix4,
   type Object3D,
   PerspectiveCamera,
   Plane,
@@ -20,17 +22,17 @@ import {
   WebGLRenderer,
 } from "three";
 import type { Game } from "../app/round.ts";
-import { canRemove, type Machine, type PartId } from "../core/index.ts";
+import { canRemove, type Machine, type PartId, type Vec3 } from "../core/index.ts";
 import { awaitingSecondTap, doubleTapGrasp, doubleTapPart, dragMode, GESTURE, screenDirection, type ScreenDirection, type Tap } from "./gesture.ts";
-import { CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, poseAt, resolveMotion, spannerSwing, TIMING, type Pose } from "./motion.ts";
+import { alongPath, type Bounds, CARRY, carryPose, carryProgress, FASTEN, fastenerPose, LOOSEN, loosePose, overPath, pathLength, poseAt, resolveMotion, spannerSwing, TIMING, tripPlan, type Pose, type TripStep, type TripTool } from "./motion.ts";
 import { fitDistance, frameAbove, position, projectPoint, rotate, TURN, turnToward, unshiftNdcY, worldPerPixel, zoom, type OrbitLimits, type OrbitState } from "./orbit.ts";
 import { firstPart, partIdOf } from "./picking.ts";
 import { createHandRig, type HandRig } from "./handrig.ts";
-import { basisToQuaternion, gripShapeFor, type GripShape, HAND, toolBasis, toolFor } from "./handpose.ts";
+import { armAnchor, basisToQuaternion, cheapest, gripShapeFor, type GripShape, HAND, SPANNER_TURNS, spannerTurn, toolBasis, toolFor } from "./handpose.ts";
 import type { RenderAssets, Tool } from "./model.ts";
 import { buildMachine, setPartOpacity, sizeHitVolumes, type FastenerView, type PartView } from "./placeholders.ts";
 import { createThumbnailer } from "./thumbnails.ts";
-import { createGround } from "./ground.ts";
+import { createContactShadow, createGround } from "./ground.ts";
 import { createLighting } from "./lighting.ts";
 import { clamp01, ease, Tweens, type TweenSpec } from "./tween.ts";
 
@@ -41,6 +43,12 @@ const DEFAULT_ORBIT = { azimuth: 0.55, polar: 1.12 };
 const BACKGROUND = "#1b1c1e";
 /** Seconds for the machine to settle halfway into its new place when the controls grow or shrink (release 0.9.3). */
 const REFRAME_HALF_LIFE = 0.08;
+/**
+ * Where the toolbox stands (plan 0012, ADR 0021): on the ground `ahead` machine radii towards the default camera and
+ * `left` radii to its left, so it shows below and to the left of the machine; turned by `turn` radians from facing the
+ * default camera, so the camera looks along its trays and sees the tools in them.
+ */
+const TOOLBOX_PLACE = { ahead: 1.85, left: 0.4, turn: -0.8 };
 
 export interface RenderView {
   /** A picture of one part as a data URL, for the tray. Null if it cannot be drawn. */
@@ -55,6 +63,8 @@ export interface RenderView {
   endChipCarry(partId: PartId): void;
   /** Told whenever carrying a part to the tray starts, comes over the tray, leaves it, or ends. Supplied by main.ts. */
   onCarry(fn: (state: "none" | "carrying" | "over") => void): void;
+  /** True while the hand plays a loosening or doing-up sequence: a new put-back is ignored until it ends (ADR 0021). */
+  busy(): boolean;
   dispose(): void;
 }
 
@@ -154,6 +164,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   // surface brings the whole hand towards the camera, so it stays under the pointer but in front.
   const collideRay = new Raycaster();
   const collide = (points: readonly Vector3[]): number => {
+    // On its way to or from the toolbox the hand follows a path over the machine (overPath). Away from the machine
+    // (at the toolbox, which may be behind it from this view) nothing is pushed; near it, the hand keeps out as always.
+    if (tripLeg && !points.some((p) => nearMachine.containsPoint(p))) return 0;
+    return depthBehind(points);
+  };
+  /** How far (metres) the deepest of `points` is behind the machine's surface as the camera sees it, plus the margin. */
+  const depthBehind = (points: readonly Vector3[]): number => {
     let need = 0;
     view.root.updateMatrixWorld();
     for (const p of points) {
@@ -211,12 +228,27 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   const loosening = new Set<PartId>();
 
   /**
+   * The scripted sequence that is playing, if any (ADR 0021): a part being loosened with a trip to the toolbox, or done
+   * up again after it is put back. While it plays, new loosen, carry and put-back input is ignored; the view still turns.
+   */
+  let sequence: { id: PartId; channel: string; mode: "undo" | "do-up" } | null = null;
+  /** True while the hand travels to or from the toolbox: its path keeps it over the machine (overPath). */
+  let tripLeg = false;
+  let legAt: Vector3 | null = null;
+  /** The closest the hand came to a tool's grip at the toolbox during the last trip, metres (browser check). */
+  let tripReach = Infinity;
+  /** The step of the trip under way, for the browser check. */
+  let tripPhase: TripStep["kind"] | null = null;
+  const handBusy = (): boolean => loosening.size > 0 || sequence !== null;
+
+  /**
    * Loosens a part: the hand undoes it and it sits loose. Does nothing at all if it cannot come off now (ADR 0007). The
    * hand takes hold at `at`, where the player touched the part, if given; otherwise at the last spot under the pointer
-   * if that is on the part, else at the part's origin.
+   * if that is on the part, else at the part's origin. A part with fasteners is undone with the right tool, fetched from
+   * the toolbox and put back after (ADR 0021).
    */
   function loosen(id: PartId, then?: () => void, at?: Surface | null): void {
-    if (!game.running || loose.has(id) || loosening.has(id) || !game.state.installed.has(id)) return;
+    if (!game.running || loose.has(id) || handBusy() || !game.state.installed.has(id)) return;
     if (!canRemove(machine, game.state, id)) return;
     const pv = view.parts.get(id);
     if (!pv) return;
@@ -224,46 +256,71 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     const m = resolveMotion(part.motion);
     loosening.add(id);
     const s = at ?? (lastSurface && lastSurface.part === id ? lastSurface : surfaceOfPart(pv));
-    const freeing: TweenSpec[] = pv.fasteners.length
-      ? [...fastenerSteps(pv), { duration: FASTEN.freeSeconds, ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) }, ...toolReturn()]
-      : [
-          { duration: HAND.close, update: () => hand?.grab(s.point, s.normal, shapeOf(id)), done: () => hand?.attachTo(pv.group) },
-          { duration: LOOSEN.seconds[m.type], ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) },
-        ];
-    tweens.play(
-      `loosen:${id}`,
-      ...freeing,
-      {
-        duration: 0,
-        update: () => {},
-        done: () => {
-          loosening.delete(id);
-          loose.add(id);
-          if (then) then();
-          else {
-            hand?.detach();
-            hand?.open();
-          }
+    const channel = `loosen:${id}`;
+    const finish = (): void => {
+      loosening.delete(id);
+      loose.add(id);
+      sequence = null;
+      tripPhase = null;
+      tripLeg = false;
+      if (then) then();
+      else {
+        hand?.detach();
+        hand?.open();
+      }
+    };
+    if (pv.fasteners.length) {
+      sequence = { id, channel, mode: "undo" };
+      const free: TweenSpec = {
+        duration: FASTEN.freeSeconds,
+        ease: ease.inOutCubic,
+        update: (q) => {
+          setPhase("free");
+          applyPose(pv, loosePose(m, part.explode, q));
         },
-      },
+        // The part is loose now (the browser checks read it); the hand still takes the tool back before it is free.
+        done: () => loose.add(id),
+      };
+      tweens.play(channel, ...tripSteps(pv, "undo", s, free), { duration: 0, update: () => {}, done: finish });
+      return;
+    }
+    tweens.play(
+      channel,
+      { duration: HAND.close, update: () => hand?.grab(s.point, s.normal, shapeOf(id)), done: () => hand?.attachTo(pv.group) },
+      { duration: LOOSEN.seconds[m.type], ease: ease.inOutCubic, update: (q) => applyPose(pv, loosePose(m, part.explode, q)) },
+      { duration: 0, update: () => {}, done: finish },
     );
   }
 
-  // ---- Fasteners and tools (plan 0011, ADR 0020) ----
+  // ---- Fasteners, tools and the toolbox (plans 0011 and 0012, ADRs 0020 and 0021) ----
 
   const tools = assets.tools ?? null;
-  if (tools) {
-    for (const t of [tools.spanner, tools.screwdriver]) {
-      t.object.visible = false;
-      scene.add(t.object);
-    }
+  const toolbox = assets.toolbox ?? null;
+  /** The machine's bounds with every part on: the hand's trips go over them, never through (overPath). */
+  const machineBox = new Box3().setFromObject(view.root);
+  /** The machine's bounds grown by a hand's length: inside it, the hand is kept out of the machine even on a trip leg. */
+  const nearMachine = machineBox.clone().expandByScalar(0.1);
+  const bounds = (): Bounds => ({ min: [machineBox.min.x, machineBox.min.y, machineBox.min.z], max: [machineBox.max.x, machineBox.max.y, machineBox.max.z] });
+  if (toolbox) {
+    // On the ground towards the default camera and to its left, turned so the camera looks into the trays (plan 0012).
+    const a = DEFAULT_ORBIT.azimuth;
+    const r = view.radius;
+    const wrap = new Group();
+    wrap.name = "toolbox_place";
+    wrap.position.set(Math.sin(a) * TOOLBOX_PLACE.ahead * r - Math.cos(a) * TOOLBOX_PLACE.left * r, 0, Math.cos(a) * TOOLBOX_PLACE.ahead * r + Math.sin(a) * TOOLBOX_PLACE.left * r);
+    wrap.rotation.y = a + TOOLBOX_PLACE.turn;
+    wrap.add(toolbox.object);
+    const size = new Box3().setFromObject(toolbox.object).getSize(new Vector3());
+    wrap.add(createContactShadow(size.x * 0.9, size.z * 0.6));
+    scene.add(wrap);
+    scene.updateMatrixWorld(true);
   }
-  /** Seconds to fetch the tool to the first fastener, or take it back after the last. */
-  const TOOL_TRAVEL = 0.3;
   /** Share of each fastener's time spent moving the tool to it from the last one. */
   const TOOL_HOP = 0.25;
   let toolInHand: Tool | null = null;
-  let toolFrom = new Vector3();
+  /** Tools out of their resting place: in the hand, or on their way to or from it. */
+  const toolsOut = new Set<Tool>();
+  const toolName = (t: Tool): TripTool => (t === tools?.spanner ? "spanner" : "screwdriver");
 
   function applyFastener(f: FastenerView, q: number): void {
     const p = fastenerPose(q);
@@ -276,114 +333,379 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     return { right: [e[0]!, e[1]!, e[2]!], up: [e[4]!, e[5]!, e[6]!], forward: new Vector3(-e[8]!, -e[9]!, -e[10]!) };
   };
 
-  /** Where tools come from and go back to: just off screen at the lower left. (ADR 0021 puts a toolbox here; plan 0012.) */
-  function toolSource(): Vector3 {
+  /** Without a toolbox, tools come from just off screen at the lower left and go back there (plan 0011). */
+  function offScreen(): Vector3 {
     const sc = screen();
     return camera.position.clone().addScaledVector(new Vector3(...sc.right), -0.3).addScaledVector(new Vector3(...sc.up), -0.5).addScaledVector(sc.forward, 0.45);
   }
 
-  const fastenerAt = (f: FastenerView): Vector3 => f.pivot.getWorldPosition(new Vector3());
-  const fastenerAxis = (pv: PartView, f: FastenerView): Vector3 => f.axis.clone().transformDirection(pv.group.matrixWorld);
-
-  /** Puts a tool with its working end at `at`, along `axis`, turned by `angle`, and the hand on its grip. */
-  function holdTool(tool: Tool, at: Vector3, axis: Vector3, angle: number): void {
-    const sc = screen();
-    tool.object.quaternion.set(...basisToQuaternion(toolBasis([axis.x, axis.y, axis.z], sc.right, sc.up, angle)));
-    tool.object.position.copy(at);
-    tool.object.visible = true;
-    const grip = new Vector3(...tool.grip).applyQuaternion(tool.object.quaternion).add(at);
-    hand?.grab(grip, camera.position.clone().sub(grip).normalize(), "grip");
+  /** Where a tool rests: its slot in the toolbox, or (with no toolbox) just off screen, keeping its turn. */
+  function restPose(tool: Tool): { at: Vector3; q: Quaternion } {
+    const slot = toolbox ? toolbox.slots[toolName(tool)] : null;
+    if (slot) return { at: slot.getWorldPosition(new Vector3()), q: slot.getWorldQuaternion(new Quaternion()) };
+    return { at: offScreen(), q: tool.object.quaternion.clone() };
   }
 
-  /** The steps that undo each of a part's fasteners in turn, fetching the right tool first (ADR 0020). */
-  function fastenerSteps(pv: PartView): TweenSpec[] {
-    const steps: TweenSpec[] = [];
-    const first = pv.fasteners[0]!;
-    const firstTool = tools ? tools[toolFor(first.kind)] : null;
-    if (firstTool) {
-      let from: Vector3 | null = null;
-      steps.push({
-        duration: TOOL_TRAVEL,
-        ease: ease.inOutCubic,
-        update: (p) => {
-          from ??= toolSource();
-          holdTool(firstTool, from.clone().lerp(fastenerAt(first), p), fastenerAxis(pv, first), 0);
-          toolInHand = firstTool;
-        },
-      });
+  /** Lays a tool in its slot, in view; with no toolbox it is hidden until it is needed. */
+  function rest(tool: Tool): void {
+    toolsOut.delete(tool);
+    if (toolInHand === tool) toolInHand = null;
+    const p = restPose(tool);
+    tool.object.position.copy(p.at);
+    tool.object.quaternion.copy(p.q);
+    tool.object.visible = toolbox !== null;
+  }
+  if (tools) {
+    for (const t of [tools.spanner, tools.screwdriver]) {
+      scene.add(t.object);
+      rest(t);
     }
-    pv.fasteners.forEach((f, i) => {
-      steps.push({
-        duration: FASTEN.outSeconds,
-        update: (p) => {
-          const hop = i === 0 ? 1 : clamp01(p / TOOL_HOP);
-          const q = i === 0 ? clamp01(p) : clamp01((p - TOOL_HOP) / (1 - TOOL_HOP));
-          if (i > 0 && hop < 1) {
-            if (hop === 0 || toolFrom.lengthSq() === 0) toolFrom = fastenerAt(pv.fasteners[i - 1]!);
+  }
+
+  const fastenerAt = (f: FastenerView): Vector3 => f.pivot.getWorldPosition(new Vector3());
+  const fastenerAxis = (pv: PartView, f: FastenerView): Vector3 => f.axis.clone().transformDirection(pv.group.matrixWorld);
+  const toCamera = (p: Vector3): Vector3 => camera.position.clone().sub(p).normalize();
+  const gripOf = (tool: Tool): Vector3 => new Vector3(...tool.grip).applyQuaternion(tool.object.quaternion).add(tool.object.position);
+
+  /** How a tool sits on a fastener: its working end on it, along its axis, turned by `angle`. */
+  function workQuaternion(axis: Vector3, angle: number): Quaternion {
+    const sc = screen();
+    return new Quaternion(...basisToQuaternion(toolBasis([axis.x, axis.y, axis.z], sc.right, sc.up, angle)));
+  }
+
+  /**
+   * Where the spanner's handle lies on a bolt: the turn about the bolt at which the hand holding it is least hidden
+   * behind the machine, over the whole of its stroke (plan 0012 follow-up). With the handle always towards the lower
+   * right of the screen, a bolt under the tank's overhang put the hand 30 to 40 cm behind the tank, past HAND.maxPush.
+   * Chosen once per bolt per trip, so the spanner does not jump while it works.
+   */
+  const spannerBase = new Map<FastenerView, number>();
+  function baseTurn(pv: PartView, tool: Tool, f: FastenerView): number {
+    if (tool !== tools?.spanner) return 0;
+    const known = spannerBase.get(f);
+    if (known !== undefined) return known;
+    const sc = screen();
+    const anchor = new Vector3(...armAnchor(v3(camera.position), sc.right, sc.up, v3(sc.forward)));
+    const at = fastenerAt(f);
+    const axis = fastenerAxis(pv, f);
+    const costs: number[] = [];
+    for (let k = 0; k < SPANNER_TURNS; k++) {
+      const points: Vector3[] = [];
+      for (const swing of [0, (FASTEN.spannerStroke * Math.PI) / 180]) {
+        const grip = new Vector3(...tool.grip).applyQuaternion(workQuaternion(axis, spannerTurn(k) + swing)).add(at);
+        const toArm = anchor.clone().sub(grip).normalize();
+        points.push(grip, grip.clone().addScaledVector(toArm, 0.06), grip.clone().addScaledVector(toArm, 0.12));
+      }
+      costs.push(depthBehind(points));
+    }
+    const turn = spannerTurn(cheapest(costs));
+    spannerBase.set(f, turn);
+    return turn;
+  }
+
+  /** Puts a tool at `at`, turned `q`, out of its slot, and the hand closed on its grip. */
+  function holdToolAt(tool: Tool, at: Vector3, q: Quaternion): void {
+    tool.object.position.copy(at);
+    tool.object.quaternion.copy(q);
+    tool.object.visible = true;
+    toolsOut.add(tool);
+    hand?.firm(true);
+    const grip = gripOf(tool);
+    hand?.grab(grip, toCamera(grip), "grip");
+  }
+
+  const v3 = (v: Vector3): Vec3 => [v.x, v.y, v.z];
+
+  /** A leg's path, and the share of its length where the stand-offs from the machine's surface end and begin again. */
+  type Route = { points: Vec3[]; core: [number, number] };
+  function route(from: Vector3, fromOut: Vector3 | null, to: Vector3, toOut: Vector3 | null): Route {
+    const points = overPath(v3(from), fromOut ? v3(fromOut) : null, v3(to), toOut ? v3(toOut) : null, bounds());
+    const total = Math.max(1e-9, pathLength(points));
+    const upTo = (i: number) => pathLength(points.slice(0, i + 1)) / total;
+    return { points, core: [upTo(fromOut ? 1 : 0), upTo(toOut ? points.length - 2 : points.length - 1)] };
+  }
+
+  /** Records what each trip did, for the browser check (only while `watchTrips` is on, set from the dev hook). */
+  let watchTrips = false;
+  const tripLog = { throughAt: [] as Array<{ kind: string; p: number; at: Vec3; points: Vec3[]; core: [number, number] }>, planned: 0, phases: [] as string[], reach: Infinity, toolAtBolts: Infinity, tools: [] as string[], through: [] as string[], legHidden: 0 };
+  function setPhase(kind: TripStep["kind"]): void {
+    if (tripPhase !== kind) tripLog.phases.push(kind);
+    tripPhase = kind;
+  }
+
+  /** Share of the hand's sample points hidden behind the machine's surface from the camera (the part it holds aside). */
+  function hiddenShare(): number {
+    if (!hand || !hand.visible) return 0;
+    const pts = hand.samplePoints();
+    let hidden = 0;
+    view.root.updateMatrixWorld();
+    const held = hand.holding;
+    for (const p of pts) {
+      const dir = p.clone().sub(camera.position);
+      const dist = dir.length();
+      raycaster.set(camera.position, dir.normalize());
+      const hit = raycaster.intersectObject(view.root, true).find((h) => !hitMeshes.has(h.object) && shown(h.object) && (held === null || partIdOf(h.object, partIds) !== held));
+      if (hit && hit.distance < dist - 0.004) hidden++;
+    }
+    return pts.length ? hidden / pts.length : 0;
+  }
+
+  /**
+   * A leg of the trip along a path over the machine (overPath), computed when the leg starts so it begins where the
+   * hand is. `move` places the hand (and the tool, if carried) at a point along it, with progress p.
+   */
+  function leg(seconds: number, kind: TripStep["kind"], path: () => Route, move: (at: Vector3, p: number) => void, done?: () => void): TweenSpec {
+    let r: Route | null = null;
+    return {
+      duration: seconds,
+      ease: ease.inOutCubic,
+      update: (p) => {
+        setPhase(kind);
+        tripLeg = true;
+        r ??= path();
+        legAt = new Vector3(...alongPath(r.points, p));
+        move(legAt.clone(), p);
+        if (watchTrips) {
+          // Between the stand-offs the path must keep out of the machine's bounds; and how much of the hand is hidden.
+          if (p > r.core[0] + 1e-3 && p < r.core[1] - 1e-3 && machineBox.clone().expandByScalar(-0.01).containsPoint(legAt)) {
+            tripLog.through.push(kind);
+            if (tripLog.throughAt.length < 3) tripLog.throughAt.push({ kind, p, at: v3(legAt), points: r.points, core: r.core });
           }
-          applyFastener(f, q);
-          const tool = tools ? tools[toolFor(f.kind)] : null;
-          if (tool) {
-            if (toolInHand && toolInHand !== tool) toolInHand.object.visible = false; // a different fastener, a different tool
-            toolInHand = tool;
-            const at = i > 0 && hop < 1 ? toolFrom.clone().lerp(fastenerAt(f), ease.inOutCubic(hop)) : fastenerAt(f);
-            holdTool(tool, at, fastenerAxis(pv, f), tool === tools?.screwdriver ? fastenerPose(q).angle : spannerSwing(q));
-          } else {
-            // No tools file: the fingers turn it.
+          tripLog.legHidden = Math.max(tripLog.legHidden, hiddenShare());
+        }
+      },
+      done: () => {
+        tripLeg = false;
+        done?.();
+      },
+    };
+  }
+
+  /**
+   * The tween steps of a trip (ADR 0021): from `start` (where the player touched the part) to the toolbox, take the
+   * tool, carry it to the first fastener, work each fastener, change tool at the toolbox if another is needed, `free`
+   * the part (loosening), put the tool back and return. Without the tools file the fingers turn the fasteners, with no
+   * trip. Leg times come from the distances as the trip starts (tripPlan).
+   */
+  function tripSteps(pv: PartView, mode: "undo" | "do-up", start: Surface, free: TweenSpec | null): TweenSpec[] {
+    const fasteners = pv.fasteners;
+    const turn = (f: FastenerView, q: number): void => applyFastener(f, mode === "undo" ? q : 1 - q);
+    if (!tools) {
+      return [
+        ...fasteners.map((f) => ({
+          duration: mode === "undo" ? FASTEN.outSeconds : FASTEN.doUpSeconds,
+          update: (q: number) => {
+            setPhase("fasten");
+            turn(f, q);
             const ax = fastenerAxis(pv, f);
             hand?.grab(fastenerAt(f).addScaledVector(ax, 0.01), ax, "pinch");
-          }
-        },
-        done: () => {
-          toolFrom = fastenerAt(f);
-        },
-      });
-    });
+          },
+        })),
+        ...(free ? [free] : []),
+      ];
+    }
+    const kit = tools;
+    tripReach = Infinity;
+    spannerBase.clear();
+    Object.assign(tripLog, { throughAt: [], planned: 0, phases: [], reach: Infinity, toolAtBolts: Infinity, tools: [], through: [], legHidden: 0 });
+    // The pointer's spot rides with the part, so the hand comes back to where the player touched it. A spot off the part
+    // (a press on its finger-sized hit volume over empty space lies at the machine's depth, inside it) gives way to
+    // the part's face the camera sees.
+    pv.group.updateMatrixWorld(true);
+    const at = start.onMachine && start.part === pv.id ? start : facingSurface(pv);
+    const spotLocal = pv.group.worldToLocal(at.point.clone());
+    const spotOut = at.onMachine ? at.normal.clone().transformDirection(new Matrix4().copy(pv.group.matrixWorld).invert()) : null;
+    const spot = (): { at: Vector3; out: Vector3 | null } => ({ at: pv.group.localToWorld(spotLocal.clone()), out: spotOut ? spotOut.clone().transformDirection(pv.group.matrixWorld) : null });
+    const toolOf = (t: TripTool): Tool => kit[t];
+    const firstSlot = restPose(toolOf(toolFor(fasteners[0]!.kind)));
+    const plan = tripPlan(
+      fasteners.map((f) => f.kind),
+      mode,
+      { pointer: at.point.distanceTo(firstSlot.at), machine: pathLength(overPath(v3(firstSlot.at), null, v3(fastenerAt(fasteners[0]!)), v3(fastenerAxis(pv, fasteners[0]!)), bounds())) },
+    );
+    tripLog.planned = plan.total;
+    // The fastener the tool last worked, as the trip runs; and whether the next fastener starts a tool's run.
+    let lastIndex = -1;
+    let runStart = false;
+    const steps: TweenSpec[] = [];
+    for (const step of plan.steps) {
+      switch (step.kind) {
+        case "toToolbox": {
+          const tool = toolOf(step.tool);
+          steps.push(
+            leg(
+              step.seconds,
+              step.kind,
+              () => {
+                const o = spot();
+                return route(o.at, o.out, gripOf(tool), null);
+              },
+              (at) => hand?.point(at, toCamera(at)),
+            ),
+          );
+          break;
+        }
+        case "pick": {
+          const tool = toolOf(step.tool);
+          steps.push({
+            duration: step.seconds,
+            update: () => {
+              setPhase("pick");
+              tripLeg = true;
+              const g = gripOf(tool);
+              tripReach = Math.min(tripReach, handAt().distanceTo(g));
+              tripLog.reach = tripReach;
+              hand?.grab(g, toCamera(g), "grip");
+            },
+            done: () => {
+              toolInHand = tool;
+              toolsOut.add(tool);
+            },
+          });
+          break;
+        }
+        case "toFastener": {
+          const tool = toolOf(step.tool);
+          const f = fasteners[step.index]!;
+          let q0: Quaternion | null = null;
+          steps.push(
+            leg(
+              step.seconds,
+              step.kind,
+              () => {
+                q0 = tool.object.quaternion.clone();
+                return route(tool.object.position.clone(), null, fastenerAt(f), fastenerAxis(pv, f));
+              },
+              (at, p) => holdToolAt(tool, at, q0!.clone().slerp(workQuaternion(fastenerAxis(pv, f), baseTurn(pv, tool, f)), p)),
+            ),
+          );
+          runStart = true;
+          break;
+        }
+        case "fasten": {
+          const tool = toolOf(step.tool);
+          const f = fasteners[step.index]!;
+          const index = step.index;
+          // The tool hops from the last fastener it worked; the first of each tool's run starts on its fastener.
+          let hopFrom: number | null = null;
+          const firstOfRun = runStart;
+          runStart = false;
+          steps.push({
+            duration: step.seconds,
+            update: (p) => {
+              setPhase("fasten");
+              tripLeg = false;
+              hand?.firm(true);
+              hopFrom ??= firstOfRun ? -1 : lastIndex;
+              const hop = hopFrom < 0 ? 1 : clamp01(p / TOOL_HOP);
+              const q = hopFrom < 0 ? clamp01(p) : clamp01((p - TOOL_HOP) / (1 - TOOL_HOP));
+              turn(f, q);
+              const target = fastenerAt(f);
+              const at = hop < 1 && hopFrom >= 0 ? fastenerAt(fasteners[hopFrom]!).lerp(target, ease.inOutCubic(hop)) : target;
+              const angle = tool === kit.screwdriver ? fastenerPose(mode === "undo" ? q : 1 - q).angle : baseTurn(pv, tool, f) + spannerSwing(q);
+              holdToolAt(tool, at, workQuaternion(fastenerAxis(pv, f), angle));
+              toolInHand = tool;
+              if (hop >= 1) tripLog.toolAtBolts = Math.min(tripLog.toolAtBolts, tool.object.position.distanceTo(target));
+              if (!tripLog.tools.includes(toolName(tool))) tripLog.tools.push(toolName(tool));
+            },
+            done: () => {
+              lastIndex = index;
+            },
+          });
+          break;
+        }
+        case "free":
+          if (free) steps.push(free);
+          break;
+        case "toSlot": {
+          const tool = toolOf(step.tool);
+          let q0: Quaternion | null = null;
+          steps.push(
+            leg(
+              step.seconds,
+              step.kind,
+              () => {
+                q0 = tool.object.quaternion.clone();
+                const last = lastIndex >= 0 ? fasteners[lastIndex]! : null;
+                return route(tool.object.position.clone(), last ? fastenerAxis(pv, last) : null, restPose(tool).at, null);
+              },
+              (at, p) => holdToolAt(tool, at, q0!.clone().slerp(restPose(tool).q, p)),
+            ),
+          );
+          break;
+        }
+        case "putBack": {
+          const tool = toolOf(step.tool);
+          steps.push({
+            duration: step.seconds,
+            update: () => {
+              setPhase("putBack");
+              tripLeg = true;
+              hand?.firm(false);
+              const g = gripOf(tool);
+              tripReach = Math.min(tripReach, handAt().distanceTo(g));
+              tripLog.reach = tripReach;
+              hand?.open();
+              hand?.point(g, toCamera(g));
+            },
+            done: () => {
+              rest(tool);
+              lastIndex = -1;
+            },
+          });
+          break;
+        }
+        case "home": {
+          let fromAt: Vector3 | null = null;
+          steps.push(
+            leg(
+              step.seconds,
+              step.kind,
+              () => {
+                fromAt = hand ? handAt() : spot().at;
+                const back = spot();
+                return route(fromAt, null, back.at, back.out);
+              },
+              (at) => hand?.point(at, toCamera(at)),
+            ),
+          );
+          break;
+        }
+      }
+    }
     return steps;
   }
 
-  /** The tool is back where it came from and the hand is free of it. */
-  function putToolAway(): void {
-    if (toolInHand) toolInHand.object.visible = false;
-    toolInHand = null;
-    toolFrom.set(0, 0, 0);
-  }
+  /** The hand's grip point, world space. */
+  const handAt = (): Vector3 => (assets.hand ? assets.hand.getWorldPosition(new Vector3()) : new Vector3());
 
-  /** Takes the tool back where it came from, then the hand is free. */
-  function toolReturn(): TweenSpec[] {
-    let from: Vector3 | null = null;
-    let axis: Vector3 | null = null;
-    return [
-      {
-        duration: TOOL_TRAVEL,
-        ease: ease.inOutCubic,
-        update: (p) => {
-          const tool = toolInHand;
-          if (!tool) return;
-          from ??= tool.object.position.clone();
-          axis ??= new Vector3(0, 0, 1).applyQuaternion(tool.object.quaternion);
-          holdTool(tool, from.clone().lerp(toolSource(), p), axis, 0);
-        },
-        done: putToolAway,
-      },
-    ];
+  /** Stops the sequence where it is: every tool back in its slot and the hand free (the cord pulled, a new round). */
+  function abortSequence(): void {
+    if (sequence) tweens.cancel(sequence.channel);
+    sequence = null;
+    tripLeg = false;
+    tripPhase = null;
+    if (tools) for (const t of [tools.spanner, tools.screwdriver]) rest(t);
+    toolInHand = null;
+    hand?.firm(false);
   }
 
   /** Before the cord is pulled, the hand presses every loose part home. No rule changes (ADR 0020). */
   function pressHome(): void {
-    // A part stopped half undone leaves no tool behind in the hand (plan 0011).
-    if (loosening.size > 0 && toolInHand) {
-      putToolAway();
+    const doingUp = sequence?.mode === "do-up" ? sequence.id : null;
+    // A part stopped half undone, or half done up, leaves no tool behind in the hand (plans 0011, 0012).
+    if (sequence || toolInHand) {
+      abortSequence();
       hand?.detach();
       hand?.open();
     }
-    for (const id of [...loose, ...loosening]) {
+    for (const id of new Set([...loose, ...loosening, ...(doingUp ? [doingUp] : [])])) {
       const pv = view.parts.get(id);
       if (!pv) continue;
       tweens.cancel(`loosen:${id}`);
       const from = pv.group.position.clone();
       const q0 = pv.group.quaternion.clone();
-      // Its fasteners go back in with it, quickly (ADR 0020).
+      // Its fasteners go back in with it, quickly, with no trip to the toolbox (ADR 0021).
       const fastFrom = pv.fasteners.map((f) => ({ f, at: f.pivot.position.clone(), q: f.pivot.quaternion.clone() }));
       tweens.play(id, {
         duration: CARRY.homeSeconds,
@@ -502,6 +824,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   function carryChip(id: PartId, x: number, y: number): void {
     const pv = view.parts.get(id);
     if (!pv || game.state.installed.has(id)) return;
+    if (!chip && sequence) return; // a put-back waits until the sequence is done (ADR 0021)
     if (!chip || chip.id !== id) {
       reset(pv);
       const part = partById(id);
@@ -541,6 +864,17 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     }
     for (const f of pv.fasteners) applyFastener(f, 1); // they come back with the part, out of their holes
     chip = null;
+    // The part is home; its fasteners go back in, the hand fetching the tool from the toolbox (ADRs 0020, 0021).
+    if (pv.fasteners.length) sequence = { id, channel: id, mode: "do-up" };
+    let doUp: TweenSpec[] = [];
+    const endInstall = (): void => {
+      sequence = null;
+      tripPhase = null;
+      tripLeg = false;
+      hand?.detach();
+      hand?.withdraw();
+      reset(pv);
+    };
     tweens.play(
       id,
       {
@@ -554,16 +888,19 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       {
         duration: m.duration,
         update: (p) => applyPose(pv, poseAt(m, part.explode, 1 - p)),
+        done: () => {
+          if (!pv.fasteners.length) return;
+          hand?.detach();
+          // The trip's steps are made once the part is home, so its legs start from where it is.
+          doUp = tripSteps(pv, "do-up", facingSurface(pv), null);
+        },
       },
-      // The part is home; its fasteners go back in, one after another (ADR 0020).
-      ...pv.fasteners.map((f) => ({ duration: FASTEN.upSeconds, update: (p: number) => applyFastener(f, 1 - p) })),
       {
         duration: 0,
         update: () => {},
         done: () => {
-          hand?.detach();
-          hand?.withdraw();
-          reset(pv);
+          if (doUp.length) tweens.play(id, ...doUp, { duration: 0, update: () => {}, done: endInstall });
+          else endInstall();
         },
       },
     );
@@ -575,6 +912,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     game.events.on("pulled", () => pressHome()),
     game.events.on("started", () => {
       tellCarry("none");
+      abortSequence();
       hand?.hide();
       loose.clear();
       loosening.clear();
@@ -583,8 +921,14 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       for (const pv of view.parts.values()) reset(pv);
       target.copy(center);
     }),
-    game.events.on("ended", () => hand?.withdraw()),
-    game.events.on("left", () => hand?.withdraw()),
+    game.events.on("ended", () => {
+      abortSequence();
+      hand?.withdraw();
+    }),
+    game.events.on("left", () => {
+      abortSequence();
+      hand?.withdraw();
+    }),
   ];
 
   // ---- Where the pointer is ----
@@ -651,6 +995,18 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     return { point: p, normal: camera.position.clone().sub(p).normalize(), part: pv.id, onMachine: true };
   }
 
+  /** The spot on a part the camera sees at its centre, facing out; its centre if the ray misses it. */
+  function facingSurface(pv: PartView): Surface {
+    const c = pv.group.getWorldPosition(new Vector3());
+    view.root.updateMatrixWorld();
+    raycaster.set(camera.position, c.clone().sub(camera.position).normalize());
+    const hit = raycaster.intersectObject(pv.group, true).find((h) => !hitMeshes.has(h.object) && shown(h.object) && h.face);
+    if (!hit) return surfaceOfPart(pv);
+    const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld);
+    if (normal.dot(raycaster.ray.direction) > 0) normal.negate();
+    return { point: hit.point.clone(), normal, part: pv.id, onMachine: true };
+  }
+
   const shapeOf = (id: PartId | null): GripShape => {
     const pv = id ? view.parts.get(id) : undefined;
     return pv ? gripShapeFor(pv.size) : "grip";
@@ -685,7 +1041,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
 
   /** Rests the hand on the spot under a mouse pointer that is not pressing. */
   function hover(x: number, y: number): void {
-    if (!hand || !game.running || drag || chip || loosening.size > 0 || carry) return;
+    if (!hand || !game.running || drag || chip || handBusy() || carry) return;
     const s = surfaceAt(x, y);
     lastSurface = s;
     hand.point(s.point, s.normal);
@@ -712,7 +1068,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     lastSurface = s;
     if (game.running && s.part) press(s.part); // the same press for every part, allowed or not (ADR 0007)
     // Pressing grabs what is under the pointer, the same way whatever it is (ADR 0020).
-    if (game.running && hand && loosening.size === 0) hand.grab(s.point, s.normal, shapeOf(s.part));
+    if (game.running && hand && !handBusy()) hand.grab(s.point, s.normal, shapeOf(s.part));
     drag = { id: e.pointerId, touch: e.pointerType !== "mouse", startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY, part: game.running ? s.part : null, surface: s, mode: "pending", held: null, carryWhenLoose: false, downT: e.timeStamp };
   }
 
@@ -731,7 +1087,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       // Nothing held: turn at the old rate, the hand following the pointer at the machine's depth.
       orbit = rotate(orbit, mdx, mdy, limits);
       placeCamera();
-      if (game.running && loosening.size === 0) hand?.grab(pointAtDepth(x, y, center), camera.position.clone().sub(center).normalize(), "grip");
+      if (game.running && !handBusy()) hand?.grab(pointAtDepth(x, y, center), camera.position.clone().sub(center).normalize(), "grip");
       return;
     }
     const ndc = ndcOf(x, y);
@@ -747,8 +1103,8 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     if (lagPx > TURN.regripPx || !facing) {
       const s = surfaceAt(x, y);
       drag.held = s.onMachine ? { point: s.point, normal: s.normal } : null;
-      if (game.running && loosening.size === 0) hand?.grab(s.point, s.normal, shapeOf(s.part));
-    } else if (game.running && loosening.size === 0) {
+      if (game.running && !handBusy()) hand?.grab(s.point, s.normal, shapeOf(s.part));
+    } else if (game.running && !handBusy()) {
       hand?.grab(drag.held.point, drag.held.normal, shapeOf(drag.surface.part));
     }
   }
@@ -768,12 +1124,13 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     }
     if (!drag || drag.id !== e.pointerId) return;
     if (drag.mode === "pending" && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) >= GESTURE.tapSlop) {
-      if (dragMode(drag.part, (id) => loose.has(id)) === "carry" && drag.part) {
+      if (drag.part && loosening.has(drag.part) && drag.carryWhenLoose) {
+        // Still loosening under a G press: wait, the carry starts when it is loose.
+      } else if (dragMode(drag.part, (id) => loose.has(id)) === "carry" && drag.part && !sequence) {
         drag.mode = "carry";
         startCarry(drag.part, drag.startX, drag.startY);
-      } else if (drag.part && loosening.has(drag.part) && drag.carryWhenLoose) {
-        // Still loosening under a G press: wait, the carry starts when it is loose.
       } else {
+        // Anything else turns the machine, a loose part too while a sequence plays (ADR 0021).
         startTurn(e.clientX, e.clientY);
       }
     }
@@ -810,7 +1167,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         lastTapSurface = d.surface;
       }
     }
-    if (loosening.size > 0 || carry) return; // the hand is busy with a part
+    if (handBusy() || carry) return; // the hand is busy with a part
     if (d.touch) hand?.withdraw();
     else {
       hand?.open();
@@ -821,7 +1178,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
   function onLeave(e: PointerEvent): void {
     if (e.pointerType === "mouse" && !pointers.has(e.pointerId)) {
       mouseAt = null;
-      if (!drag && loosening.size === 0 && !carry && !chip) hand?.withdraw();
+      if (!drag && !handBusy() && !carry && !chip) hand?.withdraw();
     }
   }
 
@@ -959,25 +1316,75 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
       loose: () => [...loose],
       // Plan 0011: the tool in the hand, and how far each fastener of a part stands out of its hole (metres).
       tool: () => (toolInHand ? (toolInHand === tools?.spanner ? "spanner" : "screwdriver") : null),
-      toolVisible: () => !!(tools && (tools.spanner.object.visible || tools.screwdriver.object.visible)),
+      // Plan 0012: a tool out of its slot (in the hand or on its way); the trip's step; the toolbox on screen.
+      toolOut: () => toolsOut.size > 0 || toolInHand !== null,
+      trip: () => tripPhase,
+      sequence: () => sequence?.id ?? null,
+      hasToolbox: () => toolbox !== null,
+      /** Metres from a tool to its resting place in the toolbox. */
+      toolFromSlot: (name: "spanner" | "screwdriver") => (tools ? tools[name].object.position.distanceTo(restPose(tools[name]).at) : null),
+      /** Screen rectangles (CSS px) of the toolbox and of the machine as drawn, and the share of the toolbox in view. */
+      toolboxRect: () => {
+        if (!toolbox) return null;
+        const rect = renderer.domElement.getBoundingClientRect();
+        type R = { left: number; top: number; right: number; bottom: number };
+        const box = (root: Object3D, skip: (o: Object3D) => boolean): { r: R | null; share: number } => {
+          const v = new Vector3();
+          let r: R | null = null;
+          let seen = 0;
+          let all = 0;
+          root.updateMatrixWorld(true);
+          root.traverse((o) => {
+            const mesh = o as Object3D & { isMesh?: boolean; geometry?: { attributes: { position?: { count: number } } } };
+            if (!mesh.isMesh || skip(o) || !shown(o) || !mesh.geometry?.attributes.position) return;
+            const m = o as unknown as { getVertexPosition(i: number, t: Vector3): Vector3; matrixWorld: Matrix4 };
+            const n = mesh.geometry.attributes.position.count;
+            for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 3000))) {
+              m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld).project(camera);
+              const x = rect.left + ((v.x + 1) / 2) * rect.width;
+              const y = rect.top + ((1 - v.y) / 2) * rect.height;
+              all++;
+              if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) seen++;
+              const c: R | null = r;
+              r = c ? { left: Math.min(c.left, x), top: Math.min(c.top, y), right: Math.max(c.right, x), bottom: Math.max(c.bottom, y) } : { left: x, top: y, right: x, bottom: y };
+            }
+          });
+          return { r, share: all ? seen / all : 0 };
+        };
+        const tb = box(toolbox.object, () => false);
+        const mc = box(view.root, (o) => hitMeshes.has(o));
+        // Points of the toolbox drawn where the machine is too (in front of it or behind it): the two overlap on screen.
+        let overMachine = 0;
+        let sampled = 0;
+        const v = new Vector3();
+        view.root.updateMatrixWorld();
+        toolbox.object.traverse((o) => {
+          const mesh = o as Object3D & { isMesh?: boolean; geometry?: { attributes: { position?: { count: number } } } };
+          if (!mesh.isMesh || !mesh.geometry?.attributes.position) return;
+          const m = o as unknown as { getVertexPosition(i: number, t: Vector3): Vector3; matrixWorld: Matrix4 };
+          const n = mesh.geometry.attributes.position.count;
+          for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 800))) {
+            const p = m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld);
+            raycaster.set(camera.position, p.clone().sub(camera.position).normalize());
+            sampled++;
+            if (raycaster.intersectObject(view.root, true).some((h) => !hitMeshes.has(h.object) && shown(h.object))) overMachine++;
+          }
+        });
+        const slots = (["spanner", "screwdriver"] as const).map((k) => {
+          const p = toolbox.slots[k].getWorldPosition(new Vector3()).project(camera);
+          return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height };
+        });
+        return { toolbox: tb.r, inView: tb.share, machine: mc.r, slots, overMachine: sampled ? overMachine / sampled : 0, screen: { width: rect.width, height: rect.height } };
+      },
       fasteners: (id: PartId) => (view.parts.get(id)?.fasteners ?? []).map((f) => f.pivot.position.distanceTo(f.rest)),
       // Share of the hand's sample points hidden behind the machine's surface from the camera: a hand that sinks into
       // the machine shows here (plan 0010 fix).
-      handHidden: () => {
-        if (!hand || !hand.visible) return 0;
-        const pts = hand.samplePoints();
-        let hidden = 0;
-        view.root.updateMatrixWorld();
-        for (const p of pts) {
-          const dir = p.clone().sub(camera.position);
-          const dist = dir.length();
-          raycaster.set(camera.position, dir.normalize());
-              const held = hand.holding;
-          const hit = raycaster.intersectObject(view.root, true).find((h) => !hitMeshes.has(h.object) && shown(h.object) && (held === null || partIdOf(h.object, partIds) !== held));
-          if (hit && hit.distance < dist - 0.004) hidden++;
-        }
-        return pts.length ? hidden / pts.length : 0;
+      handHidden: hiddenShare,
+      /** Turns on the trip log (plan 0012); `tripLog` reads what the last trip did. */
+      watchTrips: (on: boolean) => {
+        watchTrips = on;
       },
+      tripLog: () => ({ ...tripLog, reach: Number.isFinite(tripLog.reach) ? tripLog.reach : null, toolAtBolts: Number.isFinite(tripLog.toolAtBolts) ? tripLog.toolAtBolts : null }),
       orbit: () => ({ ...orbit }),
       /** Sets the camera's azimuth and polar (radians), for checks that need a given angle. */
       setOrbit: (azimuth: number, polar: number) => {
@@ -985,6 +1392,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
         placeCamera();
       },
       /** How far (metres) the whole hand, every sample point, would have to come towards the camera to clear the machine. */
+      handPush: () => (hand ? hand.push : null),
       handNeed: () => (hand && hand.visible ? collide(hand.samplePoints()) : 0),
       marker: "open-am-dev-hook",
     };
@@ -1025,6 +1433,7 @@ export function mountRender(container: HTMLElement, game: Game, assets: RenderAs
     onCarry(fn) {
       carryState = fn;
     },
+    busy: () => sequence !== null,
     carryChip,
     endChipCarry,
     dispose() {

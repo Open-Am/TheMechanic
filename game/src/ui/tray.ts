@@ -18,6 +18,8 @@ export interface Tray {
 export interface ChipCarry {
   move(partId: PartId, x: number, y: number): void;
   end(partId: PartId): void;
+  /** True while the hand plays a sequence (ADR 0021): a chip drag that starts then is ignored. */
+  busy?(): boolean;
 }
 
 /** `overMachine(x, y)` says whether a release point is over the machine rather than the controls. */
@@ -43,14 +45,22 @@ export function createTray(
     const li = el("li", { class: "chip", role: "button", tabindex: "0", "data-part": partId }, picture(), el("span", { text: name }));
     let start: { x: number; y: number; id: number } | null = null;
     let ghost: HTMLElement | null = null;
+    /** Set when a drag starts while the hand is busy: the whole drag is ignored, and it is not a tap either. */
+    let ignored = false;
 
     li.addEventListener("pointerdown", (e) => {
       li.setPointerCapture(e.pointerId);
       start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+      ignored = false;
     });
     li.addEventListener("pointermove", (e) => {
       if (!start || e.pointerId !== start.id) return;
+      if (ignored) return;
       if (!ghost && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= TAP_SLOP) {
+        if (carry?.busy?.()) {
+          ignored = true;
+          return;
+        }
         ghost = el("div", { class: "chip ghost" }, picture(), el("span", { text: name }));
         // With the hand carrying the part itself, the ghost chip stays out of sight; it still marks the drag.
         if (carry) ghost.hidden = true;
@@ -65,6 +75,7 @@ export function createTray(
     const end = (e: PointerEvent, cancelled: boolean) => {
       if (!start || e.pointerId !== start.id) return;
       start = null;
+      if (ignored) return;
       if (ghost) {
         ghost.remove();
         ghost = null;
