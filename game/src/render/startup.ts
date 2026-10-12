@@ -359,7 +359,7 @@ export function startupArmSide(r: RunTimes | null, t: number, notesSide: number,
 }
 
 /** How far the arm's root is raised for the switch press (handpose armAnchor's lift), so it comes in from the side. */
-export const SWITCH_ARM_LIFT = 0.85;
+export const SWITCH_ARM_LIFT = 0.65;
 
 /**
  * The arm's lift (armAnchor) during a run: 0, gliding up to SWITCH_ARM_LIFT over ARM_GLIDE as the hand leaves the
