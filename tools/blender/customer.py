@@ -92,7 +92,7 @@ LOOKS = {
         # shoulders and chest in long vertical folds, with straight wide sleeves lofted along the arms; no body
         # surface under it, so neither the chest nor a seam at the waist can show (see build_robe).
         "top": None,
-        "robe": {"hem": 0.12, "margin": 0.012, "flare": 0.05, "fold": 0.04, "sleeve_end": 0.86, "sleeve_margin": 0.01, "cuff": 0.062},
+        "robe": {"hem": 0.12, "margin": 0.012, "flare": 0.05, "fold": 0.04, "sleeve_end": 0.94, "sleeve_margin": 0.008, "cuff": 0.06, "sag": 0.035},
         "bottom": {"kind": "trousers", "thickness": 0.008, "hem": 0.025, "hem_radius": 0.068},
         "skirt": None,
         "head": "kufi",
@@ -792,6 +792,7 @@ def build_robe(body, lm, spec, dom, bone_names):
     dirs = np.stack([np.cos(theta), np.sin(theta)], axis=1)
     z_chest = lm.z_chest - 0.03
     z_shoulders = z_col - 0.1
+    shoulder_x = abs(lm.head("upperarm_l").x)
     zs = [z_col - 0.014 * k for k in range(8)]
     while zs[-1] - 0.035 > z_chest:
         zs.append(zs[-1] - 0.035)
@@ -818,6 +819,9 @@ def build_robe(body, lm, spec, dom, bone_names):
         half = 0.008 if z > z_shoulders else 0.02
         slab = np.abs(co[:, 2] - z) < half
         pts = co[torso & slab]
+        if z > z_shoulders:
+            # The robe's shoulders end at the shoulder joints, over the tops of the sleeves, and slope into them.
+            pts = pts[np.abs(pts[:, 0]) < shoulder_x]
         h = support(pts, centre, dirs) if len(pts) else prev
         h = round_smooth(h, 3)
         hs.append(h)
@@ -845,7 +849,7 @@ def build_robe(body, lm, spec, dom, bone_names):
         else:
             c0 = centre
             s = float(np.clip((z_chest - z) / (z_chest - z_hem), 0.0, 1.0))
-            h = hs[i] + rb["margin"] * min(1.0, i / 3) + rb["flare"] * s ** 1.5
+            h = hs[i] + rb["margin"] * min(1.0, i / 3) * (0.5 if z > z_shoulders else 1.0) + rb["flare"] * s ** 1.5
             f = folds(theta, s)
             r = np.maximum(h + rb["fold"] * s ** 0.5 * f, hs[i] + 0.006)
             zz = z + 0.006 * f if i == len(zs) - 1 else z
@@ -876,60 +880,103 @@ def build_robe(body, lm, spec, dom, bone_names):
 
 
 def build_sleeve(body, lm, rb, d, side, weights):
-    """A kaftan sleeve: a straight tube along the arm from inside the shoulder to near the wrist, as wide as the arm
-    needs at the top and widening evenly to an open cuff, never narrowing, so it neither clings nor balloons."""
+    """A kaftan sleeve (third pass, 2026-10-12): from the shoulder it lies close over the upper arm, then the cloth
+    hangs loose below the arm, more towards the wrist, gathering a little at the elbow, and ends in a wide, soft cuff
+    at the wrist that hangs longer on its lower side. "Below" is the arm's underside and back as it hangs at rest."""
     co = np.array([v.co[:] for v in body.data.vertices])
     arm = np.isin(d, [f"upperarm_{side}", f"lowerarm_{side}"])
     A, E, H = (np.array(lm.head(f"{b}_{side}")[:]) for b in ("upperarm", "lowerarm", "hand"))
     end = E + (H - E) * rb["sleeve_end"]
     L1, L2 = float(np.linalg.norm(E - A)), float(np.linalg.norm(end - E))
     u1, u2 = (E - A) / L1, (end - E) / L2
-    n, seg = 15, 24
-    ls = np.linspace(0.065, L1 + L2, n)
-    cs, ds, rs = [], [], []
+    n, seg = 17, 28
+    ls = np.linspace(0.06, L1 + L2, n)
+    def basis(D):
+        g = np.array([0.0, 0.55, -1.0])  # the underside and back of the arm as it hangs at rest
+        g = g - (g @ D) * D
+        g /= np.linalg.norm(g)
+        return g, np.cross(D, g)
+
+    tt = 2 * math.pi * np.arange(seg) / seg
+    cs, ds, rs, profiles = [], [], [], []
     for l in ls:
         b = float(ramp(L1 - 0.07, L1 + 0.07, np.array(l)))
         D = u1 * (1 - b) + u2 * b
         D = D / np.linalg.norm(D)
         P = A + u1 * l if l < L1 else E + u2 * (l - L1)
         rel = co - P
-        along_d = rel @ D
-        sel = arm & (np.abs(along_d) < 0.018) & (np.linalg.norm(rel, axis=1) < 0.15)
-        C = co[sel].mean(axis=0) if sel.sum() >= 5 else P
+        sel = arm & (np.abs(rel @ D) < 0.018) & (np.linalg.norm(rel, axis=1) < 0.15)
+        C = P if l < 0.06 or sel.sum() < 5 else co[sel].mean(axis=0)
         radial = co[sel] - C
         radial = radial - np.outer(radial @ D, D)
-        r = float(np.percentile(np.linalg.norm(radial, axis=1), 92)) if sel.sum() >= 5 else 0.05
+        dist = np.linalg.norm(radial, axis=1)
+        r = float(np.percentile(dist, 85)) if sel.sum() >= 5 else 0.045
+        # The arm's own surface in each direction round the ring, so near the shoulder, where the arm meets the
+        # body, the sleeve follows the deltoid instead of standing out as a disc.
+        g, w = basis(D)
+        prof = np.full(seg, np.nan)
+        if sel.sum() >= 5:
+            ang = np.arctan2(radial @ w, radial @ g) % (2 * math.pi)
+            k = (ang / (2 * math.pi) * seg).astype(int) % seg
+            for j in range(seg):
+                if (k == j).any():
+                    prof[j] = dist[k == j].max()
+        good = ~np.isnan(prof)
+        if good.sum() >= 3:
+            prof = np.interp(np.arange(seg), np.arange(seg)[good], prof[good], period=seg)
+            if good.sum() < seg * 0.7:  # one side is the body: keep the sleeve in close there
+                prof[~good] = np.minimum(prof[~good], r * 0.7)
+        else:
+            prof = np.full(seg, r)
+        for _ in range(2):
+            prof = (np.roll(prof, 1) + 2 * prof + np.roll(prof, -1)) / 4
         cs.append(C)
         ds.append(D)
         rs.append(r)
+        profiles.append(prof)
     cs = np.array(cs)
     smooth_c = cs.copy()
-    for i in range(1, n - 1):
-        smooth_c[i] = (cs[i - 1] + 2 * cs[i] + cs[i + 1]) / 4
-    rs = np.array(rs) + rb["sleeve_margin"]
-    top = rs[2]
-    lin_r = top + (rb["cuff"] - top) * np.clip((ls - ls[2]) / (ls[-1] - ls[2]), 0, 1)
-    rs = np.maximum(rs, lin_r)
-    rs[2:] = np.maximum.accumulate(rs[2:])
-    rs[:2] = rs[2] * np.array([0.55, 0.85])  # rounded into the shoulder, inside the robe
+    for _ in range(2):
+        for i in range(1, n - 1):
+            smooth_c[i] = (cs[i - 1] + 2 * cs[i] + cs[i + 1]) / 4
+        cs = smooth_c.copy()
+    frac = ls / ls[-1]
+    fore = np.clip((ls - L1) / L2, 0.0, 1.0)
+    rs = np.array(rs)
+    rs = (rs + np.roll(rs, 1) + np.roll(rs, -1)) / 3 if n > 2 else rs
+    rs[0], rs[-1] = rs[1], rs[-2]
+    close = rs + rb["sleeve_margin"] * (0.6 + 0.6 * frac)
+    # Close over the upper arm; from the elbow the sleeve opens out evenly to the cuff.
+    rs = np.maximum(close, close + (rb["cuff"] - close) * fore ** 1.3)
+    sag = rb["sag"] * ramp(0.2, 0.75, frac) + 0.012 * fore
     rings = []
     for i in range(n):
         D = ds[i]
-        ref = np.array([0.0, 1.0, 0.0])
-        u = ref - (ref @ D) * D
-        u /= np.linalg.norm(u)
-        v = np.cross(D, u)
-        frac = max(0.0, (ls[i] - ls[2]) / (ls[-1] - ls[2]))
+        g, w = basis(D)
+        fit = profiles[i] + rb["sleeve_margin"] * (0.6 + 0.6 * frac[i])
+        elbow = math.exp(-(((ls[i] - L1) / 0.06) ** 2))
         ring = []
         for j in range(seg):
             t = 2 * math.pi * j / seg
-            r = rs[i] * (1 + 0.05 * frac * math.sin(5 * t + 0.7) + 0.03 * frac * math.sin(3 * t + 2.1))
-            p = smooth_c[i] + r * (math.cos(t) * u + math.sin(t) * v)
+            under = max(0.0, math.cos(t)) ** 2  # t = 0 points along g
+            r = max(fit[j], rs[i] * min(1.0, frac[i] / 0.2)) + sag[i] * under + 0.005 * elbow * math.sin(7 * t) * under + 0.004 * frac[i] * math.sin(4 * t + 1.1)
+            p = smooth_c[i] + r * (math.cos(t) * g + math.sin(t) * w)
+            if i >= n - 2:
+                p = p + D * 0.025 * under  # the cuff hangs longer on its lower side
             ring.append(V(p.tolist()))
         rings.append(ring)
+    # The top of the sleeve rounds over into the shoulder, under the robe's shoulder, like the top of an arm: rings
+    # back up the arm towards the joint, shrinking, so there is no flat disc at the top as the arm hangs.
+    first = [np.array(p[:]) for p in rings[0]]
+    C0, D0 = smooth_c[0], ds[0]
+    cap = []
+    for back, scale in ((0.018, 0.9), (0.034, 0.7), (0.045, 0.42)):
+        cap.append([V((C0 - D0 * back + (q - C0) * scale).tolist()) for q in first])
+    rings = cap[::-1] + rings
     # The cuff turned in, so the hem has thickness.
     C, D = smooth_c[-1], ds[-1]
-    rings.append([V((C + (np.array(p[:]) - C) * (1 - 0.008 / rs[-1]) - D * 0.015).tolist()) for p in rings[-1]])
+    last = [np.array(p[:]) for p in rings[-1]]
+    rings.append([V((C + (q - C) * (1 - 0.008 / max(0.02, float(np.linalg.norm(q - C)))) - D * 0.012).tolist()) for q in last])
     obj = mesh_object(loft(rings, close_top=True), f"sleeve_{side}", "top")
     source = arm | np.isin(d, [f"clavicle_{side}"])
     apply_weights(obj, copied_weights([v.co[:] for v in obj.data.vertices], body, source, weights))
@@ -937,35 +984,47 @@ def build_sleeve(body, lm, rb, d, side, weights):
 
 
 def build_kufi(body, lm):
-    """A taller, straight-sided cap (a kufi) set a little back on the head: its band sits just above the brows at
-    the front and lower at the back, its sides rise about 10 cm, and its crown is nearly flat with a rounded edge.
-    Patterned by kufi_pattern."""
+    """A close-fitting cap (third pass, 2026-10-12): its rim follows the skull just above the brow and the ears,
+    lower at the back; its sides rise close to the head, narrowing a little, to a crown about 7 cm above the rim at
+    the front that sits just over the top of the head, with a rounded edge. Patterned by kufi_pattern."""
     co = np.array([v.co[:] for v in body.data.vertices])
     c = lm.head_centre
-    front, back, height = lm.eye_z + 0.04, lm.eye_z + 0.012, 0.098
+    front, back = lm.eye_z + 0.058, lm.eye_z + 0.02
+    z_top = lm.head_top + 0.008
     seg = 32
     theta = np.linspace(-math.pi, math.pi, seg, endpoint=False)
     dirs = np.stack([np.cos(theta), np.sin(theta)], axis=1)
     z_base = front + (back - front) * (np.sin(theta) + 1) / 2  # +Y is the back of the head
-    # The head above the ears, smoothed round, so the band is an even oval and not dented by the ears.
-    head = co[(co[:, 2] > lm.eye_z + 0.03) & (co[:, 2] < front + 0.035)]
-    r0 = support(head, np.array([c.x, c.y]), dirs) + 0.011
-    for _ in range(6):
-        r0 = (np.roll(r0, 1) + 2 * r0 + np.roll(r0, -1)) / 4
+    head = co[co[:, 2] > lm.eye_z]
+    centre = np.array([c.x, c.y])
+
+    def skull(zj):
+        """The head's reach in each direction at heights zj (one per direction), smoothed round."""
+        r = np.zeros(seg)
+        for j in range(seg):
+            sl = head[np.abs(head[:, 2] - zj[j]) < 0.006]
+            r[j] = float(((sl[:, :2] - centre) @ dirs[j]).max()) if len(sl) else 0.0
+        for _ in range(4):
+            r = (np.roll(r, 1) + 2 * r + np.roll(r, -1)) / 4
+        return r
+
+    rim = skull(z_base) + 0.004
     rings = []
-    for s in (0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.88, 0.95, 1.0):
-        r = r0 * (1 - 0.035 * s)
-        z = z_base + height * s
+    side_top = z_top - 0.02
+    for s in (0.0, 0.25, 0.5, 0.75, 1.0):
+        z = z_base + (side_top - z_base) * s
+        r = np.maximum(skull(z) + 0.004, rim * (1 - 0.1 * s))
         rings.append((r, z))
     r_top = rings[-1][0]
-    for t in (0.35, 0.65, 0.88):  # the rounded edge and the crown
-        rings.append((r_top * (1 - 0.12 * t * t) * (1 - 0.6 * max(0.0, t - 0.6)), z_base + height + 0.012 * math.sin(t * math.pi / 2)))
-    pts = [[V((c.x + r[j] * dirs[j, 0], c.y + r[j] * dirs[j, 1], z[j])) for j in range(seg)] for r, z in rings]
+    for t in (0.3, 0.55, 0.75, 0.92):  # a soft rounded edge and a nearly flat crown
+        rings.append((r_top * (1 - 0.22 * t * t) * (1 - 0.8 * max(0.0, t - 0.55)), side_top + 0.02 * math.sin(t * math.pi / 2)))
+    pts = [[V((c.x + r[j] * dirs[j, 0], c.y + r[j] * dirs[j, 1], float(z[j]) if np.ndim(z) else z)) for j in range(seg)] for r, z in rings]
     pts.reverse()
-    obj = mesh_object(loft(pts, close_top=True, lip=0.006), "kufi", "headwear")
+    obj = mesh_object(loft(pts, close_top=True, lip=0.005), "kufi", "headwear")
     g = obj.vertex_groups.new(name="head")
     g.add([v.index for v in obj.data.vertices], 1.0, "REPLACE")
-    lm.kufi = (c.x, c.y, front, back, height)
+    lm.kufi = (c.x, c.y, front, back, float(z_top - (front + back) / 2))
+    print(f"Kufi: rim {front - lm.eye_z:.3f} m above the eyes at the front, {back - lm.eye_z:.3f} at the back; crown {z_top - front:.3f} m above the rim at the front; rim {2 * rim[seg // 2]:.3f} m wide")
     return obj
 
 
@@ -1254,7 +1313,7 @@ def kufi_pattern(N, pos, sep, lm, mspec):
     v = N.math("DIVIDE", N.math("SUBTRACT", z, z_base), height)
     theta = N.math("ARCTAN2", dy, dx)
     u = N.math("MULTIPLY", theta, 22 / (2 * math.pi))
-    rows = N.math("MULTIPLY", N.math("SUBTRACT", v, 0.16), 4.2)
+    rows = N.math("MULTIPLY", N.math("SUBTRACT", v, 0.16), 3.2)
     fu = N.math("ABSOLUTE", N.math("SUBTRACT", N.math("FRACT", u), 0.5))
     fv = N.math("ABSOLUTE", N.math("SUBTRACT", N.math("FRACT", rows), 0.5))
     dd = N.math("ADD", fu, fv)
@@ -1264,8 +1323,8 @@ def kufi_pattern(N, pos, sep, lm, mspec):
     in_sides = N.math("MULTIPLY", N.math("GREATER_THAN", v, 0.16), N.math("LESS_THAN", v, 0.97))
     brim = N.math("LESS_THAN", v, 0.12)
     colour = N.mix(N.math("MULTIPLY", N.smoothstep(0.3, 0.7, N.noise(pos, 22.0, 6.0)), 0.12), base, tuple(c * 1.15 for c in base))
-    colour = N.mix(N.math("MULTIPLY", outline, in_sides), colour, N.mix(alt, c1, c2))
-    colour = N.mix(N.math("MULTIPLY", centre, in_sides), colour, c3)
+    colour = N.mix(N.math("MULTIPLY", outline, N.math("MULTIPLY", in_sides, 0.55)), colour, N.mix(alt, c1, c2))
+    colour = N.mix(N.math("MULTIPLY", centre, N.math("MULTIPLY", in_sides, 0.5)), colour, c3)
     colour = N.mix(brim, colour, c1)
     ring = N.math("MULTIPLY", N.math("GREATER_THAN", v, 1.0), N.math("LESS_THAN", N.math("ABSOLUTE", N.math("SUBTRACT", dist, 0.045)), 0.004))
     return N.mix(ring, colour, c3)
